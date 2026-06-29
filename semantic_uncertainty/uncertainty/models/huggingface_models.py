@@ -106,9 +106,21 @@ class HuggingfaceModel(BaseModel):
                 kwargs = {}
                 eightbit = False
 
-            if 'Llama-2' in model_name or 'Llama-3' in model_name:
+            # === ORIGINAL baseline mapping (commented out by mn1025; meta-llama/Llama-2-* is
+            #     gated, awaiting Meta review for this HF acct as of 2026-06-24) ===
+            # if 'Llama-2' in model_name or 'Llama-3' in model_name:
+            #     base = 'meta-llama'
+            #     model_name = model_name + '-hf' if 'Llama-2' in model_name else model_name
+            # else:
+            #     base = 'huggyllama'
+
+            # === NEW: redirect Llama-2 to NousResearch, a byte-identical ungated mirror of the
+            #     Meta weights (same weights/tokenizer/config). Blocks-execution path change only. ===
+            if 'Llama-2' in model_name:
+                base = 'NousResearch'
+                model_name = model_name + '-hf'
+            elif 'Llama-3' in model_name:
                 base = 'meta-llama'
-                model_name = model_name + '-hf' if 'Llama-2' in model_name else model_name
             else:
                 base = 'huggyllama'
 

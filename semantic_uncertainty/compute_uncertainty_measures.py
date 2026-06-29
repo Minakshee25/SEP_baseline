@@ -1,4 +1,9 @@
-"""Compute uncertainty measures after generating answers."""
+"""This file is to Compute uncertainty measures after generating answers."""
+"""
+    1. Take generated answers
+    2. Groupd sampled answers by meaning
+    3. Compute semantic entropy or other uncertainty score
+"""
 from collections import defaultdict
 from copy import deepcopy
 import logging
@@ -91,6 +96,7 @@ def main(args):
 
     wandb.config.update({"is_ood_eval": is_ood_eval}, allow_val_change=True)
 
+    # load entailment model for semantic entropy
     if args.compute_predictive_entropy:
         logging.info('Beginning loading for entailment model.')
         if args.entailment_model == 'deberta':
@@ -104,7 +110,13 @@ def main(args):
         else:
             raise ValueError
         logging.info('Entailment model loading complete.')
-
+    
+    # If p_true is computed during this stage, 
+    # it restores experiment_details.pkl, 
+    # loads old generation args, 
+    # either reuses the entailment model 
+    # or initializes the original model, 
+    # and reloads the original dataset.
     if args.compute_p_true_in_compute_stage:
         old_exp_file = restore(EXP_DETAILS)
         with open(old_exp_file.name, "rb") as infile:
@@ -127,6 +139,7 @@ def main(args):
         else:
             num_gen = 10
 
+        # samples 20 answerable examples and constructs the p_true few shot prompt using p_true utils
         answerable_indices, unanswerable_indices = utils.split_dataset(pt_train_dataset)
         p_true_indices = random.sample(answerable_indices, 20)  # args.p_true_num_fewshot = 20
 
@@ -150,10 +163,12 @@ def main(args):
         logging.info('p_true_few_shot_prompt: %s', p_true_few_shot_prompt)
         logging.info(80*'#')
 
+    # if requested, it reloads the correct metric to recompute the answer accuracy
     if args.recompute_accuracy:
         logging.warning('Recompute accuracy enabled. This does not apply to precomputed p_true!')
         metric = utils.get_metric(args.metric)
 
+    # uncertainty_measures is the object this script will update with new uncertainty scores
     result_dict_pickle = restore('uncertainty_measures.pkl')
     with open(result_dict_pickle.name, "rb") as infile:
         result_dict = pickle.load(infile)
@@ -161,10 +176,12 @@ def main(args):
     if 'semantic_ids' not in result_dict:
         result_dict['semantic_ids'] = []
 
+    # validation_generations contains raw outputs
     validation_generations_pickle = restore('validation_generations.pkl')
     with open(validation_generations_pickle.name, 'rb') as infile:
         validation_generations = pickle.load(infile)
 
+    # intialize containers for entropy scores, alternative generation accuracies, etc.
     entropies, accuracies = defaultdict(list), defaultdict(list)
     validation_embeddings, validation_is_true, validation_answerable = [], [], []
     p_trues = []
@@ -222,17 +239,18 @@ def main(args):
             if args.condition_on_question and args.entailment_model == 'deberta':
                 responses = [f'{question} {r}' for r in responses]
 
-            # Compute semantic ids.
+            # use entailment model to assign each sampled response a semantic cluster IDs and store those IDs.
             semantic_ids = get_semantic_ids(
                 responses, model=entailment_model,
                 strict_entailment=args.strict_entailment, example=example)
             
             result_dict['semantic_ids'].append(semantic_ids)
 
-            # Compute entropy from frequencies of cluster assignments.
+            # Compute entropy over semantic cluster frequencies
             entropies['cluster_assignment_entropy'].append(cluster_assignment_entropy(semantic_ids))
 
             # Compute entropies with and without length normalized token probabilities.
+            # token or probability based baseline to compare with semantic entropy
             for agg_name, agg_func in zip(['', '_sum'], [np.mean, np.sum]):
                 log_liks_agg = [agg_func(log_lik) for log_lik in log_liks]
 
@@ -253,10 +271,15 @@ def main(args):
 
                     entropies[name].append(pe)
 
+                    # select the most probable semantic cluster, then select the most probable generation within that cluster and records the generation's accuracy
+
                     # For the semantic uncertainties, we can also change the prediction, by first selecting the semantic
                     # cluster with the highest probability, and then selecting the generation with the highest probability
                     # within that cluster.
                     # NOTE: nanargmax because we currently have some clusters with empty generations.
+
+                    # this asks "if we chose the answer from the most confident semantic cluster instead of the original low-temperature answer, would accuracy improve?"
+                    # It evaluates whether semantic clustering can also improve answer selection, not only uncertainty estimation.
                     max_cluster_id = np.nanargmax(log_likelihood_per_semantic_id)
                     # Filter log_liks to max cluster.
                     generations_in_cluster = np.array(log_liks_agg)
@@ -287,6 +310,7 @@ def main(args):
             logging.info('High Temp Generation:')
             logging.info(log_str, semantic_ids, log_liks_agg, entropies_fmt)
 
+        # compute p_true for self assessment baseline 
         if args.compute_p_true_in_compute_stage:
             p_true = p_true_utils.calculate_p_true(
                 pt_model, question, most_likely_answer['response'],
@@ -311,6 +335,7 @@ def main(args):
     if 'uncertainty_measures' not in result_dict:
         result_dict['uncertainty_measures'] = dict()
 
+    # adds computed entropy scores to result dict
     if args.compute_predictive_entropy:
         result_dict['uncertainty_measures'].update(entropies)
         accuracies_mean = {k: np.mean(v) for k, v in accuracies.items()}
@@ -319,6 +344,7 @@ def main(args):
         result_dict['alt_validation_accuracies_mean'] = accuracies_mean
         result_dict['alt_validation_is_false'] = {k: [1 - vi for vi in v] for k, v in accuracies.items()}
 
+    # if p_ik is requested, build training arrays from train generations
     if args.compute_p_ik or args.compute_p_ik_answerable:
         # Assemble training data for embedding classification.
         train_is_true, train_embeddings, train_answerable = [], [], []
@@ -330,7 +356,9 @@ def main(args):
         train_is_false = [0.0 if is_t else 1.0 for is_t in train_is_true]
         train_unanswerable = [0.0 if is_t else 1.0 for is_t in train_answerable]
         logging.info('Unanswerable prop on p_ik training: %f', np.mean(train_unanswerable))
-
+    
+    # trains p_ik to predict incorrectness from hidden states and stores predictions for validation embeddings
+    # this is a supervised hidden state uncertainty baseline. it gives a comparison against semantic entropy
     if args.compute_p_ik:
         logging.info('Starting training p_ik on train embeddings.')
         # Train classifier of correct/incorrect.
@@ -340,6 +368,8 @@ def main(args):
         result_dict['uncertainty_measures']['p_ik'] = p_ik_predictions
         logging.info('Finished training p_ik on train embeddings.')
 
+    # trains a second p_ik classifier to predict whether the question is unanswerable
+    # this baseline targets answerability rather than correctness
     if args.compute_p_ik_answerable:
         # Train classifier of answerable/unanswerable:
         p_ik_predictions = get_p_ik(
@@ -351,8 +381,10 @@ def main(args):
         result_dict['uncertainty_measures']['p_false'] = [1 - p for p in p_trues]
         result_dict['uncertainty_measures']['p_false_fixed'] = [1 - np.exp(p) for p in p_trues]
 
+    # saves the final uncertainty result dictionary
     utils.save(result_dict, 'uncertainty_measures.pkl')
 
+    # saves entailment model's prediction cache
     if args.compute_predictive_entropy:
         entailment_model.save_prediction_cache()
 

@@ -139,4 +139,10 @@ dmypy.json
 # WanDB
 */wandb/
 
+# Scratch / wandb run output (regenerable; too large for GitHub's 100MB limit)
+semantic_uncertainty/mn1025/
+
+# Trained probe artifacts (regenerable)
+semantic_entropy_probes/models/*.pkl
+
 .env

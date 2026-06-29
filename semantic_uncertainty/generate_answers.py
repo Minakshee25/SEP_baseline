@@ -1,4 +1,5 @@
 """Predict with LLM on task."""
+""" This file is to generate multiple samples from the prompt, hidden representation of one sample and a single response"""
 import gc
 import os
 import logging
@@ -10,9 +11,13 @@ import torch
 import openai
 import wandb
 
+# to load datasets like TriviaQA
 from uncertainty.data.data_utils import load_ds
+# prompt creation, model loading, saving files
 from uncertainty.utils import utils
+# optional p_true confidence baseline
 from uncertainty.uncertainty_measures import p_true as p_true_utils
+# optional SE computation after generation
 from compute_uncertainty_measures import main as main_compute
 
 
@@ -21,6 +26,8 @@ openai.api_key = os.getenv("OPENAI_API_KEY")  # Set up OpenAI API credentials.
 
 
 def main(args):
+
+    # section 1: dataset specific things
     if args.dataset == 'svamp':
         if not args.use_context:
             logging.info('Forcing `use_context=True` for svamp dataset.')
@@ -30,10 +37,10 @@ def main(args):
             logging.info('Forcing `answerable_only=True` for squad dataset.')
             args.answerable_only = True
     
+    # SECTION 2: EXPERIMENT TRACKING AND REPRODUCIBILITY LAYER
     experiment_details = {'args': args}
     random.seed(args.random_seed)
 
-    # Implement
     user = os.environ['USER']
     entity = os.environ['WANDB_ENT']
     slurm_jobid = os.getenv('SLURM_JOB_ID', None)
@@ -50,10 +57,13 @@ def main(args):
     )
     logging.info('Finished wandb init.')
 
+    # section 3: load metrics and dataset
     metric = utils.get_metric(args.metric)
 
     train_dataset, validation_dataset = load_ds(
         args.dataset, add_options=args.use_mc_options, seed=args.random_seed)
+    
+    # Section 3: OOD data to do cross domain experimentation
     if args.ood_train_dataset is not None:
         logging.warning(
             'Using OOD dataset %s to construct few-shot prompts and train p_ik.',
@@ -63,7 +73,7 @@ def main(args):
     if not isinstance(train_dataset, list):
         logging.info('Train dataset: %s', train_dataset)
 
-    # Get indices of answerable and unanswerable questions and construct prompt.
+    # Section 4: Get indices of answerable and unanswerable questions and construct prompt.
     answerable_indices, unanswerable_indices = utils.split_dataset(train_dataset)
 
     if args.answerable_only:
