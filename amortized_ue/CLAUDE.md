@@ -130,4 +130,15 @@ relaunch.
   artifact `stage1_records:v0` (401 files), run `4d2lvwzc`.
 - Smoke test passes.
 
+**Stage-1 data sanity check PASSED (throwaway diagnostic, not part of the pipeline).**
+`sanity_probe.py` (+ `sanity_probe_auroc.png`) reproduces a SEP-style per-layer
+logistic-regression probe on the records' TBG/SLT hidden states predicting
+*binarised* SE (binarisation is diagnostic-only via SEP `best_split`; stored
+continuous labels untouched). Mirrors the SEP baseline probe logic (best_split,
+binarize_entropy, 0.2/0.1 split, seed 42). Loads via `load_records`; saves no
+models/W&B. Result on the N=400 run: labels healthy-spread (mean 0.614, 41% at 0),
+hidden states clean (no NaN/Inf/all-zero), **best test AUROC 0.805 (SLT layer 31)**,
+TBG best 0.731 (layer 10) — clearly above chance, so the data carries learnable SE
+signal and the SLM proxy can proceed. Committed to `main` (`4f1fc51`).
+
 **Not started (future stages):** proxy model + its training. Out of scope until asked.
