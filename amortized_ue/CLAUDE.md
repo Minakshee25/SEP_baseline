@@ -1,21 +1,24 @@
-# CLAUDE.md — `amortized_ue/` (amortized UE, Stage 1)
+# CLAUDE.md — `amortized_ue/` (amortized UE: Stage 1 dataset + Stage 2 proxy)
 
-> **Scope: amortized-UE Stage 1.** This file governs the `amortized_ue/` module only.
-> The repo-root `../CLAUDE.md` is also in effect (it owns environment setup, the
-> Imperial-DoC machine quirks, wandb auth, model compatibility, and the SEP
-> baseline-reproduction rules). Read both; this file does **not** repeat the env setup.
+> **Scope: amortized-UE Stage 1 (offline dataset) and Stage 2 (SLM proxy).** This file
+> governs the `amortized_ue/` module only. The repo-root `../CLAUDE.md` is also in effect
+> (it owns the SEP baseline, the Imperial-DoC machine quirks, wandb auth, model
+> compatibility, and the `se_probes` env). Read both. Stage 2 runs in its **own separate
+> conda env** (`amortized_stage2`, see the Stage 2 section) — `se_probes` stays pinned.
 
 ## What this module is
 
-MSc project: **amortized uncertainty estimation** — eventually, train a small model
-to predict a large LLM's semantic entropy in a single forward pass, avoiding the
-multi-sample cost at inference. **This module is Stage 1 only: offline dataset
-construction.** Building the proxy model or its training is explicitly **out of
-scope here** — do not start it unless asked.
+MSc project: **amortized uncertainty estimation** — train a small model to predict a
+large LLM's semantic entropy in a **single forward pass**, avoiding the multi-sample
+cost at inference. Two stages, both now built:
 
-Stage 1 produces, for one target LLM and a QA dataset, one **self-contained record
-per prompt** that a later training stage can consume **without ever re-running the
-target LLM**.
+- **Stage 1 (dataset):** for one target LLM + QA dataset, produce one **self-contained,
+  id-keyed record per prompt** (canonical answer + TBG/SLT hidden states all layers, N
+  high-temp samples, continuous `cluster_assignment_entropy` label) so Stage 2 never
+  re-runs the target LLM.
+- **Stage 2 (proxy):** train a frozen decoder-only SLM (Llama-3.2-3B) to regress that
+  continuous SE label from the stored hidden state (injected as soft tokens) plus optional
+  text. Consumes Stage-1 records read-only. See the **Stage 2** section below.
 
 ## Relationship to the SEP repo (read-only reuse)
 
@@ -120,25 +123,70 @@ relaunch.
   copy** (same files uploaded), never the only place the data lives. Load source is a
   single config switch defaulting to `local`.
 
-## Current state (updated 2026-06-30)
+## Stage 2 — SLM proxy (`amortized_ue/stage2/`)
 
-**Stage 1 COMPLETE for Llama-2-7b-chat / trivia_qa, N=400.**
-- Local: `amortized_ue/data/stage1/Llama-2-7b-chat_trivia_qa_n400_full/`
-  (`records/` 400 `.pt` + `manifest.json`, ~0.43 GB).
-- Metrics: mean_accuracy 0.5775, mean_cluster_assignment_entropy 0.6138, ~26 min/1 GPU.
-- W&B copy verified byte-identical (spot-checked SHA-256): project `amortized_ue_stage1`,
-  artifact `stage1_records:v0` (401 files), run `4d2lvwzc`.
-- Smoke test passes.
+Frozen **Llama-3.2-3B** backbone reads, in one forward pass,
+`[k soft tokens] (+ [text]) + [REG readout]` and a linear head on the REG token's final
+hidden state regresses the standardised SE label. Only the projector, LoRA adapters, REG
+embedding, and head train.
 
-**Stage-1 data sanity check PASSED (throwaway diagnostic, not part of the pipeline).**
-`sanity_probe.py` (+ `sanity_probe_auroc.png`) reproduces a SEP-style per-layer
-logistic-regression probe on the records' TBG/SLT hidden states predicting
-*binarised* SE (binarisation is diagnostic-only via SEP `best_split`; stored
-continuous labels untouched). Mirrors the SEP baseline probe logic (best_split,
-binarize_entropy, 0.2/0.1 split, seed 42). Loads via `load_records`; saves no
-models/W&B. Result on the N=400 run: labels healthy-spread (mean 0.614, 41% at 0),
-hidden states clean (no NaN/Inf/all-zero), **best test AUROC 0.805 (SLT layer 31)**,
-TBG best 0.731 (layer 10) — clearly above chance, so the data carries learnable SE
-signal and the SLM proxy can proceed. Committed to `main` (`4f1fc51`).
+**Files:** `config.py` (`Stage2Config`, every knob), `data.py` (id-keyed load, split,
+target standardise, `best_split` binarisation for AUROC, strict-train sweep subsample,
+label report), `model.py` (`Projector` + `ProxyModel`), `train.py` (`Trainer`: per-arm
+train/eval, sweep, k-ablation), `run.py` (`--report` / `--smoke` / full run).
 
-**Not started (future stages):** proxy model + its training. Out of scope until asked.
+**Separate env (do not use `se_probes`).** `se_probes` (transformers 4.35.2) rejects
+Llama-3.2's `rope_type:"llama3"`. Stage 2 runs in `amortized_stage2` at
+`/vol/bitbucket/<user>/conda_envs/amortized_stage2`, made by **cloning `se_probes`**
+(hardlinks; avoids a 5 GB torch re-download) then upgrading in the clone to
+`transformers==4.52.4` + `peft` + `accelerate` (torch stays 2.1.1). `meta-llama/Llama-3.2-3B`
+gated access is cleared for acct Minakshee25 (official weights, no mirror).
+
+**Commands** (repo root, `amortized_stage2` env, pin a free GPU):
+```bash
+python -m amortized_ue.stage2.run --report   # label distribution + subsample checks, no GPU work
+python -m amortized_ue.stage2.run --smoke     # full path, few prompts, 2 steps
+python -m amortized_ue.stage2.run             # full run -> stage2/runs/<name>/results.json (gitignored)
+```
+
+**Locked Stage-2 design (do not change without asking):**
+- Projector: `LayerNorm(H_in) → Linear(H_in,256) → GELU → Dropout(0.1) → Linear(256,k·d_model)
+  → reshape → per-token unit-normalise × **learnable scalar** (init emb_norm)`. The learnable
+  scale keeps soft tokens in embedding-norm range WITHOUT discarding z magnitude (an earlier
+  hard norm-match did, and underperformed). Interface takes `[B, n_layers_in, H]` so a future
+  multi-layer ablation needs no rewrite (this build uses 1 layer).
+- **Separate model per arm** (`z` / `z_q` / `z_q_resp`), each trained on its own fixed,
+  **null-free** sequence — no modality dropout, no z-dropout, no learned nulls. z-only =
+  `[k soft][REG]`; z+q drops the response tokens; z+q+resp keeps both.
+- z = one stored **(position, layer)** selected by **validation Spearman** via a z-only sweep
+  over both positions × all 33 layers, trained on a fixed **600-example TRAIN-only** subsample
+  (seed 42). `k∈{1,4,8}` ablated on the z-only arm; best k used for all arms.
+- Target z-score standardised on train; metrics in original space: **Spearman (primary)**,
+  RMSE, MAE, R², AUROC (via train `best_split`), per arm.
+- Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout — **not to
+  be changed**. bf16 backbone; projector/head fp32, cast at the backbone boundary.
+
+## Current state (updated 2026-07-01)
+
+**Stage 1 datasets (Llama-2-7b-chat / trivia_qa):**
+- `..._n400_full/` — 400 records (mean_acc 0.5775, mean_CAE 0.6138). W&B artifact
+  `stage1_records:v0` (run `4d2lvwzc`). Sanity probe: best test AUROC **0.805 (SLT L31)**.
+- `..._n2000_full/` — **2000 records** (mean_acc 0.5905, mean_CAE 0.5857). Built by reusing
+  the 400 (verified: `random.sample` is nested, so the n2000 sample's first 400 == the n400
+  set) + generating 1600 new. Split 1440/360/200 (seed 42). Local only (not pushed to W&B).
+
+**Stage 2 big-data run COMPLETE (N=2000) — SUCCESS.** Selected **TBG layer 12, k=4**.
+z-only test AUROC **0.758** / Spearman 0.459 (was 0.596 at an earlier N=400 attempt — the
+soft token is now used); **z+q+resp best: test AUROC 0.795 / Spearman 0.575 / R² 0.384**
+(text helps); z+q 0.733 (question alone doesn't help — the canonical *response* carries the
+signal). R² positive across arms. Code committed (`772340d`); `results.json` gitignored under
+`stage2/runs/stage2_..._n2000_full/`. Smoke + `--report` pass.
+
+## Next steps (pick up here)
+
+1. **OOD story:** add a 2nd Stage-1 dataset (e.g. squad/nq) and test cross-dataset transfer of
+   the proxy (train on trivia_qa, eval OOD), mirroring the SEP paper.
+2. **Multi-layer projector ablation:** feed a band of layers (interface already supports
+   `n_layers_in > 1`) instead of a single selected layer.
+3. **Push the winning z+q+resp arm:** light hyperparameter pass (lr, LoRA rank, epochs).
+4. **(Optional) W&B copy of the n2000 dataset** for provenance (n400 has one; n2000 doesn't).
