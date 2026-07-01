@@ -134,3 +134,44 @@ class Stage2Data:
             "y_std": self.transform.encode(self.labels_raw[rows]),  # training target
             "y_bin": self.labels_bin[rows],                        # for AUROC
         }
+
+    def sweep_subsample(self, size: int, seed: int) -> np.ndarray:
+        """A fixed subsample drawn STRICTLY from the training split (no val/test).
+
+        Used only to make the (position, layer) sweep cheap. Guaranteed disjoint
+        from val_idx / test_idx because it samples from self.train_idx.
+        """
+        rng = np.random.default_rng(seed)
+        pool = np.asarray(self.train_idx)
+        k = min(size, len(pool))
+        rows = np.sort(rng.choice(pool, size=k, replace=False))
+        # hard guarantees
+        assert set(rows).issubset(set(pool.tolist())), "subsample escaped the train split"
+        assert set(rows).isdisjoint(set(self.val_idx.tolist())), "subsample overlaps val"
+        assert set(rows).isdisjoint(set(self.test_idx.tolist())), "subsample overlaps test"
+        return rows
+
+    def label_distribution_report(self) -> str:
+        """Human-readable SE-label distribution over the whole dataset + per split."""
+        e = self.labels_raw.numpy()
+        lines = ["--- SE label (cluster_assignment_entropy) distribution ---"]
+
+        def stat(name, arr):
+            fz = float(np.mean(arr <= 1e-9))
+            return (f"  {name:6s} N={arr.size:5d}  min={arr.min():.3f}  max={arr.max():.3f}  "
+                    f"mean={arr.mean():.4f}  std={arr.std():.4f}  median={np.median(arr):.3f}  "
+                    f"frac==0={fz:.3f}")
+
+        lines.append(stat("all", e))
+        lines.append(stat("train", e[self.train_idx]))
+        lines.append(stat("val", e[self.val_idx]))
+        lines.append(stat("test", e[self.test_idx]))
+        # coarse histogram over the whole set
+        counts, edges = np.histogram(e, bins=8)
+        for c, lo, hi in zip(counts, edges[:-1], edges[1:]):
+            bar = "#" * int(40 * c / max(counts.max(), 1))
+            lines.append(f"  [{lo:5.2f},{hi:5.2f})  {c:5d} {bar}")
+        lines.append(f"  binarisation threshold (train best_split, for AUROC): {self.bin_threshold:.4f}")
+        pos_rate = float(np.mean(self.labels_bin[self.train_idx].numpy() == 1))
+        lines.append(f"  train positive rate after binarisation: {pos_rate:.3f}")
+        return "\n".join(lines)
