@@ -19,10 +19,10 @@ class Stage2Config:
     # local data dir / run-name convention is reused verbatim.
     stage1_model_name: str = "Llama-2-7b-chat"
     stage1_dataset: str = "trivia_qa"
-    stage1_num_samples: int = 400
+    stage1_num_samples: int = 2000             # big-data run (n2000_full)
     stage1_load_source: str = "local"          # "local" | "wandb"
 
-    # --- proxy backbone ---------------------------------------------------------
+    # --- proxy backbone (frozen; not to be changed) -----------------------------
     proxy_model: str = "meta-llama/Llama-3.2-3B"   # official, gated access cleared
     backbone_dtype: str = "bfloat16"
     max_seq_len: int = 256
@@ -37,31 +37,35 @@ class Stage2Config:
     sweep_layers: tuple = tuple(range(33))     # all 33 (embedding + 32 layers)
     selected_position: str | None = None       # filled in after selection
     selected_layer: int | None = None
-    select_metric: str = "val_mse"             # criterion for the sweep
+    select_metric: str = "val_spearman"        # sweep selection: val Spearman (higher=better)
     select_arm: str = "z"                      # selection uses the z-only arm
-    select_k_soft_tokens: int = 4              # selection done at default k
+    select_k_soft_tokens: int = 4              # (pos,layer) selection done at k=4
     sweep_epochs: int = 3                      # cheap epochs per candidate during the sweep
+    sweep_subsample_size: int = 600            # sweep trains on a fixed 600-example TRAIN subsample
+    sweep_subsample_seed: int = 42             # seed for that subsample (train split only)
 
     # --- projector (hidden vector -> soft tokens) -------------------------------
+    #   LayerNorm(H_in) -> Linear(H_in, hidden) -> GELU -> Dropout
+    #   -> Linear(hidden, k*d_model) -> reshape [B,k,d_model]
+    #   -> per-token unit-normalise -> * learnable scalar (init = emb_norm)
     k_soft_tokens: int = 4                      # configurable; ablate {1,4,8}
-    projector_type: str = "mlp"                 # 2-layer MLP, GELU
-    projector_hidden_dim: int = 512             # bottleneck width (4096 -> hidden -> k*d_model);
-                                                # small on purpose for N=400 (redefined for big-data run)
-    projector_dropout: float = 0.0
-    norm_match: bool = True                     # scale soft tokens to backbone emb norm
+    projector_type: str = "mlp"                 # "mlp" (bottleneck) | "linear"
+    projector_hidden_dim: int = 256             # bottleneck width
+    projector_dropout: float = 0.1
+    k_ablation_values: tuple = (1, 4, 8)        # k sweep on the z-only arm
 
-    # --- readout / head ---------------------------------------------------------
+    # --- readout / head (not to be changed) -------------------------------------
     readout: str = "reg_token"                  # dedicated appended [REG] token
     head_hidden_mult: int = 0                   # 0 => linear head
 
-    # --- input arms + modality dropout ------------------------------------------
-    # One model served three ways. arm controls evaluation/serving; during training
-    # modality dropout randomises the present modalities.
-    arm: str = "z_q_resp"                       # "z" | "z_q" | "z_q_resp"
-    p_drop_text: float = 0.5
-    p_drop_z: float = 0.1
+    # --- input arms -------------------------------------------------------------
+    # Separate model per arm: each arm is trained on its own fixed, null-free
+    # sequence (no modality dropout). z-only = [k soft][REG]; z+q drops the
+    # response tokens; z+q+resp keeps both.
+    arm: str = "z_q_resp"                       # "z" | "z_q" | "z_q_resp" (smoke/eval default)
+    arms: tuple = ("z", "z_q", "z_q_resp")      # the three arms trained separately
 
-    # --- LoRA -------------------------------------------------------------------
+    # --- LoRA (not to be changed) -----------------------------------------------
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
@@ -72,10 +76,10 @@ class Stage2Config:
     weight_decay: float = 0.01
     scheduler: str = "cosine"
     warmup_ratio: float = 0.03
-    batch_size: int = 16
+    batch_size: int = 32                        # bumped from 16 (more data; fits L40)
     grad_accum: int = 1
     epochs: int = 10
-    early_stop_metric: str = "val_mse"
+    early_stop_metric: str = "val_mse"          # training early-stop (MSE objective)
     early_stop_patience: int = 3
     grad_clip: float = 1.0
     seed: int = 42
@@ -83,7 +87,7 @@ class Stage2Config:
     # --- target transform -------------------------------------------------------
     target_transform: str = "standardize"       # z-score on train; report orig space
 
-    # --- split (consistent with the Stage-1 diagnostic) -------------------------
+    # --- split (test 0.1 -> val 0.2 of remainder, seed 42; id-sorted) -----------
     test_size: float = 0.1                       # of all data
     val_size: float = 0.2                        # of the train+val remainder
     split_seed: int = 42
@@ -101,7 +105,7 @@ class Stage2Config:
         if self.run_name:
             return self.run_name
         tag = "smoke" if self.smoke else "full"
-        return f"stage2_{self.stage1_model_name}_{self.stage1_dataset}_{self.arm}_k{self.k_soft_tokens}_{tag}"
+        return f"stage2_{self.stage1_model_name}_{self.stage1_dataset}_n{self.stage1_num_samples}_{tag}"
 
     def run_dir(self) -> str:
         return os.path.join(self.output_dir, self.resolved_run_name())
