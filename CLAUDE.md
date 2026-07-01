@@ -5,10 +5,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A detailed read-only walkthrough of the data-generation and hidden-state-extraction internals lives in `SEP_TECHNICAL_REPORT.md`.
 
 > **New work lives in `amortized_ue/` and has its own `amortized_ue/CLAUDE.md`.** That
-> module (amortized uncertainty estimation, Stage 1 offline dataset construction)
-> reuses the SEP logic read-only and is governed by its own scoped CLAUDE.md, which
-> auto-loads when working under `amortized_ue/`. This root file stays focused on the
-> SEP baseline + shared env/machine setup that `amortized_ue/` inherits.
+> module (amortized uncertainty estimation) reuses the SEP logic read-only and is governed
+> by its own scoped CLAUDE.md, which auto-loads when working under `amortized_ue/`. It now
+> has **Stage 1 (offline SE dataset)** and **Stage 2 (SLM proxy that predicts SE in one
+> forward pass)** — both built. **Stage 2 runs in a separate conda env `amortized_stage2`**
+> (cloned from `se_probes`, upgraded to transformers 4.52.4 + peft, for Llama-3.2-3B); this
+> root file's `se_probes` env stays pinned for the SEP baseline. This root file stays focused
+> on the SEP baseline + shared env/machine setup that `amortized_ue/` inherits.
 
 ## Environment Setup
 
@@ -120,16 +123,19 @@ analyze_results.py
 
 The notebook is wired for the 4-dataset experiment (bioasq/trivia-qa/nq/squad) with OOD cross-dataset tests and multi-panel plots; its plotting crashes on a single dataset. `run_llama2_probe.py` and `run_falcon_probe.py` reproduce ONLY the in-distribution core verbatim (load_dataset → best universal split → binarize_entropy → per-layer LogisticRegression → AUROC) for single-dataset runs. Trained probes are saved as `.pkl` to `semantic_entropy_probes/models/`.
 
-### `amortized_ue/` — amortized UE Stage 1 (new work; see `amortized_ue/CLAUDE.md`)
+### `amortized_ue/` — amortized UE (new work; see `amortized_ue/CLAUDE.md`)
 
-Sibling module for the amortized-uncertainty MSc project. Stage 1 builds one
+Sibling module for the amortized-uncertainty MSc project. **Stage 1** builds one
 self-contained, **id-keyed** record per prompt (canonical low-temp answer + TBG/SLT
 hidden states all layers, N high-temp samples, and a **continuous**
-`cluster_assignment_entropy` label) so a later stage can train a proxy without
-re-running the LLM. It **imports the SEP logic read-only** via `sys.path` and edits
-nothing under `semantic_uncertainty/`. Full details — schema, commands, the TBG/SLT
-true-position labelling (SEP's keys are inverted), and current state — are in the
-scoped **`amortized_ue/CLAUDE.md`**, which auto-loads when working in that folder.
+`cluster_assignment_entropy` label) so Stage 2 can train a proxy without re-running the
+LLM. **Stage 2** (`amortized_ue/stage2/`) trains a frozen Llama-3.2-3B to regress that SE
+label from the stored hidden state (as soft tokens) plus optional text, in one forward
+pass — in its **own env** `amortized_stage2`. It **imports the SEP logic read-only** via
+`sys.path` and edits nothing under `semantic_uncertainty/`. Full details — schemas,
+commands, the TBG/SLT true-position labelling (SEP's keys are inverted), the Stage-2
+design, the N=2000 results, and next steps — are in the scoped **`amortized_ue/CLAUDE.md`**,
+which auto-loads when working in that folder.
 
 ## Key Design Decisions
 
