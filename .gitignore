@@ -149,4 +149,7 @@ semantic_entropy_probes/models/*.pkl
 # Amortized-UE Stage 1 outputs (regenerable; hidden-state tensors are GB-scale)
 amortized_ue/data/
 
+# Amortized-UE Stage 2 run outputs (regenerable; results.json + checkpoints)
+amortized_ue/stage2/runs/
+
 .env
