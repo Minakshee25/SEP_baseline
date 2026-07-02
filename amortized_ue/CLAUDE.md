@@ -147,7 +147,20 @@ gated access is cleared for acct Minakshee25 (official weights, no mirror).
 python -m amortized_ue.stage2.run --report   # label distribution + subsample checks, no GPU work
 python -m amortized_ue.stage2.run --smoke     # full path, few prompts, 2 steps
 python -m amortized_ue.stage2.run             # full run -> stage2/runs/<name>/results.json (gitignored)
+# OOD: train each arm on the ID dataset, evaluate on a 2nd Stage-1 dataset (eval-only)
+python -m amortized_ue.stage2.run --ood --ood_dataset squad --ood_num_samples 1000
+#   -> stage2/runs/<name>/ood_results_<dataset>.json  (reuses selected pos/layer/k from results.json)
 ```
+
+**Where results are saved** (all gitignored — tensors/JSON are large / run-specific):
+- Stage-1 records: `amortized_ue/data/stage1/<run_name>/records/<id>.pt` + `manifest.json`.
+- Stage-2 ID run: `amortized_ue/stage2/runs/stage2_<model>_<dataset>_n<N>_full/results.json`
+  (sweep, k-ablation, and per-arm train/val/test metrics).
+- Stage-2 OOD run: `.../ood_results_<ood_dataset>.json` in the same run dir.
+- W&B: Stage-1 datasets pushed as artifacts (`stage1_records:v0` for n400,
+  `stage1_records_n2000` for n2000) in project `amortized_ue_stage1`.
+- The numeric headline results are also recorded below and in the memory file
+  `amortized-ue-stage2.md`.
 
 **Locked Stage-2 design (do not change without asking):**
 - Projector: `LayerNorm(H_in) → Linear(H_in,256) → GELU → Dropout(0.1) → Linear(256,k·d_model)
@@ -166,27 +179,47 @@ python -m amortized_ue.stage2.run             # full run -> stage2/runs/<name>/r
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout — **not to
   be changed**. bf16 backbone; projector/head fp32, cast at the backbone boundary.
 
-## Current state (updated 2026-07-01)
+## Current state (updated 2026-07-02)
 
-**Stage 1 datasets (Llama-2-7b-chat / trivia_qa):**
-- `..._n400_full/` — 400 records (mean_acc 0.5775, mean_CAE 0.6138). W&B artifact
+**Stage 1 datasets (target LLM Llama-2-7b-chat):**
+- `trivia_qa ..._n400_full/` — 400 records (mean_acc 0.5775, mean_CAE 0.6138). W&B artifact
   `stage1_records:v0` (run `4d2lvwzc`). Sanity probe: best test AUROC **0.805 (SLT L31)**.
-- `..._n2000_full/` — **2000 records** (mean_acc 0.5905, mean_CAE 0.5857). Built by reusing
-  the 400 (verified: `random.sample` is nested, so the n2000 sample's first 400 == the n400
-  set) + generating 1600 new. Split 1440/360/200 (seed 42). Local only (not pushed to W&B).
+- `trivia_qa ..._n2000_full/` — **2000 records** (mean_acc 0.5905, mean_CAE 0.5857). Built by
+  reusing the 400 (verified: `random.sample` is nested, so the n2000 sample's first 400 == the
+  n400 set) + generating 1600 new. Split 1440/360/200 (seed 42). W&B artifact
+  `stage1_records_n2000`.
+- `squad ..._n1000_full/` — **1000 records** (mean_acc 0.236, mean_CAE 1.498 — a real shift vs
+  trivia's 0.59/0.59). Built for OOD evaluation only. Local; not pushed to W&B.
 
-**Stage 2 big-data run COMPLETE (N=2000) — SUCCESS.** Selected **TBG layer 12, k=4**.
+**Stage 2 ID run COMPLETE (trivia_qa, N=2000) — SUCCESS.** Selected **TBG layer 12, k=4**.
 z-only test AUROC **0.758** / Spearman 0.459 (was 0.596 at an earlier N=400 attempt — the
 soft token is now used); **z+q+resp best: test AUROC 0.795 / Spearman 0.575 / R² 0.384**
 (text helps); z+q 0.733 (question alone doesn't help — the canonical *response* carries the
-signal). R² positive across arms. Code committed (`772340d`); `results.json` gitignored under
-`stage2/runs/stage2_..._n2000_full/`. Smoke + `--report` pass.
+signal). R² positive across arms. Code committed (`772340d`); results in
+`stage2/runs/stage2_..._n2000_full/results.json` (gitignored). Smoke + `--report` pass.
 
-## Next steps (pick up here)
+**Stage 2 OOD run COMPLETE (trivia_qa → squad, N=1000 eval-only, `42a3d6c`).** Each arm trained
+on trivia_qa n2000 (TBG/L12/k4), evaluated on all 1000 squad rows (`ood_results_squad.json`).
+Spearman / AUROC:
+- z (hidden only): trivia-test 0.466/0.757 → **squad 0.287/0.622** — the hidden-state signal
+  transfers across a real distribution shift.
+- z+q+resp: trivia-test 0.414/0.737 → **squad 0.291/0.618** — the in-distribution text advantage
+  does **NOT** transfer (z ≈ z+q+resp OOD) → **z is the domain-robust feature** (headline finding).
+- z+q: 0.372/0.709 → squad 0.081/0.513 (chance). OOD RMSE/R² are meaningless (label-scale shift).
 
-1. **OOD story:** add a 2nd Stage-1 dataset (e.g. squad/nq) and test cross-dataset transfer of
-   the proxy (train on trivia_qa, eval OOD), mirroring the SEP paper.
-2. **Multi-layer projector ablation:** feed a band of layers (interface already supports
+**Caveat (open):** text-arm metrics show run-to-run variance — this OOD run's ID z+q+resp was
+0.737 vs the committed ID run's 0.795 (z-only stable at ~0.758). Cause: `build_ood` skips the
+sweep/k-ablation, so the shared RNG state entering arm-training differs. Treat single-run
+text-arm magnitudes as noisy until reseeded + multi-seed'd (item 1 below).
+
+## To-do list (pick up here)
+
+1. **Per-arm reseeding + multi-seed run** — reseed each arm's training independently and run a
+   few seeds to report mean±std, before any strong claim about the text-arm (z+q / z+q+resp)
+   advantage. Motivated by the variance caveat above.
+2. **Multi-layer projector ablation** — feed a band of layers (interface already supports
    `n_layers_in > 1`) instead of a single selected layer.
-3. **Push the winning z+q+resp arm:** light hyperparameter pass (lr, LoRA rank, epochs).
-4. **(Optional) W&B copy of the n2000 dataset** for provenance (n400 has one; n2000 doesn't).
+3. **Full 2×2 OOD matrix** — also train on squad and eval on trivia_qa (currently only
+   trivia→squad is done).
+4. **Hyperparameter pass on the winning z+q+resp arm** — lr, LoRA rank, epochs.
+5. **(Housekeeping)** rotate the HF token that was pasted in chat (security).
