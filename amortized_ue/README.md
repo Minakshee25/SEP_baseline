@@ -127,9 +127,12 @@ Use `amortized_stage2` (a clone of `se_probes` upgraded to `transformers==4.52.4
 python -m amortized_ue.stage2.run --report   # label distribution + subsample checks (no GPU)
 python -m amortized_ue.stage2.run --smoke     # full path, a few prompts, 2 steps
 python -m amortized_ue.stage2.run             # full run -> stage2/runs/<name>/results.json
+# OOD: train each arm on the ID dataset, evaluate on a 2nd Stage-1 dataset (eval-only)
+python -m amortized_ue.stage2.run --ood --ood_dataset squad --ood_num_samples 1000
+#   -> stage2/runs/<name>/ood_results_<dataset>.json
 ```
 
-### Results (Llama-2-7b-chat / trivia_qa, N=2000; selected TBG layer 12, k=4)
+### In-distribution results (Llama-2-7b-chat / trivia_qa, N=2000; selected TBG layer 12, k=4)
 
 | arm (test split) | Spearman | AUROC | RMSE | R² |
 |------------------|---------:|------:|-----:|---:|
@@ -140,6 +143,37 @@ python -m amortized_ue.stage2.run             # full run -> stage2/runs/<name>/r
 z-only ≈ the single-layer linear-probe reference (0.805 AUROC), i.e. the soft token is
 used; adding the **canonical response** is what lifts performance (the question alone
 does not). Reference: a plain logistic probe on the same hidden state reaches ~0.805 AUROC.
+
+### OOD results (train trivia_qa → eval squad, N=1000, eval-only)
+
+Same target LLM, apply the trivia-trained proxy to squad's stored `z` + text. Rank metrics
+(Spearman/AUROC) are the OOD signal; RMSE/R² are miscalibrated OOD (label-scale shift) by design.
+
+| arm | trivia-test Spearman / AUROC | **squad-OOD Spearman / AUROC** |
+|-----|:---:|:---:|
+| z (hidden only) | 0.466 / 0.757 | **0.287 / 0.622** |
+| z + question | 0.372 / 0.709 | 0.081 / 0.513 (chance) |
+| z + question + response | 0.414 / 0.737 | **0.291 / 0.618** |
+
+**Headline:** the hidden-state (`z`) signal transfers across a real distribution shift
+(~0.62 AUROC OOD), but the in-distribution *text* advantage does **not** (z ≈ z+q+resp OOD)
+— **`z` is the domain-robust feature**. squad is a genuine shift (mean acc 0.24 / mean CAE 1.50
+vs trivia's 0.59 / 0.59). Caveat: text-arm metrics vary run-to-run (see to-do #1) — treat
+single-run text magnitudes as noisy pending a multi-seed pass.
+
+### Where results are saved
+
+- Stage-1 records: `amortized_ue/data/stage1/<run_name>/records/<id>.pt` + `manifest.json` (gitignored).
+- Stage-2 ID: `amortized_ue/stage2/runs/stage2_<model>_<dataset>_n<N>_full/results.json` (gitignored).
+- Stage-2 OOD: `.../ood_results_<ood_dataset>.json` in the same run dir.
+- W&B artifacts (project `amortized_ue_stage1`): `stage1_records:v0` (n400), `stage1_records_n2000`.
+
+### To-do
+
+1. **Per-arm reseeding + multi-seed run** — quantify text-arm (z+q / z+q+resp) variance (mean±std).
+2. **Multi-layer projector ablation** — feed a band of layers (`n_layers_in > 1` already supported).
+3. **Full 2×2 OOD matrix** — also train on squad, eval on trivia_qa.
+4. **Hyperparameter pass** on the z+q+resp arm (lr, LoRA rank, epochs).
 
 ### Stage 2 files
 
