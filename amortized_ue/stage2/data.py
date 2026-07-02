@@ -115,7 +115,15 @@ class Stage2Data:
         self.labels_bin = binarize_entropy(self.labels_raw, self.bin_threshold)
 
     def split_indices(self, split: str) -> np.ndarray:
+        if split == "all":
+            return np.arange(len(self.ids))
         return {"train": self.train_idx, "val": self.val_idx, "test": self.test_idx}[split]
+
+    def bin_labels_over(self, rows: np.ndarray):
+        """Binarise labels over `rows` using best_split fit ON those rows (for OOD AUROC)."""
+        y = self.labels_raw[rows]
+        thr = best_split(y)
+        return binarize_entropy(self.labels_raw[rows], thr).numpy(), thr
 
     def z(self, position: str, layer: int, rows: np.ndarray) -> torch.Tensor:
         """z vectors [len(rows), H] at a physical position and layer."""

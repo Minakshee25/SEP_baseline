@@ -117,8 +117,8 @@ class Trainer:
     def _trainable_params(self):
         return [p for p in self.model.parameters() if p.requires_grad]
 
-    def _forward_batch(self, rows, position, layer, arm):
-        d = self.data
+    def _forward_batch(self, rows, position, layer, arm, data=None):
+        d = data or self.data
         z = d.hidden[position][layer][rows].unsqueeze(1).to(self.device)   # [B,1,H]
         ids, attn = _tokenize_arm(
             self.model.tokenizer, [d.questions[r] for r in rows], [d.responses[r] for r in rows],
@@ -182,6 +182,27 @@ class Trainer:
         pred_orig = self.data.transform.decode(torch.cat(preds)).numpy()
         y_raw = self.data.labels_raw[rows_all].numpy()
         y_bin = self.data.labels_bin[rows_all].numpy()
+        self.model.train()
+        return regression_and_ranking(pred_orig, y_raw, y_bin)
+
+    @torch.no_grad()
+    def evaluate_ood(self, position, layer, arm, ood_data):
+        """Apply the current (trivia-trained) model to ALL rows of an OOD dataset.
+
+        Predictions are decoded with the TRAINING data's transform (self.data), so the
+        model is used exactly as trained. Rank metrics (Spearman, AUROC) are the OOD
+        signal; RMSE/MAE/R2 are miscalibrated OOD (different label scale) and reported
+        only for completeness. AUROC binarises the OOD labels with their own best_split.
+        """
+        self.model.eval()
+        rows_all = ood_data.split_indices("all")
+        preds = []
+        for i in range(0, len(rows_all), self.cfg.batch_size):
+            rows = rows_all[i:i + self.cfg.batch_size]
+            preds.append(self._forward_batch(rows, position, layer, arm, data=ood_data).float().cpu())
+        pred_orig = self.data.transform.decode(torch.cat(preds)).numpy()   # train transform
+        y_raw = ood_data.labels_raw[rows_all].numpy()
+        y_bin, _ = ood_data.bin_labels_over(rows_all)
         self.model.train()
         return regression_and_ranking(pred_orig, y_raw, y_bin)
 
