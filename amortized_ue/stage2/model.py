@@ -135,6 +135,26 @@ class ProxyModel(nn.Module):
         """Swap in a fresh projector for a new k without reloading the backbone."""
         self._build_projector(k)
 
+    def reinit_trainable(self):
+        """Re-initialise every trainable parameter in place, under the active RNG.
+
+        Used by the multi-seed arm study so each trial's init varies with its seed
+        without reloading the frozen backbone. Reinitialises the projector, the REG
+        readout, the head and the LoRA adapters; the frozen backbone is untouched.
+        """
+        d = self.d_model
+        self._build_projector(self.cfg.k_soft_tokens)                 # fresh projector at current k
+        with torch.no_grad():
+            self.reg_token.copy_(torch.randn(d, device=self.reg_token.device)
+                                 * (float(self.emb_norm) / (d ** 0.5)))
+        for m in self.head.modules():                                  # head Linear(s)
+            if isinstance(m, nn.Linear):
+                m.reset_parameters()
+        self.head.float()
+        for module in self.backbone.modules():                         # LoRA adapters
+            if hasattr(module, "reset_lora_parameters"):
+                module.reset_lora_parameters("default", init_lora_weights=True)
+
     # --- forward ----------------------------------------------------------------
     def forward(self, z, text_input_ids=None, text_attention_mask=None):
         """z: [B, n_layers_in, H_in]; text_* optional (None => z-only arm).

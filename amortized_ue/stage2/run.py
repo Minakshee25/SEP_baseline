@@ -98,40 +98,96 @@ def run_smoke(cfg: Stage2Config) -> dict:
     return {"pos": pos, "layer": layer}
 
 
+# ----------------------------- multi-seed aggregation -------------------------
+_AGG_KEYS = ("spearman", "auroc", "rmse", "mae", "r2")
+
+
+def _stats(vals: list) -> dict:
+    vals = [float(v) for v in vals if v == v]           # drop NaN
+    if not vals:
+        return {"mean": float("nan"), "std": float("nan"), "values": []}
+    std = float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0
+    return {"mean": float(np.mean(vals)), "std": std, "values": vals}
+
+
+def _summarize(trials: list, arms, split: str) -> dict:
+    """Per-arm mean±std over trials for each metric on the given split."""
+    return {arm: {k: _stats([t["arms"][arm][split][k] for t in trials]) for k in _AGG_KEYS}
+            for arm in arms}
+
+
+def _paired(trials: list, arms, split: str, ref: str = "z") -> dict:
+    """Per-trial paired difference (arm - ref) for spearman/auroc, with frac_positive."""
+    out = {}
+    for arm in arms:
+        if arm == ref:
+            continue
+        entry = {}
+        for k in ("spearman", "auroc"):
+            diffs = [t["arms"][arm][split][k] - t["arms"][ref][split][k] for t in trials]
+            diffs = [d for d in diffs if d == d]
+            s = _stats(diffs)
+            s["frac_positive"] = float(np.mean([d > 0 for d in diffs])) if diffs else float("nan")
+            entry[k] = s
+        out[f"{arm}_minus_{ref}"] = entry
+    return out
+
+
 def build(cfg: Stage2Config) -> dict:
     data = Stage2Data(cfg)
     trainer = Trainer(cfg, data)
 
-    # 1) (position, layer) selection: z-only sweep on a strict-train subsample, by Spearman
-    sub = data.sweep_subsample(cfg.sweep_subsample_size, cfg.sweep_subsample_seed)
-    trainer.set_k(cfg.select_k_soft_tokens)
-    logging.info("Sweep: z-only over %d positions x %d layers on %d-example train subsample ...",
-                 len(cfg.sweep_positions), len(cfg.sweep_layers), len(sub))
-    best, sweep_table = trainer.sweep_pos_layer(train_rows=sub, epochs=cfg.sweep_epochs)
-    pos, layer = best["position"], best["layer"]
-    logging.info("Selected position=%s layer=%d (val_spearman=%.4f)", pos, layer, best["spearman"])
+    # --- selection: reuse a saved (pos,layer,k) or run the sweep + k-ablation ---
+    if cfg.reuse_selection:
+        sel = _load_selected(cfg)
+        pos, layer, best_k = sel["position"], sel["layer"], sel["k"]
+        sweep_table = k_table = None
+        logging.info("Reusing selection: position=%s layer=%d k=%d (sweep/k-ablation skipped)",
+                     pos, layer, best_k)
+    else:
+        # 1) (position, layer) selection: z-only sweep on a strict-train subsample, by Spearman
+        sub = data.sweep_subsample(cfg.sweep_subsample_size, cfg.sweep_subsample_seed)
+        trainer.reseed(cfg.seed)
+        trainer.set_k(cfg.select_k_soft_tokens)
+        logging.info("Sweep: z-only over %d positions x %d layers on %d-example train subsample ...",
+                     len(cfg.sweep_positions), len(cfg.sweep_layers), len(sub))
+        best, sweep_table = trainer.sweep_pos_layer(train_rows=sub, epochs=cfg.sweep_epochs)
+        pos, layer = best["position"], best["layer"]
+        logging.info("Selected position=%s layer=%d (val_spearman=%.4f)", pos, layer, best["spearman"])
 
-    # 2) k ablation on the z-only arm (full train), select best k
-    kbest, k_table = trainer.k_ablation(pos, layer, epochs=cfg.epochs)
-    best_k = kbest["k"]
-    logging.info("Selected k=%d (val_spearman=%.4f)", best_k, kbest["spearman"])
+        # 2) k ablation on the z-only arm (full train), select best k
+        trainer.reseed(cfg.seed)
+        kbest, k_table = trainer.k_ablation(pos, layer, epochs=cfg.epochs)
+        best_k = kbest["k"]
+        logging.info("Selected k=%d (val_spearman=%.4f)", best_k, kbest["spearman"])
 
-    # 3) train the three arms separately at the best k on the full train split
-    trainer.set_k(best_k)
-    arms = {}
+    # --- multi-seed arm training: each arm on its own (seed,trial,arm) stream ----
+    trials = []
+    for s in cfg.arm_trial_seeds:
+        logging.info("=== arm trial seed=%d ===", s)
+        arm_res = trainer.train_arms_trial(pos, layer, best_k, cfg.arms, trial_seed=s)
+        trials.append({"seed": s, "arms": arm_res})
+        for arm in cfg.arms:
+            m = arm_res[arm]["test"]
+            logging.info("seed=%d arm=%-9s test spearman=%.4f auroc=%.4f rmse=%.4f",
+                         s, arm, m["spearman"], m["auroc"], m["rmse"])
+
+    summary = _summarize(trials, cfg.arms, "test")
+    paired = _paired(trials, cfg.arms, "test", ref="z")
     for arm in cfg.arms:
-        trainer.reset_trainable()
-        trainer.train_arm(pos, layer, arm=arm, epochs=cfg.epochs)
-        arms[arm] = {s: trainer.evaluate(pos, layer, arm, s) for s in ("val", "test")}
-        logging.info("arm=%s test spearman=%.4f auroc=%.4f rmse=%.4f",
-                     arm, arms[arm]["test"]["spearman"], arms[arm]["test"]["auroc"], arms[arm]["test"]["rmse"])
+        sp, au = summary[arm]["spearman"], summary[arm]["auroc"]
+        logging.info("arm=%-9s test spearman %.4f±%.4f  auroc %.4f±%.4f",
+                     arm, sp["mean"], sp["std"], au["mean"], au["std"])
 
     result = {"selected": {"position": pos, "layer": layer, "k": best_k},
-              "arms": arms, "sweep": sweep_table, "k_ablation": k_table}
+              "seeds": list(cfg.arm_trial_seeds), "trials": trials,
+              "summary": summary, "paired": paired,
+              "sweep": sweep_table, "k_ablation": k_table}
     os.makedirs(cfg.run_dir(), exist_ok=True)
-    with open(os.path.join(cfg.run_dir(), "results.json"), "w") as f:
+    out = os.path.join(cfg.run_dir(), "results_multiseed.json")
+    with open(out, "w") as f:
         json.dump({"config": cfg.as_dict(), **result}, f, indent=2)
-    logging.info("Wrote results -> %s", os.path.join(cfg.run_dir(), "results.json"))
+    logging.info("Wrote results -> %s", out)
     return result
 
 
@@ -170,20 +226,32 @@ def build_ood(cfg: Stage2Config) -> dict:
     logging.info("Using in-distribution selection: position=%s layer=%d k=%d", pos, layer, k)
 
     trainer = Trainer(cfg, data)
-    trainer.set_k(k)
-    arms = {}
-    for arm in cfg.arms:
-        trainer.reset_trainable()
-        trainer.train_arm(pos, layer, arm=arm, epochs=cfg.epochs)
-        id_test = trainer.evaluate(pos, layer, arm, "test")
-        ood = trainer.evaluate_ood(pos, layer, arm, ood_data)
-        arms[arm] = {"id_test": id_test, "ood": ood}
-        logging.info("arm=%-9s ID test spearman=%.4f auroc=%.4f | OOD(%s) spearman=%.4f auroc=%.4f",
-                     arm, id_test["spearman"], id_test["auroc"], cfg.ood_dataset,
-                     ood["spearman"], ood["auroc"])
+    # multi-seed: each trial reuses the same (seed,trial,arm) streams as build(), so the
+    # ID test numbers here match build()'s for the same trial_seed (removes the caveat).
+    trials = []
+    for s in cfg.arm_trial_seeds:
+        logging.info("=== OOD arm trial seed=%d ===", s)
+        arm_res = trainer.train_arms_trial(pos, layer, k, cfg.arms, trial_seed=s, ood_data=ood_data)
+        trials.append({"seed": s, "arms": arm_res})
+        for arm in cfg.arms:
+            idt, ood = arm_res[arm]["test"], arm_res[arm]["ood"]
+            logging.info("seed=%d arm=%-9s ID test sp=%.4f au=%.4f | OOD(%s) sp=%.4f au=%.4f",
+                         s, arm, idt["spearman"], idt["auroc"], cfg.ood_dataset,
+                         ood["spearman"], ood["auroc"])
 
-    result = {"selected": sel, "in_distribution": cfg.stage1_dataset, "ood": cfg.ood_dataset, "arms": arms}
-    out = os.path.join(cfg.run_dir(), f"ood_results_{cfg.ood_dataset}.json")
+    result = {"selected": sel, "in_distribution": cfg.stage1_dataset, "ood": cfg.ood_dataset,
+              "seeds": list(cfg.arm_trial_seeds), "trials": trials,
+              "id_summary": _summarize(trials, cfg.arms, "test"),
+              "ood_summary": _summarize(trials, cfg.arms, "ood"),
+              "id_paired": _paired(trials, cfg.arms, "test", ref="z"),
+              "ood_paired": _paired(trials, cfg.arms, "ood", ref="z")}
+    for arm in cfg.arms:
+        sp = result["ood_summary"][arm]["spearman"]
+        au = result["ood_summary"][arm]["auroc"]
+        logging.info("arm=%-9s OOD(%s) spearman %.4f±%.4f  auroc %.4f±%.4f",
+                     arm, cfg.ood_dataset, sp["mean"], sp["std"], au["mean"], au["std"])
+
+    out = os.path.join(cfg.run_dir(), f"ood_results_{cfg.ood_dataset}_multiseed.json")
     with open(out, "w") as f:
         json.dump({"config": cfg.as_dict(), **result}, f, indent=2)
     logging.info("Wrote OOD results -> %s", out)
@@ -205,12 +273,25 @@ def _parse() -> tuple[Stage2Config, str]:
     p.add_argument("--stage1_num_samples", type=int, default=Stage2Config.stage1_num_samples)
     p.add_argument("--smoke_num_prompts", type=int, default=Stage2Config.smoke_num_prompts)
     p.add_argument("--smoke_steps", type=int, default=Stage2Config.smoke_steps)
+    p.add_argument("--seeds", default=None,
+                   help="arm trial seeds: comma list '0,1,2' or an int N -> 0..N-1")
+    p.add_argument("--reuse_selection", action="store_true",
+                   help="skip the sweep/k-ablation; reuse the saved (pos,layer,k)")
     a = p.parse_args()
     mode = "report" if a.report else ("smoke" if a.smoke else ("ood" if a.ood else "full"))
+
+    if a.seeds is None:
+        seeds = Stage2Config.arm_trial_seeds
+    elif "," in a.seeds:
+        seeds = tuple(int(x) for x in a.seeds.split(","))
+    else:
+        seeds = tuple(range(int(a.seeds)))
+
     cfg = Stage2Config(
         k_soft_tokens=a.k_soft_tokens, proxy_model=a.proxy_model, lr=a.lr, epochs=a.epochs,
         batch_size=a.batch_size, stage1_num_samples=a.stage1_num_samples,
         ood_dataset=a.ood_dataset, ood_num_samples=a.ood_num_samples,
+        arm_trial_seeds=seeds, reuse_selection=a.reuse_selection,
         smoke=a.smoke, smoke_num_prompts=a.smoke_num_prompts, smoke_steps=a.smoke_steps)
     return cfg, mode
 
