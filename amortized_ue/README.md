@@ -126,54 +126,59 @@ Use `amortized_stage2` (a clone of `se_probes` upgraded to `transformers==4.52.4
 ```bash
 python -m amortized_ue.stage2.run --report   # label distribution + subsample checks (no GPU)
 python -m amortized_ue.stage2.run --smoke     # full path, a few prompts, 2 steps
-python -m amortized_ue.stage2.run             # full run -> stage2/runs/<name>/results.json
+python -m amortized_ue.stage2.run --reuse_selection --seeds 5   # multi-seed -> results_multiseed.json
 # OOD: train each arm on the ID dataset, evaluate on a 2nd Stage-1 dataset (eval-only)
-python -m amortized_ue.stage2.run --ood --ood_dataset squad --ood_num_samples 1000
-#   -> stage2/runs/<name>/ood_results_<dataset>.json
+python -m amortized_ue.stage2.run --ood --ood_dataset squad --reuse_selection --seeds 5
+#   -> stage2/runs/<name>/ood_results_<dataset>_multiseed.json
 ```
 
-### In-distribution results (Llama-2-7b-chat / trivia_qa, N=2000; selected TBG layer 12, k=4)
+`--seeds N` runs N trial seeds; each arm trains on its own deterministic `(seed, trial, arm)`
+RNG stream (init + shuffle + dropout), so the arms are decoupled from the sweep/k-ablation and
+`build`/`build_ood` agree per seed. `--reuse_selection` skips the sweep and reuses the saved
+(position, layer, k). Single-seed runs (`results.json` / `ood_results_<ds>.json`) still exist
+but the text-arm figures there are noise-dominated — **use the multi-seed numbers below.**
 
-| arm (test split) | Spearman | AUROC | RMSE | R² |
-|------------------|---------:|------:|-----:|---:|
-| z (hidden only)  | 0.459 | 0.758 | 0.574 | 0.176 |
-| z + question     | 0.414 | 0.733 | 0.591 | 0.129 |
-| **z + question + response** | **0.575** | **0.795** | **0.497** | **0.384** |
+### Results — MULTI-SEED (5 seeds; Llama-2-7b-chat, TBG layer 12, k=4). Reference result.
 
-z-only ≈ the single-layer linear-probe reference (0.805 AUROC), i.e. the soft token is
-used; adding the **canonical response** is what lifts performance (the question alone
-does not). Reference: a plain logistic probe on the same hidden state reaches ~0.805 AUROC.
+Test AUROC, mean ± std over 5 seeds (ID = trivia_qa N=2000; OOD = train trivia → eval squad N=1000):
 
-### OOD results (train trivia_qa → eval squad, N=1000, eval-only)
-
-Same target LLM, apply the trivia-trained proxy to squad's stored `z` + text. Rank metrics
-(Spearman/AUROC) are the OOD signal; RMSE/R² are miscalibrated OOD (label-scale shift) by design.
-
-| arm | trivia-test Spearman / AUROC | **squad-OOD Spearman / AUROC** |
+| arm | ID (trivia) AUROC | OOD (squad) AUROC |
 |-----|:---:|:---:|
-| z (hidden only) | 0.466 / 0.757 | **0.287 / 0.622** |
-| z + question | 0.372 / 0.709 | 0.081 / 0.513 (chance) |
-| z + question + response | 0.414 / 0.737 | **0.291 / 0.618** |
+| z (hidden only)          | **0.763 ± 0.010** (best) | 0.622 ± 0.016 |
+| z + question             | 0.744 ± 0.032 | 0.586 ± 0.045 (worst) |
+| z + question + response  | 0.722 ± 0.017 | **0.650 ± 0.005** (best) |
 
-**Headline:** the hidden-state (`z`) signal transfers across a real distribution shift
-(~0.62 AUROC OOD), but the in-distribution *text* advantage does **not** (z ≈ z+q+resp OOD)
-— **`z` is the domain-robust feature**. squad is a genuine shift (mean acc 0.24 / mean CAE 1.50
-vs trivia's 0.59 / 0.59). Caveat: text-arm metrics vary run-to-run (see to-do #1) — treat
-single-run text magnitudes as noisy pending a multi-seed pass.
+Paired per-seed differences (arm − z), sign consistent across **all 5 seeds**:
+
+- **In-distribution: text HURTS.** z+q+resp − z = −0.041 AUROC (negative 5/5). z-only is the
+  strongest and most stable arm (≈ the 0.805 single-layer probe reference — the soft token is used).
+- **Out-of-distribution: the response HELPS.** z+q+resp − z = +0.027 AUROC / +0.045 Spearman
+  (positive 5/5). Under a real shift z degrades (0.763→0.622) and the canonical response supplies
+  transferable signal.
+- **The question alone (z+q) hurts in both regimes** — the *response*, not the question, carries signal.
+
+**Headline:** in-distribution the hidden state `z` alone is best and added text is a distractor;
+under domain shift `z` degrades and the canonical **response** recovers signal. This **supersedes**
+the earlier single-run claims (ID "text helps 0.795>0.758" and OOD "text doesn't transfer"), both
+of which were lucky/unlucky seeds. squad is a genuine shift (mean acc 0.24 / mean CAE 1.50 vs
+trivia's 0.59 / 0.59). OOD RMSE/R² are miscalibrated by design (label-scale shift).
 
 ### Where results are saved
 
 - Stage-1 records: `amortized_ue/data/stage1/<run_name>/records/<id>.pt` + `manifest.json` (gitignored).
-- Stage-2 ID: `amortized_ue/stage2/runs/stage2_<model>_<dataset>_n<N>_full/results.json` (gitignored).
-- Stage-2 OOD: `.../ood_results_<ood_dataset>.json` in the same run dir.
+- Stage-2 ID multi-seed: `.../stage2_<model>_<dataset>_n<N>_full/results_multiseed.json` (gitignored);
+  single-seed `results.json` retained for provenance.
+- Stage-2 OOD multi-seed: `.../ood_results_<ood_dataset>_multiseed.json` in the same run dir.
+- Logs: `amortized_ue/stage2/logs/multiseed_{id,ood}.log`.
 - W&B artifacts (project `amortized_ue_stage1`): `stage1_records:v0` (n400), `stage1_records_n2000`.
 
 ### To-do
 
-1. **Per-arm reseeding + multi-seed run** — quantify text-arm (z+q / z+q+resp) variance (mean±std).
+1. **(DONE 2026-07-02)** Per-arm reseeding + multi-seed run — implemented; 5-seed ID + OOD above.
 2. **Multi-layer projector ablation** — feed a band of layers (`n_layers_in > 1` already supported).
 3. **Full 2×2 OOD matrix** — also train on squad, eval on trivia_qa.
-4. **Hyperparameter pass** on the z+q+resp arm (lr, LoRA rank, epochs).
+4. **Hyperparameter pass** — lr, LoRA rank, epochs (winning arm is regime-dependent: z-only ID,
+   z+q+resp OOD).
 
 ### Stage 2 files
 

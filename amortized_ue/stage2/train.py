@@ -108,6 +108,45 @@ class Trainer:
     def reset_trainable(self):
         self._restore(self._fresh_state)
 
+    def reseed(self, seed: int):
+        """Reset the numpy and torch RNG streams (model init, batch shuffle, dropout)."""
+        seed = int(seed) % (2 ** 31 - 1)
+        self.rng = np.random.default_rng(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
+    @staticmethod
+    def _derive_seed(base: int, trial: int, tag: str) -> int:
+        """Deterministic per-(base, trial, arm) seed, independent of prior RNG use."""
+        import hashlib
+        return int(hashlib.sha256(f"{base}:{trial}:{tag}".encode()).hexdigest()[:8], 16)
+
+    def train_arms_trial(self, position, layer, k, arms, trial_seed, ood_data=None):
+        """Train every arm from a shared, trial-seeded init and evaluate each.
+
+        The init (projector/REG/head/LoRA) is reinitialised once per trial under an
+        (init) seed so all arms in a trial share the same starting point; each arm then
+        gets its own (seed, trial, arm) shuffle/dropout stream. Because these streams are
+        derived — not inherited from the sweep/k-ablation — build and build_ood produce
+        identical arm results for the same trial_seed. Returns {arm: {"val","test"[,"ood"]}}.
+        """
+        self.set_k(k)                                             # projector at the selected k
+        self.reseed(self._derive_seed(self.cfg.seed, trial_seed, "init"))
+        self.model.reinit_trainable()                             # trial-specific shared init
+        self._fresh_state = self._snapshot_trainable()
+        out = {}
+        for arm in arms:
+            self.reset_trainable()                                # same init for every arm
+            self.reseed(self._derive_seed(self.cfg.seed, trial_seed, arm))
+            self.train_arm(position, layer, arm=arm, epochs=self.cfg.epochs)
+            entry = {"val": self.evaluate(position, layer, arm, "val"),
+                     "test": self.evaluate(position, layer, arm, "test")}
+            if ood_data is not None:
+                entry["ood"] = self.evaluate_ood(position, layer, arm, ood_data)
+            out[arm] = entry
+        return out
+
     def set_k(self, k: int):
         """Swap the projector for a new k (k ablation) and refresh the fresh-state snapshot."""
         self.model.set_k(k)

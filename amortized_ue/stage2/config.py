@@ -89,6 +89,15 @@ class Stage2Config:
     grad_clip: float = 1.0
     seed: int = 42
 
+    # --- multi-seed arm training (variance study) -------------------------------
+    # Each arm is trained under its own deterministic (seed, trial_seed, arm) RNG
+    # stream — model re-init, batch-shuffle order and dropout — independent of the
+    # sweep/k-ablation consumption. This makes build and build_ood agree for a given
+    # seed and gives a mean±std per arm across trials, so the text-arm advantage can
+    # be tested against run-to-run noise (Stage-2 to-do #1).
+    arm_trial_seeds: tuple = (0, 1, 2)           # trial seeds for the arm variance study
+    reuse_selection: bool = False                # skip sweep/k-ablation; reuse saved/override (pos,layer,k)
+
     # --- target transform -------------------------------------------------------
     target_transform: str = "standardize"       # z-score on train; report orig space
 
