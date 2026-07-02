@@ -22,6 +22,10 @@ class Stage2Config:
     stage1_num_samples: int = 2000             # big-data run (n2000_full)
     stage1_load_source: str = "local"          # "local" | "wandb"
 
+    # --- OOD evaluation (train on stage1_dataset, eval on a 2nd dataset) ---------
+    ood_dataset: str | None = None             # e.g. "squad"; None disables OOD
+    ood_num_samples: int = 1000                # size of the OOD Stage-1 dataset
+
     # --- proxy backbone (frozen; not to be changed) -----------------------------
     proxy_model: str = "meta-llama/Llama-3.2-3B"   # official, gated access cleared
     backbone_dtype: str = "bfloat16"
@@ -35,8 +39,9 @@ class Stage2Config:
     select_pos_layer: bool = True
     sweep_positions: tuple = ("TBG", "SLT")    # both physical positions
     sweep_layers: tuple = tuple(range(33))     # all 33 (embedding + 32 layers)
-    selected_position: str | None = None       # filled in after selection
+    selected_position: str | None = None       # filled in after selection (or OOD override)
     selected_layer: int | None = None
+    selected_k: int | None = None              # fixed k for OOD (else read from prior results.json)
     select_metric: str = "val_spearman"        # sweep selection: val Spearman (higher=better)
     select_arm: str = "z"                      # selection uses the z-only arm
     select_k_soft_tokens: int = 4              # (pos,layer) selection done at k=4

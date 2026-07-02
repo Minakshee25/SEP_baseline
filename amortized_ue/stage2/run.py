@@ -135,10 +135,68 @@ def build(cfg: Stage2Config) -> dict:
     return result
 
 
+def _load_selected(cfg: Stage2Config) -> dict:
+    """Read the selected (position, layer, k) from the in-distribution run's results.json,
+    falling back to explicit config overrides."""
+    path = os.path.join(cfg.run_dir(), "results.json")
+    if os.path.exists(path):
+        sel = json.load(open(path)).get("selected", {})
+        if sel.get("position") is not None:
+            return {"position": sel["position"], "layer": sel["layer"], "k": sel["k"]}
+    if cfg.selected_position is None or cfg.selected_layer is None or cfg.selected_k is None:
+        raise RuntimeError(
+            "No prior results.json and no selected_position/layer/k in config; "
+            "run the in-distribution build first or set the overrides.")
+    return {"position": cfg.selected_position, "layer": cfg.selected_layer, "k": cfg.selected_k}
+
+
+def build_ood(cfg: Stage2Config) -> dict:
+    """OOD eval: train each arm on the in-distribution dataset, evaluate on the OOD dataset.
+
+    Uses the (position, layer, k) already selected in-distribution (no re-selection). The
+    OOD dataset is never used for training or selection.
+    """
+    import dataclasses
+    assert cfg.ood_dataset, "set cfg.ood_dataset (e.g. 'squad')"
+    data = Stage2Data(cfg)                                    # in-distribution (train)
+    ood_cfg = dataclasses.replace(cfg, stage1_dataset=cfg.ood_dataset,
+                                  stage1_num_samples=cfg.ood_num_samples, smoke=False)
+    ood_data = Stage2Data(ood_cfg)                            # OOD (eval only)
+    logging.info("OOD: train on %s (N=%d) -> eval on %s (N=%d, all rows)",
+                 cfg.stage1_dataset, len(data.ids), cfg.ood_dataset, len(ood_data.ids))
+
+    sel = _load_selected(cfg)
+    pos, layer, k = sel["position"], sel["layer"], sel["k"]
+    logging.info("Using in-distribution selection: position=%s layer=%d k=%d", pos, layer, k)
+
+    trainer = Trainer(cfg, data)
+    trainer.set_k(k)
+    arms = {}
+    for arm in cfg.arms:
+        trainer.reset_trainable()
+        trainer.train_arm(pos, layer, arm=arm, epochs=cfg.epochs)
+        id_test = trainer.evaluate(pos, layer, arm, "test")
+        ood = trainer.evaluate_ood(pos, layer, arm, ood_data)
+        arms[arm] = {"id_test": id_test, "ood": ood}
+        logging.info("arm=%-9s ID test spearman=%.4f auroc=%.4f | OOD(%s) spearman=%.4f auroc=%.4f",
+                     arm, id_test["spearman"], id_test["auroc"], cfg.ood_dataset,
+                     ood["spearman"], ood["auroc"])
+
+    result = {"selected": sel, "in_distribution": cfg.stage1_dataset, "ood": cfg.ood_dataset, "arms": arms}
+    out = os.path.join(cfg.run_dir(), f"ood_results_{cfg.ood_dataset}.json")
+    with open(out, "w") as f:
+        json.dump({"config": cfg.as_dict(), **result}, f, indent=2)
+    logging.info("Wrote OOD results -> %s", out)
+    return result
+
+
 def _parse() -> tuple[Stage2Config, str]:
     p = argparse.ArgumentParser(description="Stage 2 amortized-UE proxy.")
     p.add_argument("--report", action="store_true", help="pre-launch checks only")
     p.add_argument("--smoke", action="store_true")
+    p.add_argument("--ood", action="store_true", help="train ID, evaluate on --ood_dataset")
+    p.add_argument("--ood_dataset", default=None)
+    p.add_argument("--ood_num_samples", type=int, default=Stage2Config.ood_num_samples)
     p.add_argument("--k_soft_tokens", type=int, default=Stage2Config.k_soft_tokens)
     p.add_argument("--proxy_model", default=Stage2Config.proxy_model)
     p.add_argument("--lr", type=float, default=Stage2Config.lr)
@@ -148,10 +206,11 @@ def _parse() -> tuple[Stage2Config, str]:
     p.add_argument("--smoke_num_prompts", type=int, default=Stage2Config.smoke_num_prompts)
     p.add_argument("--smoke_steps", type=int, default=Stage2Config.smoke_steps)
     a = p.parse_args()
-    mode = "report" if a.report else ("smoke" if a.smoke else "full")
+    mode = "report" if a.report else ("smoke" if a.smoke else ("ood" if a.ood else "full"))
     cfg = Stage2Config(
         k_soft_tokens=a.k_soft_tokens, proxy_model=a.proxy_model, lr=a.lr, epochs=a.epochs,
         batch_size=a.batch_size, stage1_num_samples=a.stage1_num_samples,
+        ood_dataset=a.ood_dataset, ood_num_samples=a.ood_num_samples,
         smoke=a.smoke, smoke_num_prompts=a.smoke_num_prompts, smoke_steps=a.smoke_steps)
     return cfg, mode
 
@@ -163,5 +222,7 @@ if __name__ == "__main__":
         report(cfg)
     elif mode == "smoke":
         run_smoke(cfg)
+    elif mode == "ood":
+        build_ood(cfg)
     else:
         build(cfg)
