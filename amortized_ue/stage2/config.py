@@ -106,6 +106,17 @@ class Stage2Config:
     val_size: float = 0.2                        # of the train+val remainder
     split_seed: int = 42
 
+    # --- checkpointing / eval ---------------------------------------------------
+    # Trained models are saved as per-(arm, seed) checkpoints holding ONLY the
+    # trainable params (projector, REG, head, LoRA) + metadata — never the frozen
+    # backbone. This lets one trained proxy be evaluated on many datasets and target
+    # models without retraining (the `--eval` mode). See checkpoint.py.
+    save_checkpoints: bool = False               # build: save each arm/seed after training
+    push_wandb: bool = False                     # build: also push the checkpoint dir as a W&B artifact
+    wandb_project: str = "amortized_ue_stage2"   # W&B project for stage-2 checkpoint artifacts
+    ckpt_dir: str | None = None                  # eval: dir of *.pt checkpoints (default run_dir/checkpoints)
+    eval_datasets: tuple = ()                    # eval: extra "name:N" datasets to score (all-rows / OOD)
+
     # --- output -----------------------------------------------------------------
     output_dir: str = _DEFAULT_OUT
     run_name: str | None = None

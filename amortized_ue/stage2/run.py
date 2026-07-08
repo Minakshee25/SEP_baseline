@@ -162,10 +162,14 @@ def build(cfg: Stage2Config) -> dict:
         logging.info("Selected k=%d (val_spearman=%.4f)", best_k, kbest["spearman"])
 
     # --- multi-seed arm training: each arm on its own (seed,trial,arm) stream ----
+    ckpt_dir = os.path.join(cfg.run_dir(), "checkpoints") if cfg.save_checkpoints else None
+    if ckpt_dir:
+        logging.info("Saving per-(arm,seed) checkpoints under %s", ckpt_dir)
     trials = []
     for s in cfg.arm_trial_seeds:
         logging.info("=== arm trial seed=%d ===", s)
-        arm_res = trainer.train_arms_trial(pos, layer, best_k, cfg.arms, trial_seed=s)
+        arm_res = trainer.train_arms_trial(pos, layer, best_k, cfg.arms, trial_seed=s,
+                                           save_dir=ckpt_dir)
         trials.append({"seed": s, "arms": arm_res})
         for arm in cfg.arms:
             m = arm_res[arm]["test"]
@@ -188,6 +192,10 @@ def build(cfg: Stage2Config) -> dict:
     with open(out, "w") as f:
         json.dump({"config": cfg.as_dict(), **result}, f, indent=2)
     logging.info("Wrote results -> %s", out)
+
+    if ckpt_dir and cfg.push_wandb:
+        _push_checkpoints_wandb(cfg, ckpt_dir,
+                                selected={"position": pos, "layer": layer, "k": best_k})
     return result
 
 
@@ -258,6 +266,104 @@ def build_ood(cfg: Stage2Config) -> dict:
     return result
 
 
+# ------------------------------ checkpoint eval -------------------------------
+def _summarize_by_arm(by_arm: dict) -> dict:
+    """{arm: [per-seed metric dicts]} -> {arm: {metric: mean±std}}."""
+    return {arm: {k: _stats([r[k] for r in rows]) for k in _AGG_KEYS}
+            for arm, rows in by_arm.items()}
+
+
+def _paired_by_arm(by_arm: dict, ref: str = "z") -> dict:
+    """Per-seed paired (arm - ref) differences, aligned by seed."""
+    ref_by_seed = {r["seed"]: r for r in by_arm.get(ref, [])}
+    out = {}
+    for arm, rows in by_arm.items():
+        if arm == ref:
+            continue
+        entry = {}
+        for k in ("spearman", "auroc"):
+            diffs = [r[k] - ref_by_seed[r["seed"]][k] for r in rows if r["seed"] in ref_by_seed]
+            s = _stats(diffs)
+            s["frac_positive"] = float(np.mean([d > 0 for d in diffs])) if diffs else float("nan")
+            entry[k] = s
+        out[f"{arm}_minus_{ref}"] = entry
+    return out
+
+
+def run_eval(cfg: Stage2Config) -> dict:
+    """Load saved checkpoints and score them on one or more datasets — NO retraining.
+
+    The checkpoints' own training dataset is scored on its held-out TEST split (ID);
+    any `--eval_datasets name:N` are scored on ALL rows (OOD). Results are aggregated
+    per arm across seeds (mean±std) exactly like the training runs, so this reproduces
+    the ID/OOD numbers without recomputing the models.
+    """
+    import glob
+    import dataclasses
+    from collections import defaultdict
+    from amortized_ue.stage2.checkpoint import load_checkpoint, read_meta
+
+    ckpt_dir = cfg.ckpt_dir or os.path.join(cfg.run_dir(), "checkpoints")
+    paths = sorted(glob.glob(os.path.join(ckpt_dir, "*.pt")))
+    assert paths, f"no *.pt checkpoints in {ckpt_dir}"
+    logging.info("Eval: %d checkpoints in %s", len(paths), ckpt_dir)
+
+    first = read_meta(paths[0])
+    id_ds, id_n = first["train_dataset"], first["train_num_samples"]
+    targets = [(id_ds, id_n, "test")]                       # ID: held-out test split
+    for spec in cfg.eval_datasets:                          # OOD: all rows
+        name, n = spec.split(":")
+        targets.append((name, int(n), "all"))
+
+    model, trainer = None, None
+    out = {"ckpt_dir": ckpt_dir, "id_dataset": id_ds, "target_model": first["stage1_model_name"],
+           "datasets": {}}
+    for ds, n, split in targets:
+        eval_cfg = dataclasses.replace(cfg, stage1_dataset=ds, stage1_num_samples=n, smoke=False)
+        eval_data = Stage2Data(eval_cfg)
+        by_arm = defaultdict(list)
+        for p in paths:
+            model, meta, transform = load_checkpoint(p, model=model)
+            if trainer is None:
+                trainer = Trainer(cfg, eval_data, model=model)
+            trainer.data = eval_data
+            m = trainer.evaluate_on(meta["position"], meta["layer"], meta["arm"],
+                                    eval_data, transform, split=split)
+            by_arm[meta["arm"]].append({"seed": meta["seed"], **m})
+        summary = _summarize_by_arm(by_arm)
+        out["datasets"][ds] = {"split": split, "n": len(eval_data.ids),
+                               "summary": summary, "paired": _paired_by_arm(by_arm, ref="z"),
+                               "per_seed": {a: rows for a, rows in by_arm.items()}}
+        for arm in sorted(by_arm):
+            au, sp = summary[arm]["auroc"], summary[arm]["spearman"]
+            logging.info("eval %-9s [%-4s] arm=%-9s auroc %.4f±%.4f  spearman %.4f±%.4f",
+                         ds, split, arm, au["mean"], au["std"], sp["mean"], sp["std"])
+
+    dest = os.path.join(ckpt_dir, "eval_summary.json")
+    with open(dest, "w") as f:
+        json.dump({"config": cfg.as_dict(), **out}, f, indent=2)
+    logging.info("Wrote eval summary -> %s", dest)
+
+    if cfg.push_wandb:
+        _push_checkpoints_wandb(cfg, ckpt_dir, selected={k: first[k] for k in ("position", "layer", "k")})
+    return out
+
+
+def _push_checkpoints_wandb(cfg: Stage2Config, ckpt_dir: str, selected: dict) -> None:
+    """Push the local checkpoint dir as a versioned W&B artifact (type=model)."""
+    import wandb
+    name = f"stage2_ckpts_{cfg.stage1_model_name}_{cfg.stage1_dataset}_n{cfg.stage1_num_samples}"
+    run = wandb.init(project=cfg.wandb_project, entity=os.environ.get("WANDB_ENT"),
+                     name=name, job_type="checkpoint", config=cfg.as_dict())
+    art = wandb.Artifact(name, type="model",
+                         metadata={"selected": selected, "seeds": list(cfg.arm_trial_seeds),
+                                   "arms": list(cfg.arms), "proxy_model": cfg.proxy_model})
+    art.add_dir(ckpt_dir)
+    run.log_artifact(art)
+    run.finish()
+    logging.info("Pushed checkpoints to W&B artifact %r (project %s)", name, cfg.wandb_project)
+
+
 def _parse() -> tuple[Stage2Config, str]:
     p = argparse.ArgumentParser(description="Stage 2 amortized-UE proxy.")
     p.add_argument("--report", action="store_true", help="pre-launch checks only")
@@ -277,8 +383,19 @@ def _parse() -> tuple[Stage2Config, str]:
                    help="arm trial seeds: comma list '0,1,2' or an int N -> 0..N-1")
     p.add_argument("--reuse_selection", action="store_true",
                    help="skip the sweep/k-ablation; reuse the saved (pos,layer,k)")
+    p.add_argument("--save_checkpoints", action="store_true",
+                   help="build: save a checkpoint per (arm, seed) under run_dir/checkpoints")
+    p.add_argument("--push_wandb", action="store_true",
+                   help="build: also push the checkpoint dir as a W&B artifact")
+    p.add_argument("--eval", action="store_true",
+                   help="load saved checkpoints and score them (no retraining)")
+    p.add_argument("--ckpt_dir", default=None,
+                   help="eval: dir of *.pt checkpoints (default run_dir/checkpoints)")
+    p.add_argument("--eval_datasets", default=None,
+                   help="eval: extra OOD datasets as 'name:N,name:N' (scored on all rows)")
     a = p.parse_args()
-    mode = "report" if a.report else ("smoke" if a.smoke else ("ood" if a.ood else "full"))
+    mode = ("report" if a.report else "smoke" if a.smoke else
+            "eval" if a.eval else "ood" if a.ood else "full")
 
     if a.seeds is None:
         seeds = Stage2Config.arm_trial_seeds
@@ -286,12 +403,15 @@ def _parse() -> tuple[Stage2Config, str]:
         seeds = tuple(int(x) for x in a.seeds.split(","))
     else:
         seeds = tuple(range(int(a.seeds)))
+    eval_datasets = tuple(a.eval_datasets.split(",")) if a.eval_datasets else ()
 
     cfg = Stage2Config(
         k_soft_tokens=a.k_soft_tokens, proxy_model=a.proxy_model, lr=a.lr, epochs=a.epochs,
         batch_size=a.batch_size, stage1_num_samples=a.stage1_num_samples,
         ood_dataset=a.ood_dataset, ood_num_samples=a.ood_num_samples,
         arm_trial_seeds=seeds, reuse_selection=a.reuse_selection,
+        save_checkpoints=a.save_checkpoints, push_wandb=a.push_wandb,
+        ckpt_dir=a.ckpt_dir, eval_datasets=eval_datasets,
         smoke=a.smoke, smoke_num_prompts=a.smoke_num_prompts, smoke_steps=a.smoke_steps)
     return cfg, mode
 
@@ -303,6 +423,8 @@ if __name__ == "__main__":
         report(cfg)
     elif mode == "smoke":
         run_smoke(cfg)
+    elif mode == "eval":
+        run_eval(cfg)
     elif mode == "ood":
         build_ood(cfg)
     else:

@@ -1,0 +1,65 @@
+{
+  "purpose": "Reconcile the two trivia_qa-test AUROC/Spearman numbers that disagreed between the main N=2000 run and the OOD run's trivia-test reference column.",
+  "generated": "2026-07-02",
+
+  "test_split": {
+    "verdict_identical": true,
+    "evidence": "Both runs build Stage2Data with identical config (trivia_qa, N=2000, split_seed=42, test_size=0.1, val_size=0.2). Split reproduced independently from stage-1 records: train/val/test = 1440/360/200. First 5 test ids: bb_2552--20/20_518822.txt#0_0, bb_3944--191/191_920236.txt#0_1, bb_4382--79/79_930359.txt#0_0, bb_5083--184/184_944999.txt#0_0, bb_5497--152/152_643813.txt#0_2.",
+    "n_test": 200
+  },
+
+  "preprocessing": {
+    "verdict_identical": true,
+    "z_source_file": "amortized_ue/data/stage1/Llama-2-7b-chat_trivia_qa_n2000_full/records/*.pt (loaded read-only via load_records in both runs)",
+    "position": "TBG",
+    "layer": 12,
+    "k_soft_tokens": 4,
+    "label_source": "labels.cluster_assignment_entropy (continuous)",
+    "auroc_binarisation": "train best_split threshold (data.py best_split), identical in both runs"
+  },
+
+  "checkpoint": {
+    "verdict_same_checkpoint": false,
+    "reason": "NO checkpoint is saved by either run. build() (main) and build_ood() (OOD) contain no torch.save / state_dict persistence anywhere in amortized_ue/stage2/. The best-val-RMSE state is snapshotted in memory during train_arm() and discarded when the process exits. The two trivia-test numbers therefore come from TWO INDEPENDENT trainings, not one reusable checkpoint."
+  },
+
+  "reported_numbers": {
+    "main_n2000_run__arms.<arm>.test": {
+      "z":        {"spearman": 0.4586, "auroc": 0.7578, "rmse": 0.5743, "r2": 0.1762},
+      "z_q":      {"spearman": 0.4136, "auroc": 0.7325, "rmse": 0.5906, "r2": 0.1290},
+      "z_q_resp": {"spearman": 0.5748, "auroc": 0.7954, "rmse": 0.4968, "r2": 0.3837},
+      "source": "runs/stage2_Llama-2-7b-chat_trivia_qa_n2000_full/results.json"
+    },
+    "ood_run_trivia_test_reference__arms.<arm>.id_test": {
+      "z":        {"spearman": 0.4657, "auroc": 0.7571, "rmse": 0.5747, "r2": 0.1753},
+      "z_q":      {"spearman": 0.3715, "auroc": 0.7092, "rmse": 0.5888, "r2": 0.1342},
+      "z_q_resp": {"spearman": 0.4142, "auroc": 0.7371, "rmse": 0.5776, "r2": 0.1668},
+      "source": "runs/stage2_Llama-2-7b-chat_trivia_qa_n2000_full/ood_results_squad.json"
+    }
+  },
+
+  "diagnosis": {
+    "cause": "Training stochasticity from a divergent RNG stream (NOT a split/preprocessing/label bug, NOT a checkpoint mismatch).",
+    "mechanism": "The Trainer seeds np/torch RNG ONCE in __init__. build() runs the (pos,layer) sweep (2 positions x 33 layers) and the k-ablation (k in {1,4,8}) BEFORE training the three arms; each reset_trainable/set_k/permutation advances the shared RNG. build_ood() skips the sweep and k-ablation and trains the arms immediately. So for a given arm the projector init, LoRA init, and per-epoch minibatch shuffle order differ between the two runs.",
+    "why_z_is_stable_but_text_arms_are_not": "z-only (0.7578 vs 0.7571, delta 0.0007 AUROC) is a low-variance, well-conditioned fit over a fixed feature and converges to essentially the same solution regardless of RNG. The text arms carry more trainable capacity (LoRA over text tokens) and are higher-variance: z_q_resp swings 0.7954 vs 0.7371 (delta 0.058 AUROC / 0.16 Spearman).",
+    "conclusion": "Neither 0.795 nor 0.737 is 'the correct' in-domain number. Both are valid single-draw samples of a stochastic procedure. The true value is a distribution whose mean+/-std requires multiple seeds. z-only ~0.757 is reliable as reported."
+  },
+
+  "se_oracle": {
+    "definition": "roc_auc_score(incorrect_flag, true_SE) on the canonical 200-example test split. incorrect_flag = (canonical squad-F1 accuracy < 0.5). This is the ceiling for the DOWNSTREAM task (using SE to flag wrong answers), computed from stage-1 records with no proxy model and no retraining.",
+    "test_n": 200,
+    "test_n_correct": 130,
+    "test_n_incorrect": 70,
+    "test_mean_accuracy": 0.6500,
+    "test_mean_SE": 0.5530,
+    "se_oracle_auroc_incorrect_TEST": 0.7836,
+    "se_oracle_auroc_incorrect_ALL_2000": 0.7874,
+    "caveat": "This oracle predicts CORRECTNESS from true SE. The proxy arm AUROCs above predict BINARISED SE (an internal target), so the two are related references, not the same quantity. Reported here because it was missing from the comparison table and bounds the useful signal."
+  },
+
+  "step5_definitive_proxy_reeval": {
+    "status": "NOT EXECUTABLE as specified",
+    "reason": "Step 5 requires loading 'the best checkpoint that produced 0.795/0.575' and re-evaluating it. That checkpoint does not exist on disk (no run saves one) and cannot be reconstructed. The only way to obtain a definitive proxy number is to retrain, which the task constraints explicitly forbid ('Do NOT re-run Stage 2 training').",
+    "recommended_resolution": "Run the planned per-arm reseeding + multi-seed experiment (amortized_ue/CLAUDE.md to-do item 1): train each arm under >=5 seeds and report mean+/-std for all arms, both from build() and build_ood() code paths, to bound the text-arm variance. This needs explicit user go-ahead because it is retraining."
+  }
+}

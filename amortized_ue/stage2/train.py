@@ -86,13 +86,15 @@ def regression_and_ranking(pred_orig: np.ndarray, y_raw: np.ndarray, y_bin: np.n
 class Trainer:
     """Holds one proxy (backbone loaded once) and trains/evaluates it per (pos, layer, arm)."""
 
-    def __init__(self, cfg: Stage2Config, data: Stage2Data, device: str | None = None):
+    def __init__(self, cfg: Stage2Config, data: Stage2Data, device: str | None = None,
+                 model: ProxyModel | None = None):
         self.cfg = cfg
         self.data = data
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.rng = np.random.default_rng(cfg.seed)
         torch.manual_seed(cfg.seed)
-        self.model = ProxyModel(cfg, h_in=data.hidden_size).to(self.device)
+        # `model` lets an eval path reuse an already-loaded backbone (see checkpoint.py)
+        self.model = model if model is not None else ProxyModel(cfg, h_in=data.hidden_size).to(self.device)
         self._fresh_state = self._snapshot_trainable()
 
     # -- snapshot/restore every trainable param so candidates reuse the loaded backbone --
@@ -122,7 +124,45 @@ class Trainer:
         import hashlib
         return int(hashlib.sha256(f"{base}:{trial}:{tag}".encode()).hexdigest()[:8], 16)
 
-    def train_arms_trial(self, position, layer, k, arms, trial_seed, ood_data=None):
+    def save_checkpoint(self, path, position, layer, arm, seed):
+        """Write a checkpoint (trainable params + metadata) for the current model state."""
+        from amortized_ue.stage2.checkpoint import save_checkpoint as _save
+        meta = {
+            "arm": arm, "seed": int(seed),
+            "position": position, "layer": int(layer), "k": int(self.cfg.k_soft_tokens),
+            "h_in": int(self.data.hidden_size),
+            "stage1_model_name": self.cfg.stage1_model_name,
+            "train_dataset": self.cfg.stage1_dataset,
+            "train_num_samples": int(self.cfg.stage1_num_samples),
+            "proxy_model": self.cfg.proxy_model,
+            "transform": {"kind": self.cfg.target_transform,
+                          "mean": float(self.data.transform.mean),
+                          "std": float(self.data.transform.std)},
+            "config": self.cfg.as_dict(),
+        }
+        _save(self.model, meta, path)
+
+    @torch.no_grad()
+    def evaluate_on(self, position, layer, arm, eval_data, transform, split="all"):
+        """Score the current model on `eval_data`, decoding with the given (training)
+        transform. split='test' uses the dataset's train-threshold binarisation (ID
+        held-out test); split='all' rebinarises over the eval rows (OOD), matching
+        evaluate() / evaluate_ood() respectively."""
+        self.model.eval()
+        rows = eval_data.split_indices(split)
+        preds = []
+        for i in range(0, len(rows), self.cfg.batch_size):
+            r = rows[i:i + self.cfg.batch_size]
+            preds.append(self._forward_batch(r, position, layer, arm, data=eval_data).float().cpu())
+        pred_orig = transform.decode(torch.cat(preds)).numpy()
+        y_raw = eval_data.labels_raw[rows].numpy()
+        if split == "all":
+            y_bin, _ = eval_data.bin_labels_over(rows)
+        else:
+            y_bin = eval_data.labels_bin[rows].numpy()
+        return regression_and_ranking(pred_orig, y_raw, y_bin)
+
+    def train_arms_trial(self, position, layer, k, arms, trial_seed, ood_data=None, save_dir=None):
         """Train every arm from a shared, trial-seeded init and evaluate each.
 
         The init (projector/REG/head/LoRA) is reinitialised once per trial under an
@@ -140,6 +180,11 @@ class Trainer:
             self.reset_trainable()                                # same init for every arm
             self.reseed(self._derive_seed(self.cfg.seed, trial_seed, arm))
             self.train_arm(position, layer, arm=arm, epochs=self.cfg.epochs)
+            if save_dir is not None:
+                import os
+                os.makedirs(save_dir, exist_ok=True)
+                self.save_checkpoint(os.path.join(save_dir, f"{arm}_seed{trial_seed}.pt"),
+                                     position, layer, arm, trial_seed)
             entry = {"val": self.evaluate(position, layer, arm, "val"),
                      "test": self.evaluate(position, layer, arm, "test")}
             if ood_data is not None:

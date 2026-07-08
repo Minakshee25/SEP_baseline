@@ -126,11 +126,27 @@ Use `amortized_stage2` (a clone of `se_probes` upgraded to `transformers==4.52.4
 ```bash
 python -m amortized_ue.stage2.run --report   # label distribution + subsample checks (no GPU)
 python -m amortized_ue.stage2.run --smoke     # full path, a few prompts, 2 steps
-python -m amortized_ue.stage2.run --reuse_selection --seeds 5   # multi-seed -> results_multiseed.json
-# OOD: train each arm on the ID dataset, evaluate on a 2nd Stage-1 dataset (eval-only)
+# preferred flow: train once WITH checkpoints, then evaluate any dataset without retraining
+python -m amortized_ue.stage2.run --reuse_selection --seeds 5 --save_checkpoints [--push_wandb]
+#   -> results_multiseed.json + checkpoints/<arm>_seed<s>.pt  (+ W&B artifact if --push_wandb)
+python -m amortized_ue.stage2.run --eval --eval_datasets squad:1000 [--push_wandb]
+#   -> loads the checkpoints, scores ID test + squad(all rows) -> checkpoints/eval_summary.json
+# legacy: OOD by retraining (no checkpoints) — kept for reference, superseded by --eval
 python -m amortized_ue.stage2.run --ood --ood_dataset squad --reuse_selection --seeds 5
-#   -> stage2/runs/<name>/ood_results_<dataset>_multiseed.json
 ```
+
+**Checkpointing (train once, evaluate anywhere).** `--save_checkpoints` writes one file per
+`(arm, seed)` under `run_dir/checkpoints/` holding **only the ~13–17M trainable params**
+(projector, REG, head, LoRA) + metadata (selected `(pos,layer,k)`, target-model `h_in`, the
+training label transform, provenance) — **never the frozen 3B backbone** (~50 MB/ckpt, not GB).
+`--eval` reloads them and scores the checkpoints' own dataset on its held-out **test** split (ID)
+plus any `--eval_datasets name:N` on **all rows** (OOD), aggregating per arm across seeds
+(mean±std) — **no retraining**. Verified 2026-07-08: reloaded ID-test AUROCs reproduce the
+training log to 4 dp (`--eval --eval_datasets squad:1000`, see `checkpoints/eval_summary.json`). This is
+how one proxy is evaluated on many datasets, and (by training a second run) across target models
+(the projector input dim `h_in` is read back from each checkpoint). Checkpoints live on
+`/vol/bitbucket` (gitignored — never committed to git); `--push_wandb` mirrors the dir as a
+versioned W&B artifact (`type=model`, project `amortized_ue_stage2`) for durable, shareable storage.
 
 `--seeds N` runs N trial seeds; each arm trains on its own deterministic `(seed, trial, arm)`
 RNG stream (init + shuffle + dropout), so the arms are decoupled from the sweep/k-ablation and

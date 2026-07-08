@@ -1,0 +1,38 @@
+{
+  "purpose": "Record the trivia_qa -> squad OOD numbers alongside the reconciliation, and state why a same-checkpoint recompute (Step 6) is not executable.",
+  "generated": "2026-07-02",
+
+  "setup": {
+    "in_distribution_train": "trivia_qa N=2000 (TBG, layer 12, k=4)",
+    "ood_eval": "squad N=1000 (all rows, eval-only)",
+    "source": "runs/stage2_Llama-2-7b-chat_trivia_qa_n2000_full/ood_results_squad.json"
+  },
+
+  "reported_numbers": {
+    "arms.<arm>.ood (squad)": {
+      "z":        {"spearman": 0.2865, "auroc": 0.6215},
+      "z_q":      {"spearman": 0.0809, "auroc": 0.5130},
+      "z_q_resp": {"spearman": 0.2913, "auroc": 0.6182}
+    },
+    "arms.<arm>.id_test (trivia-test reference, same run)": {
+      "z":        {"spearman": 0.4657, "auroc": 0.7571},
+      "z_q":      {"spearman": 0.3715, "auroc": 0.7092},
+      "z_q_resp": {"spearman": 0.4142, "auroc": 0.7371}
+    }
+  },
+
+  "internal_consistency": {
+    "note": "Within the OOD run, the id_test and ood columns ARE mutually consistent: they use the same trained arm model, the same training-data transform, and the same code path. The domain drop is therefore internally valid when read within this file.",
+    "domain_drop_internally_consistent": {
+      "z":        "0.7571 -> 0.6215 (delta 0.136 AUROC)",
+      "z_q_resp": "0.7371 -> 0.6182 (delta 0.119 AUROC)"
+    },
+    "headline_finding_unchanged": "OOD, z (0.6215) approx z_q_resp (0.6182): the in-domain text advantage does not transfer; the hidden-state feature is the domain-robust signal."
+  },
+
+  "step6_same_checkpoint_ood_reeval": {
+    "status": "NOT EXECUTABLE as specified",
+    "reason": "Step 6 requires the same checkpoint from Step 5. No checkpoint is saved by any run (no torch.save in amortized_ue/stage2/), so the OOD numbers cannot be recomputed from the exact model that produced the main-run 0.795. The existing ood_results_squad.json is already internally self-consistent (id_test and ood share one trained model).",
+    "implication_for_thesis": "Report the OOD drop using THIS run's own internally-consistent reference: 0.737 -> 0.618 for z_q_resp and 0.757 -> 0.622 for z. Do NOT pair the OOD 0.618 against the main-run 0.795, because 0.795 came from a different (unsaved) training. See se_oracle and diagnosis in trivia_test_definitive.json."
+  }
+}

@@ -224,6 +224,25 @@ distractor; under domain shift z degrades (0.763→0.622) and the canonical resp
 complementary, transferable signal. The variance caveat that motivated this task is resolved:
 `build` and `build_ood` now give identical ID-test numbers for a given seed.
 
+**Checkpointing (2026-07-02) — train once, evaluate anywhere.** Previously OOD *retrained* the
+model (no weights were ever saved — only metrics JSON). Now `checkpoint.py` + `--save_checkpoints`
+write one file per `(arm, seed)` under `run_dir/checkpoints/` holding **only the ~13–17M trainable
+params** (projector/REG/head/LoRA) + metadata (selected `(pos,layer,k)`, target-model `h_in`,
+training label transform, provenance) — **never the frozen 3B backbone** (~50 MB/ckpt). `--eval`
+(`run_eval`) reloads them (reusing one backbone load) and scores the ID dataset's held-out **test**
+split plus any `--eval_datasets name:N` on **all rows**, aggregating per arm across seeds — **no
+retraining**. **Reload verified 2026-07-08** (`--eval --eval_datasets squad:1000`, log
+`stage2/logs/eval_reload.log`, output `checkpoints/eval_summary.json`): reloaded ID-test AUROCs
+reproduce the training log to 4 dp (z 0.7626±0.0101, z_q 0.7440±0.0323, z_q_resp 0.7218±0.0170 —
+exact match), and OOD-squad matches the earlier retrain-based OOD run (z 0.622, z_q 0.586,
+z_q_resp 0.650) — confirming the saved checkpoints ARE the trained models and the round-trip is
+correct. (`run_eval` scores each reloaded checkpoint independently; it does not itself assert an
+in-memory-vs-reload diff — the 4-dp reproduction is the evidence.) This is the
+mechanism for "one proxy → many datasets" and, via a second training run, across target models
+(the projector input dim is rebuilt from each checkpoint's `h_in`). `Trainer` now accepts a
+prebuilt `model=` (eval reuses the backbone). Storage: local `/vol/bitbucket` (gitignored) +
+optional `--push_wandb` versioned artifact (`type=model`, project `amortized_ue_stage2`).
+
 ## To-do list (pick up here)
 
 1. **(DONE 2026-07-02)** Per-arm reseeding + multi-seed run — implemented and run (5 seeds, ID
