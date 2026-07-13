@@ -159,7 +159,7 @@ This is a baseline I must reproduce faithfully, not code to improve.
 - Do NOT add new models (Gemma included). New targets are a separate task.
 - Never print or echo environment variables.
 
-## Current state (updated 2026-06-29)
+## Current state (updated 2026-07-13)
 
 **Pipeline proven end-to-end. Real Llama-2-7b-chat N=400 / trivia_qa baseline COMPLETE (Stages 1–4).**
 
@@ -168,7 +168,11 @@ This is a baseline I must reproduce faithfully, not code to improve.
 - **Llama-2-7b-chat baseline run COMPLETE:** N=400, trivia_qa, Stages 1→2 auto-chained. wandb run id `095l3ou2` (`celestial-night-5`), artifacts at `semantic_uncertainty/mn1025/uncertainty/wandb/run-20260624_170438-095l3ou2/files/`.
 - **Llama-2 probe training COMPLETE:** `run_llama2_probe.py` (pointed at run `095l3ou2`) trained SEP + Acc. Pr. at TBG/SLT, 33 layers, SE split 0.814. Per-layer test AUROC — **SEP TBG** mean 0.623 / best layer 18 = 0.695; **SEP SLT** mean 0.608 / best layer 22 = 0.726; **AccPr TBG** mean 0.665 / best layer 11 = 0.795; **AccPr SLT** mean 0.642 / best layer 20 = 0.731. Saved to `semantic_entropy_probes/models/Llama-2-7b-chat_probe_inference.pkl`. Still to do: compare against the SEP paper (arXiv:2406.15927) and reconcile (paper expects SEP highly probeable, often > direct Acc. probe).
 - **Falcon-7b (pipeline sanity, NOT the baseline):** N=400 run `9ddn5y2k` (`spring-planet-4`) + probe training validated the full pipeline; per-layer probes in `models/falcon-7b_smoke_inference.pkl`. N<400 is too few to train probes — `test_size=0.1` can leave a single-class test split and `roc_auc_score`/`log_loss` raise `ValueError: y_true contains only one label`.
-- **`amortized_ue/` (new work, separate from the baseline — Stages 1 & 2 built):** Stage 1 offline SE datasets for Llama-2-7b-chat: trivia_qa N=400 (`stage1_records:v0`) + N=2000 (`stage1_records_n2000`), and squad N=1000 (OOD, local). Stage 2 SLM proxy (Llama-3.2-3B, separate `amortized_stage2` env) COMPLETE, now with a **5-seed multi-seed run** (to-do #1) that is the reference result and supersedes the earlier single-run figures. Test AUROC mean±std (TBG L12/k4): **ID (trivia N=2000)** z-only **0.763±0.010** (best), z+q+resp 0.722±0.017 — in-distribution *text HURTS* (z+q+resp−z negative in 5/5 seeds); **OOD (trivia→squad)** z 0.622±0.016, z+q+resp **0.650±0.005** (best) — under shift the *response HELPS* (z+q+resp−z positive in 5/5). z+q (question alone) hurts in both. The old single-run claims ("text helps ID 0.795>0.758" / "text doesn't transfer OOD") were noise. Full results, save locations, and the to-do list are in `amortized_ue/CLAUDE.md` / `amortized_ue/README.md`.
+- **`amortized_ue/` (new work, separate from the baseline — Stages 1 & 2 built):** Stage 1 offline SE datasets for Llama-2-7b-chat: trivia_qa N=400 (`stage1_records:v0`) + N=2000 (`stage1_records_n2000`), and squad N=1000 (OOD, local). Stage 2 SLM proxy (Llama-3.2-3B, separate `amortized_stage2` env) COMPLETE.
+  - **Reference result (2026-07-13, 5 seeds; z input = TBG L22 + SLT L15 stacked, projector 1024):** ID (trivia N=2000) Spearman **0.602 ± 0.019** / AUROC 0.807; OOD (trivia→squad) Spearman **0.368 ± 0.033**. **Spearman is the primary metric**, not AUROC.
+  - ⚠️ **RETRACTED:** the earlier TBG-L12 claims (*"text hurts in-distribution"*, *"the response helps OOD"*) are **withdrawn**. The 3B (pos,layer) sweep had picked a poor layer; with z starved of information the text arms were *compensating* for it. At the corrected input every text effect collapses to noise. **Do not cite the TBG-L12 numbers.**
+  - **Key negative result:** a plain **ridge** regression on the *same* hidden states beats the 3B proxy (0.642 vs 0.602 ID; 0.437 vs 0.368 OOD), and an **MLP loses to ridge** at every input — the z→SE relation is **linear**, so the frozen backbone has no nonlinear signal to add. Two diagnostics now live in `amortized_ue/`: `linear_ceiling_probe.py` (ridge baseline + the correct way to pick the layer) and `label_noise_ceiling.py` (achievable ceiling ≈0.914 ID / 0.901 squad ⇒ the proxy recovers 66% of achievable ID).
+  - Full results, save locations, and the reprioritised to-do list are in `amortized_ue/CLAUDE.md` / `amortized_ue/README.md`.
 
 ## Outstanding tasks
 

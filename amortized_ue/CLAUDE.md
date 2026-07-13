@@ -47,6 +47,11 @@ prompt construction (`get_make_prompt`, `construct_fewshot_prompt_from_indices`,
 - `loaders.py`    — `load_local` / `load_wandb` / `load_records` (single source switch).
 - `wandb_io.py`   — optional: upload the same local files as a versioned W&B artifact.
 - `data/stage1/`  — outputs (gitignored; tensors are GB-scale).
+- `sanity_probe.py`        — throwaway SEP-style *classification* probe (binarised SE, per-layer AUROC).
+- **`linear_ceiling_probe.py`** — ridge from one hidden state → *continuous* SE. **Use this to pick
+  the (position, layer)**, and as the baseline every Stage-2 result must be reported against.
+- **`label_noise_ceiling.py`**  — split-half reliability of the SE label → the achievable ceiling,
+  which turns a raw Spearman into "% of achievable signal recovered".
 
 ## Record schema (`stage1-v1`, one `.pt` per prompt, keyed by `id`)
 
@@ -146,40 +151,64 @@ gated access is cleared for acct Minakshee25 (official weights, no mirror).
 ```bash
 python -m amortized_ue.stage2.run --report   # label distribution + subsample checks, no GPU work
 python -m amortized_ue.stage2.run --smoke     # full path, few prompts, 2 steps
-python -m amortized_ue.stage2.run             # full run -> stage2/runs/<name>/results.json (gitignored)
-# OOD: train each arm on the ID dataset, evaluate on a 2nd Stage-1 dataset (eval-only)
-python -m amortized_ue.stage2.run --ood --ood_dataset squad --ood_num_samples 1000
-#   -> stage2/runs/<name>/ood_results_<dataset>.json  (reuses selected pos/layer/k from results.json)
+
+# THE REFERENCE COMMAND (2026-07-13). Reproduces the current best result.
+# Do NOT use the built-in 3B (pos,layer) sweep — it is unreliable (it picked TBG L12,
+# which costs ~0.12 Spearman). Pick the layer with linear_ceiling_probe.py instead.
+python -m amortized_ue.stage2.run \
+  --ood --ood_dataset squad --ood_num_samples 1000 \
+  --seeds 5 --reuse_selection \
+  --z_inputs TBG:22,SLT:15 --selected_k 4 \
+  --projector_hidden_dim 1024 \
+  --run_name stage2_Llama-2-7b-chat_trivia_qa_n2000_multipos_p1024
+#   -> ID Spearman 0.602±0.019, OOD 0.368±0.033 (z arm)
+
+# Diagnostics (se_probes env, no GPU) — run these BEFORE any Stage-2 training:
+python -m amortized_ue.linear_ceiling_probe    # exact ridge layer sweep + the baseline to beat
+python -m amortized_ue.label_noise_ceiling     # achievable ceiling; converts Spearman -> % recovered
 ```
+
+**New CLI flags (2026-07-13):** `--selected_position/--selected_layer/--selected_k` force the z
+input (an explicit override now WINS over a saved `results.json`); `--z_inputs TBG:22,SLT:15`
+stacks several positions (h_in widens to n·H automatically); `--projector_hidden_dim` sets the
+bottleneck width (default stays 256 so old runs reproduce — pass 1024 when stacking);
+`--run_name` keeps a new run from overwriting the reference results.
 
 **Where results are saved** (all gitignored — tensors/JSON are large / run-specific):
 - Stage-1 records: `amortized_ue/data/stage1/<run_name>/records/<id>.pt` + `manifest.json`.
-- Stage-2 ID run: `amortized_ue/stage2/runs/stage2_<model>_<dataset>_n<N>_full/results.json`
-  (sweep, k-ablation, and per-arm train/val/test metrics).
-- Stage-2 OOD run: `.../ood_results_<ood_dataset>.json` in the same run dir.
+- **Reference Stage-2 result:** `stage2/runs/..._n2000_multipos_p1024/ood_results_squad_multiseed.json`
+  (log `stage2/logs/multipos_p1024.log`) — TBG22+SLT15, projector 1024, 5 seeds, ID + OOD.
+- **Superseded (provenance only, DO NOT CITE):** `..._n2000_full/results_multiseed.json` and
+  `ood_results_squad_multiseed.json` (TBG L12 — the retracted text-arm claims), and
+  `..._n2000_TBG_L22/` (layer-only fix; its JSON was lost to the `build_ood` mkdir bug, now fixed
+  — the numbers survive in `stage2/logs/tbg_L22_multiseed.log`).
 - W&B: Stage-1 datasets pushed as artifacts (`stage1_records:v0` for n400,
   `stage1_records_n2000` for n2000) in project `amortized_ue_stage1`.
-- The numeric headline results are also recorded below and in the memory file
-  `amortized-ue-stage2.md`.
 
 **Locked Stage-2 design (do not change without asking):**
-- Projector: `LayerNorm(H_in) → Linear(H_in,256) → GELU → Dropout(0.1) → Linear(256,k·d_model)
-  → reshape → per-token unit-normalise × **learnable scalar** (init emb_norm)`. The learnable
-  scale keeps soft tokens in embedding-norm range WITHOUT discarding z magnitude (an earlier
-  hard norm-match did, and underperformed). Interface takes `[B, n_layers_in, H]` so a future
-  multi-layer ablation needs no rewrite (this build uses 1 layer).
+- Projector: `LayerNorm(H_in) → Linear(H_in, hidden) → GELU → Dropout(0.1) → Linear(hidden,
+  k·d_model) → reshape → per-token unit-normalise × learnable scalar (init emb_norm)`.
+  `hidden` is `--projector_hidden_dim` (default 256; **use 1024 when stacking positions** — at 256
+  it is a 16–32× bottleneck and it measurably binds). Interface takes `[B, n_layers_in, H]` and
+  flattens, which is what makes `--z_inputs` work with **no change to `model.py`**.
+  *(The docstring's claim that the learnable scalar preserves z's magnitude is FALSE — see
+  "Known wart" below. Measured cost ~0.01 Spearman, so it is left alone.)*
 - **Separate model per arm** (`z` / `z_q` / `z_q_resp`), each trained on its own fixed,
   **null-free** sequence — no modality dropout, no z-dropout, no learned nulls. z-only =
   `[k soft][REG]`; z+q drops the response tokens; z+q+resp keeps both.
-- z = one stored **(position, layer)** selected by **validation Spearman** via a z-only sweep
-  over both positions × all 33 layers, trained on a fixed **600-example TRAIN-only** subsample
-  (seed 42). `k∈{1,4,8}` ablated on the z-only arm; best k used for all arms.
+- **z input: pick the (position, layer) with `linear_ceiling_probe.py` (exact ridge sweep), NOT
+  with the built-in 3B sweep.** ⚠️ The 3B sweep (600-example subsample, 3 epochs per candidate)
+  is too noisy to rank layers — it selected TBG L12, costing ~0.12 Spearman. It is retained in
+  the code but **should not be used**; pass `--reuse_selection` with an explicit
+  `--z_inputs` / `--selected_*`. Current best input: **`TBG:22,SLT:15`** (the two positions are
+  complementary; extra *layers* within a position are not). `k=4`.
 - Target z-score standardised on train; metrics in original space: **Spearman (primary)**,
-  RMSE, MAE, R², AUROC (via train `best_split`), per arm.
+  RMSE, MAE, R², AUROC (via train `best_split`), per arm. *(R² is meaningless OOD — the label
+  scale shifts, so it goes strongly negative. Rank metrics only, under shift.)*
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout — **not to
   be changed**. bf16 backbone; projector/head fp32, cast at the backbone boundary.
 
-## Current state (updated 2026-07-02)
+## Current state (updated 2026-07-13)
 
 **Stage 1 datasets (target LLM Llama-2-7b-chat):**
 - `trivia_qa ..._n400_full/` — 400 records (mean_acc 0.5775, mean_CAE 0.6138). W&B artifact
@@ -191,38 +220,63 @@ python -m amortized_ue.stage2.run --ood --ood_dataset squad --ood_num_samples 10
 - `squad ..._n1000_full/` — **1000 records** (mean_acc 0.236, mean_CAE 1.498 — a real shift vs
   trivia's 0.59/0.59). Built for OOD evaluation only. Local; not pushed to W&B.
 
-**Stage 2 run COMPLETE — see the MULTI-SEED numbers below, which supersede the earlier
-single-run figures.** Selected **TBG layer 12, k=4** (unchanged). The original single-run
-`results.json` / `ood_results_squad.json` reported z-only ID 0.758, z+q+resp ID 0.795, and
-OOD z 0.622 / z+q+resp 0.618 — but those individual seeds turned out to be **noise-dominated**
-for the text arms (see the multi-seed section). The multi-seed run is the reference result.
+### ⚠️ RETRACTED (2026-07-13): the text-arm findings from the TBG-L12 runs
 
-**Stage 2 MULTI-SEED run COMPLETE (5 seeds, 2026-07-02) — to-do #1. This is the reference
-result and it FLIPS both earlier single-run claims.** Each arm now trains on its own
-deterministic `(seed, trial_seed, arm)` RNG stream (model re-init + batch shuffle + dropout),
-decoupled from the sweep/k-ablation consumption; run via `--seeds N` (+ `--reuse_selection` to
-skip the sweep and reuse TBG/L12/k4). Results in `results_multiseed.json` /
-`ood_results_squad_multiseed.json`; logs in `stage2/logs/multiseed_{id,ood}.log`. Test AUROC
-mean±std:
+The 5-seed TBG-L12 run (2026-07-02) was the reference result and produced two headline
+claims. **Both are now retracted.** They were artefacts of a badly chosen z, not real
+effects. Kept here so they are not re-derived by accident:
 
-| arm | ID (trivia) | OOD (squad) |
-|-----|-------------|-------------|
-| z (hidden only)      | **0.763 ± 0.010** (best) | 0.622 ± 0.016 |
-| z + question         | 0.744 ± 0.032 | 0.586 ± 0.045 (worst) |
-| z + question + resp  | 0.722 ± 0.017 | **0.650 ± 0.005** (best) |
+- ~~"in-distribution **text HURTS**" (z+q+resp − z = −0.041 AUROC, 5/5 seeds)~~
+- ~~"under domain shift the **canonical response HELPS**" (+0.027 AUROC / +0.045 Spearman, 5/5)~~
 
-Paired per-seed (arm − z), sign consistent across all 5 seeds:
-- **ID:** z+q+resp − z = **−0.041 AUROC, negative in 5/5 seeds** → in-distribution **text HURTS**;
-  z-only is the strongest and most stable arm. (The committed 0.795 > 0.758 was a lucky seed.)
-- **OOD:** z+q+resp − z = **+0.027 AUROC / +0.045 Spearman, positive in 5/5 seeds** → under a real
-  shift the **canonical response HELPS**. (The committed single-run "text advantage doesn't
-  transfer, z is domain-robust" was also noise: that seed had z+q+resp 0.618 < z 0.622.)
-- **z+q (question alone) hurts in BOTH regimes** — the *response*, not the question, carries signal.
+The 3B (pos, layer) sweep had selected **TBG L12**, which the ridge diagnostic shows is a
+poor layer (ridge: 0.481 at L12 vs 0.600 at L22). With z starved of information, the text
+arms partly *compensated* for it, producing consistent-looking text effects. Once z is fed
+properly (TBG L22 + SLT L15, projector 1024), **every text effect collapses into noise**
+(see the reference result below: |mean| ≤ 0.03, signs inconsistent at 2–3 / 5 seeds).
+Lesson: sign-consistency across seeds proves the effect is not *seed* noise; it does **not**
+prove the effect is real if the whole configuration is mis-specified.
 
-**Robust interpretation:** in-distribution the hidden state alone is best and added text is a
-distractor; under domain shift z degrades (0.763→0.622) and the canonical response supplies
-complementary, transferable signal. The variance caveat that motivated this task is resolved:
-`build` and `build_ood` now give identical ID-test numbers for a given seed.
+The superseded numbers live in `stage2/runs/..._n2000_full/results_multiseed.json` and
+`ood_results_squad_multiseed.json` (kept for provenance only — do not cite).
+
+### REFERENCE RESULT (2026-07-13): TBG L22 + SLT L15, projector 8192→1024, 5 seeds
+
+Run: `--ood --ood_dataset squad --seeds 5 --reuse_selection --z_inputs TBG:22,SLT:15
+--selected_k 4 --projector_hidden_dim 1024`.
+Output: `stage2/runs/..._n2000_multipos_p1024/ood_results_squad_multiseed.json`;
+log `stage2/logs/multipos_p1024.log`. **Spearman is primary; AUROC secondary.**
+
+| arm | ID Spearman | OOD Spearman | ID AUROC | OOD AUROC |
+|-----|-------------|--------------|----------|-----------|
+| **z (hidden only)** | **0.602 ± 0.019** | 0.368 ± 0.033 | **0.807 ± 0.013** | 0.669 ± 0.014 |
+| z + question | 0.590 ± 0.049 | 0.402 ± 0.033 | 0.808 ± 0.025 | 0.684 ± 0.018 |
+| z + question + resp | 0.583 ± 0.015 | 0.398 ± 0.060 | 0.799 ± 0.012 | 0.682 ± 0.025 |
+
+Paired (arm − z), Spearman: z_q **−0.013 ID (2/5)** / +0.034 OOD (3/5); z_q_resp **−0.020 ID
+(2/5)** / +0.030 OOD (3/5). **No text effect is sign-consistent or larger than its own std —
+all text arms are now indistinguishable from z-only.**
+
+**Trajectory of the z arm (what the fixes bought):**
+
+| config | ID | OOD | % of ID ceiling (0.914) |
+|--------|-----|-----|------------------------|
+| proxy TBG L12 (original sweep pick) | 0.467 | 0.289 | 51% |
+| proxy TBG L22 (layer fixed) | 0.517 | 0.256 | 57% |
+| **proxy TBG22+SLT15, projector 1024** | **0.602** | **0.368** | **66%** |
+| *ridge, same input (TBG22+SLT15)* | *0.642* | *0.437* | *70%* |
+| *ridge SLT L15 alone (best OOD)* | *0.584* | *0.495* | — |
+
+**Honest interpretation (three parts):**
+1. **The proxy's shortfall was input selection, not a bug.** Fixing the layer and feeding both
+   positions through a wider projector moved ID 0.467 → 0.602 (+0.135) and recovered 51% → 66%
+   of the label-noise ceiling. ID AUROC 0.807 now edges the direct SEP-style sanity probe (0.805).
+2. **The text arms add nothing once z is well-fed.** They were compensating for a weak z.
+3. **The proxy still LOSES to ridge on the same input** (0.602 vs 0.642 ID; 0.368 vs 0.437 OOD),
+   even with the right layers and a 1024-wide projector. This is now a *fair fight* and a clean
+   **negative result**: the frozen-3B + LoRA + soft-token design extracts nothing a linear
+   readout cannot. Consistent with the MLP-vs-ridge test (below): the z→SE relation is linear,
+   so there is no nonlinear signal for a backbone to add.
 
 **Checkpointing (2026-07-02) — train once, evaluate anywhere.** Previously OOD *retrained* the
 model (no weights were ever saved — only metrics JSON). Now `checkpoint.py` + `--save_checkpoints`
@@ -264,12 +318,22 @@ otherwise yields `0*log 0 = nan`):
 | squad (all, OOD basis) | 1000 | 0.682 ± 0.013 | 0.811 | **0.901** |
 
 So the achievable ceiling is ~0.91, not ~0.6 — **label noise accounts for only ~9 points**.
-Recovered signal: proxy z = 0.467/0.914 = **51%** ID; 0.289/0.901 = **32%** OOD (z+q+resp 37%).
-**Useful control:** squad's labels are as reliable as trivia's (0.901 vs 0.914), so the OOD drop
-is a *genuine transfer failure*, not noisier OOD labels — this hardens the OOD finding.
+Recovered signal (z arm): **51%** ID at the original TBG L12 → **66%** ID at the fixed input
+(0.602/0.914). **Useful control:** squad's labels are as reliable as trivia's (0.901 vs 0.914),
+so the OOD drop is a *genuine transfer failure*, not noisier OOD labels.
 Caveats: holds DeBERTa clustering fixed (measures sampling noise only → true ceiling slightly
 lower → true recovered% slightly higher); zero-entropy prompts agree trivially across halves and
 prop up `r_half`.
+
+**IMPORTANT — two DIFFERENT ceilings; do not conflate them.**
+- **Label-noise ceiling ≈ 0.91** — an upper bound imposed by the noisy target. Unreachable by
+  anyone. Says nothing about whether the input *contains* the needed information.
+- **Information ceiling ≈ 0.64 ID / ≈ 0.50 OOD** — how much SE is actually recoverable from
+  hidden states at all (measured below). This is the ceiling that actually binds.
+The 0.64 → 0.91 gap is **information genuinely absent from the hidden states**, not model
+failure: SE is a property of the *distribution over 10 stochastic samples*, and one
+deterministic forward pass cannot fully encode it. Chasing 0.91 with a bigger model is chasing
+something that is not there.
 
 **`linear_ceiling_probe.py` — plain ridge from ONE hidden state beats the 3B proxy.**
 Same split, same continuous target, same Spearman; ID test + OOD (all squad rows):
@@ -282,40 +346,77 @@ Same split, same continuous target, same Spearman; ID test + OOD (all squad rows
 | **ridge** | **SLT L15** (best OOD) | **0.584** | **0.495** (55%) |
 
 Conclusions:
-- **At equal input the backbone adds nothing.** Ridge 0.481 vs proxy 0.467 at TBG L12 — the
-  frozen 3B, LoRA, and soft tokens buy no nonlinear signal over a linear readout.
-- **The (pos, layer) selection is wrong.** The Stage-2 sweep chose TBG L12; ridge shows TBG
+- **The (pos, layer) selection was wrong.** The Stage-2 sweep chose TBG L12; ridge shows TBG
   L22–L32 are far stronger ID (0.59–0.60). The sweep trains the full 3B on a 600-example
-  subsample for 3 epochs per (pos, layer) — too noisy/undertrained to select reliably. Ridge
-  selects exactly, in seconds.
-- **ID-optimal ≠ OOD-optimal, and SLT L15 nearly wins both** (ID 0.584 / OOD 0.495), beating the
-  proxy on both axes. Late TBG layers are ID-strong but OOD-brittle (0.24–0.30).
-- **This partly deflates the text finding:** "response helps OOD" is +0.045 Spearman, but simply
-  picking a better layer is worth **+0.16 to +0.19**. The text arm may be compensating for a
-  badly chosen z. Re-run the arm comparison at the ridge-selected layer before trusting it.
+  subsample for 3 epochs per (pos, layer) — too noisy/undertrained to rank layers. **Ridge selects
+  exactly, in seconds — always pick the layer this way, never with the 3B sweep.**
+- **ID-optimal ≠ OOD-optimal.** Late TBG layers are ID-strong but OOD-brittle (0.24–0.30); SLT
+  L15 nearly wins both (ID 0.584 / OOD 0.495) and is still the best single OOD input known.
+- **At equal input the backbone adds nothing** — see the fair-fight result above: even with the
+  right layers and a 1024 projector the proxy (0.602 / 0.368) loses to ridge (0.642 / 0.437).
 
-**Suspected causes, in order:** (a) bad layer selection; (b) the projector's **256-dim
-bottleneck** (`projector_hidden_dim=256` compresses the 4096-dim z ~16× before expanding to soft
-tokens — ridge keeps all 4096 dims linearly); (c) genuinely little nonlinear headroom to add.
+**`info_ceiling` experiment — the z→SE relation is LINEAR; there is no nonlinear headroom.**
+MLP (unbottlenecked, on the full 4096/8192-dim z) vs ridge, same split:
+
+| input | ridge ID | **MLP ID** | ridge OOD | **MLP OOD** |
+|-------|----------|-----------|-----------|-------------|
+| TBG L22 | 0.600 | **0.564** | 0.301 | **0.293** |
+| SLT L15 | 0.584 | **0.567** | 0.495 | **0.463** |
+| TBG L22 + SLT L15 | **0.642** | **0.584** | 0.437 | 0.420 |
+
+**MLP LOSES to ridge at every input.** This is the root explanation for the whole Stage-2 story:
+the backbone adds nothing because *there is nothing nonlinear to add*. Two more structural facts
+from the same sweep:
+- **Extra layers within a position are near-redundant** (TBG L22 alone 0.600 → TBG every-4th
+  0.605, i.e. +0.005). A multi-layer *band* is NOT worth pursuing.
+- **The two positions ARE complementary** (TBG L22 + SLT L15 → 0.642, +0.042). This is what
+  motivated `--z_inputs` and it is where the real gain lives.
+
+*Caveat:* only 1440 train examples for a 4096–8192-dim input, so the MLP is data-starved — the
+honest claim is "**no nonlinear signal recoverable at N=2000**", not "none exists". Scaling
+Stage-1 to N≈10k is the one experiment that could overturn this.
+
+**Known wart (measured, minor):** `Projector` destroys z's magnitude twice — `LayerNorm` on the
+input strips ‖z‖ per example, and the output is per-token unit-normalised then scaled by a
+**single global learnable scalar** (`model.py:66,74`). The docstring claim that this preserves
+z's magnitude is **false** (a learned constant scales all examples identically). Measured cost is
+small (~0.01 Spearman: ridge on LayerNorm'd z scores 0.599 vs 0.600 at TBG L22), because ‖z‖
+carries only weak SE signal (ρ(‖z‖, SE) ≈ −0.21 at TBG L22). Not worth fixing; do not cite the
+docstring.
 
 ## To-do list (pick up here)
 
-1. **(DONE 2026-07-02)** Per-arm reseeding + multi-seed run — implemented and run (5 seeds, ID
-   + OOD); results above. Superseded the noisy single-run text-arm claims.
-2. **(NEW — do first) Fix (pos, layer) selection.** Replace the expensive, noisy 3B sweep with the
-   exact ridge sweep in `linear_ceiling_probe.py`, then retrain the proxy at the ridge-selected
-   layer (TBG L22 for ID; SLT L15 as a both-regimes operating point). Expect ID 0.467 → ~0.58–0.60.
-3. **(NEW) Widen the projector.** `projector_hidden_dim=256` is a 16× bottleneck on a 4096-dim z.
-   Ablate 1024/2048 (or a linear pass-through) and re-check whether the backbone then beats ridge.
-   *This touches the locked projector spec — ask before changing.*
-4. **(NEW) Re-run the arm comparison at the corrected layer.** The z-vs-text ID/OOD reversal was
-   measured at the bad layer TBG L12; confirm it survives at TBG L22 / SLT L15.
-5. **(NEW) Justify the 3B backbone.** If a widened projector at the right layer still doesn't beat
-   ridge, the honest thesis result is that the SLM adds nothing for z-only, and its value is
-   confined to the text arms / OOD regime. That is a publishable negative result — report it.
-6. **Multi-layer projector ablation** — feed a band of layers (`n_layers_in > 1` already supported);
-   the ID/OOD layer split (TBG-late vs SLT-mid) is direct motivation for a band.
-7. **Full 2×2 OOD matrix** — also train on squad and eval on trivia_qa.
-8. **Hyperparameter pass** — lr, LoRA rank, epochs. Winning arm is regime-dependent (z-only ID,
-   z+q+resp OOD), so tune with the intended deployment in mind.
+**Done (2026-07-13):** ridge-based layer selection (#2), projector widened to 1024 (#3), arm
+comparison re-run at the corrected input (#4 — all text effects turned out to be noise). The
+multi-layer *band* ablation is **cancelled**: measured at +0.005, layers within a position are
+redundant; positions are what matter, and `--z_inputs` already exploits that.
+
+**The one thing that now matters: the proxy loses to ridge in a fair fight (0.602 vs 0.642 ID,
+0.368 vs 0.437 OOD).** Everything below is framed around that.
+
+1. **Decide the thesis framing — talk to the supervisor first.** A linear probe on hidden states
+   predicting SE *is essentially SEP* (arXiv:2406.15927). Since ridge wins, the z-only branch of
+   this project re-derives existing work. The SLM cannot be justified by "it models z better" —
+   MLP < ridge proves there is no nonlinear signal to win with. Its value must come from something
+   ridge **structurally cannot do**. This is a real pivot; surface it as a result, not a failure.
+2. **(Highest value) Text-only arms — the one thing ridge cannot do.** Every current arm contains
+   z, which requires a **forward pass of the target LLM** — but if you are running that pass
+   anyway, SEP/ridge already solves the problem. Add **`q_only`** and **`q_resp_only`** arms (no z)
+   to test whether the SLM can predict SE from **text alone, with no target-model forward pass**.
+   Even ~0.3–0.4 Spearman would be a genuinely new capability (uncertainty *before* generation:
+   routing, abstention, cascades). A hidden-state probe cannot do this by construction.
+3. **Close the remaining ridge gap, or concede it.** Proxy 0.602 vs ridge 0.642 ID. Try
+   `--projector_hidden_dim 2048` / `projector_type=linear` (pass-through). If it still loses,
+   **report the negative result** — it is well-controlled and publishable.
+4. **Beat ridge OOD, or concede.** Best OOD known is ridge on **SLT L15 alone (0.495)**, well
+   above the proxy's 0.368. Try `--z_inputs SLT:15` (single position) — late TBG layers are
+   OOD-brittle and may be *hurting* the OOD arm.
+5. **Report every result against the ridge baseline.** Ridge on `[TBG L22 + SLT L15]` = **0.642 ID
+   / 0.437 OOD** (and SLT L15 = 0.495 OOD) is the number to beat. Cheap, exact, seconds on CPU.
+6. **Full 2×2 OOD matrix** — also train on squad and eval on trivia_qa. *Low priority.*
+7. **Hyperparameter pass** — lr, LoRA rank, epochs. *Low priority* (the arms are now equivalent,
+   so there is no regime-dependent arm choice to tune for).
+8. **(Only if reviving the nonlinear story) Scale Stage-1 to N≈10k.** The MLP had 1440 examples
+   for a 4096–8192-dim input, so "the relation is linear" is really "linear at N=2000". Expensive
+   and speculative; do not lead with it.
 9. **(Housekeeping)** rotate the HF token that was pasted in chat (security).
