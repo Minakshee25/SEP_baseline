@@ -243,14 +243,79 @@ mechanism for "one proxy → many datasets" and, via a second training run, acro
 prebuilt `model=` (eval reuses the backbone). Storage: local `/vol/bitbucket` (gitignored) +
 optional `--push_wandb` versioned artifact (`type=model`, project `amortized_ue_stage2`).
 
+## Diagnostics (2026-07-13) — the proxy is UNDERPERFORMING a ridge regression
+
+Two read-only scripts, both run from the repo root in the **`se_probes`** env (they need no
+GPU and touch nothing under `semantic_uncertainty/`). They were added to answer "is Spearman
+0.467 any good?" and "why isn't it higher?". The answer to the second is uncomfortable and
+should drive the next work.
+
+**`label_noise_ceiling.py` — the SE label is RELIABLE, so noise does not excuse the gap.**
+The label is estimated from N=10 samples, so it carries measurement noise, and no model can
+rank against it better than it ranks against itself. Split-half reliability over the stored
+`semantic_id`s (200 draws, Spearman–Brown corrected; the subset's ids are relabelled to
+contiguous before calling SEP's `cluster_assignment_entropy`, because `np.bincount` on a subset
+otherwise yields `0*log 0 = nan`):
+
+| dataset | rows | split-half r | reliability | **ceiling = sqrt(rel)** |
+|---------|------|--------------|-------------|-------------------------|
+| trivia (ID test) | 200 | 0.717 ± 0.028 | 0.835 | **0.914** |
+| trivia (all) | 2000 | 0.773 ± 0.007 | 0.872 | 0.934 |
+| squad (all, OOD basis) | 1000 | 0.682 ± 0.013 | 0.811 | **0.901** |
+
+So the achievable ceiling is ~0.91, not ~0.6 — **label noise accounts for only ~9 points**.
+Recovered signal: proxy z = 0.467/0.914 = **51%** ID; 0.289/0.901 = **32%** OOD (z+q+resp 37%).
+**Useful control:** squad's labels are as reliable as trivia's (0.901 vs 0.914), so the OOD drop
+is a *genuine transfer failure*, not noisier OOD labels — this hardens the OOD finding.
+Caveats: holds DeBERTa clustering fixed (measures sampling noise only → true ceiling slightly
+lower → true recovered% slightly higher); zero-entropy prompts agree trivially across halves and
+prop up `r_half`.
+
+**`linear_ceiling_probe.py` — plain ridge from ONE hidden state beats the 3B proxy.**
+Same split, same continuous target, same Spearman; ID test + OOD (all squad rows):
+
+| model | input | ID test Spearman | OOD Spearman |
+|-------|-------|------------------|--------------|
+| Stage-2 proxy (3B + LoRA + soft tokens) | TBG L12 | 0.467 (51% of ceiling) | 0.289 / 0.334 w/ text |
+| **ridge** | **TBG L12** (identical input) | **0.481** | **0.301** |
+| **ridge** | **TBG L22** (best ID) | **0.600** (66%) | 0.301 |
+| **ridge** | **SLT L15** (best OOD) | **0.584** | **0.495** (55%) |
+
+Conclusions:
+- **At equal input the backbone adds nothing.** Ridge 0.481 vs proxy 0.467 at TBG L12 — the
+  frozen 3B, LoRA, and soft tokens buy no nonlinear signal over a linear readout.
+- **The (pos, layer) selection is wrong.** The Stage-2 sweep chose TBG L12; ridge shows TBG
+  L22–L32 are far stronger ID (0.59–0.60). The sweep trains the full 3B on a 600-example
+  subsample for 3 epochs per (pos, layer) — too noisy/undertrained to select reliably. Ridge
+  selects exactly, in seconds.
+- **ID-optimal ≠ OOD-optimal, and SLT L15 nearly wins both** (ID 0.584 / OOD 0.495), beating the
+  proxy on both axes. Late TBG layers are ID-strong but OOD-brittle (0.24–0.30).
+- **This partly deflates the text finding:** "response helps OOD" is +0.045 Spearman, but simply
+  picking a better layer is worth **+0.16 to +0.19**. The text arm may be compensating for a
+  badly chosen z. Re-run the arm comparison at the ridge-selected layer before trusting it.
+
+**Suspected causes, in order:** (a) bad layer selection; (b) the projector's **256-dim
+bottleneck** (`projector_hidden_dim=256` compresses the 4096-dim z ~16× before expanding to soft
+tokens — ridge keeps all 4096 dims linearly); (c) genuinely little nonlinear headroom to add.
+
 ## To-do list (pick up here)
 
 1. **(DONE 2026-07-02)** Per-arm reseeding + multi-seed run — implemented and run (5 seeds, ID
    + OOD); results above. Superseded the noisy single-run text-arm claims.
-2. **Multi-layer projector ablation** — feed a band of layers (interface already supports
-   `n_layers_in > 1`) instead of a single selected layer.
-3. **Full 2×2 OOD matrix** — also train on squad and eval on trivia_qa (currently only
-   trivia→squad is done).
-4. **Hyperparameter pass** — lr, LoRA rank, epochs. Note the winning arm now depends on regime
-   (z-only ID, z+q+resp OOD), so tune with the intended deployment (ID vs shift) in mind.
-5. **(Housekeeping)** rotate the HF token that was pasted in chat (security).
+2. **(NEW — do first) Fix (pos, layer) selection.** Replace the expensive, noisy 3B sweep with the
+   exact ridge sweep in `linear_ceiling_probe.py`, then retrain the proxy at the ridge-selected
+   layer (TBG L22 for ID; SLT L15 as a both-regimes operating point). Expect ID 0.467 → ~0.58–0.60.
+3. **(NEW) Widen the projector.** `projector_hidden_dim=256` is a 16× bottleneck on a 4096-dim z.
+   Ablate 1024/2048 (or a linear pass-through) and re-check whether the backbone then beats ridge.
+   *This touches the locked projector spec — ask before changing.*
+4. **(NEW) Re-run the arm comparison at the corrected layer.** The z-vs-text ID/OOD reversal was
+   measured at the bad layer TBG L12; confirm it survives at TBG L22 / SLT L15.
+5. **(NEW) Justify the 3B backbone.** If a widened projector at the right layer still doesn't beat
+   ridge, the honest thesis result is that the SLM adds nothing for z-only, and its value is
+   confined to the text arms / OOD regime. That is a publishable negative result — report it.
+6. **Multi-layer projector ablation** — feed a band of layers (`n_layers_in > 1` already supported);
+   the ID/OOD layer split (TBG-late vs SLT-mid) is direct motivation for a band.
+7. **Full 2×2 OOD matrix** — also train on squad and eval on trivia_qa.
+8. **Hyperparameter pass** — lr, LoRA rank, epochs. Winning arm is regime-dependent (z-only ID,
+   z+q+resp OOD), so tune with the intended deployment in mind.
+9. **(Housekeeping)** rotate the HF token that was pasted in chat (security).

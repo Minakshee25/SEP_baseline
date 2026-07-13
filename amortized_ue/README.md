@@ -179,6 +179,61 @@ the earlier single-run claims (ID "text helps 0.795>0.758" and OOD "text doesn't
 of which were lucky/unlucky seeds. squad is a genuine shift (mean acc 0.24 / mean CAE 1.50 vs
 trivia's 0.59 / 0.59). OOD RMSE/R² are miscalibrated by design (label-scale shift).
 
+### Diagnostics — label-noise ceiling + linear probe (2026-07-13)
+
+Two read-only diagnostics that answer "is Spearman 0.47 good?" and "why isn't it higher?".
+Neither modifies Stage-1/Stage-2 code or data.
+
+**1. Label-noise ceiling** (`python -m amortized_ue.label_noise_ceiling`, `se_probes` env).
+The SE label is estimated from only N=10 samples, so it carries measurement noise, and no model
+can rank against it better than it ranks against itself. Split-half reliability over the stored
+`semantic_id`s (200 random draws, Spearman–Brown corrected) gives the achievable ceiling:
+
+| dataset | rows | split-half r | reliability | **ceiling** |
+|---------|------|--------------|-------------|-------------|
+| trivia (ID test) | 200 | 0.717 ± 0.028 | 0.835 | **0.914** |
+| trivia (all) | 2000 | 0.773 ± 0.007 | 0.872 | 0.934 |
+| squad (all, OOD basis) | 1000 | 0.682 ± 0.013 | 0.811 | **0.901** |
+
+**The label is highly reliable** — noise explains only ~9 points of the gap to 1.0, so it does
+*not* excuse the proxy's shortfall. Two things this buys: (a) recovered-signal framing —
+proxy z recovers **0.467/0.914 = 51%** of achievable ID and **0.289/0.901 = 32%** OOD (z+q+resp
+37%); (b) a **control for the OOD story** — squad's labels are as reliable as trivia's (0.901 vs
+0.914), so the OOD drop is a genuine transfer failure, *not* noisier OOD labels.
+Caveats: reusing stored `semantic_id`s holds the DeBERTa clustering fixed, so this measures
+sampling noise only (true ceiling slightly lower → true recovered% slightly higher); and
+zero-entropy prompts (all 10 samples in one cluster) agree trivially across halves, propping up
+`r_half` somewhat.
+
+**2. Linear probe — the proxy is UNDERPERFORMING a ridge regression** (`python -m
+amortized_ue.linear_ceiling_probe`). Plain ridge from ONE hidden state → continuous SE, same
+split, same Spearman, ID test + OOD(all rows):
+
+| model | input | ID test Spearman | OOD Spearman |
+|-------|-------|------------------|--------------|
+| Stage-2 proxy (3B + LoRA + soft tokens) | TBG L12 | 0.467 (51% of ceiling) | 0.289 / 0.334 w/ text |
+| **ridge** | **TBG L12** (same input) | **0.481** | **0.301** |
+| **ridge** | **TBG L22** (best ID) | **0.600** (66%) | 0.301 |
+| **ridge** | **SLT L15** (best OOD) | **0.584** | **0.495** (55%) |
+
+Three conclusions, all actionable:
+- **At the same input (TBG L12), ridge ≈ proxy** (0.481 vs 0.467). The frozen 3B backbone, LoRA,
+  and soft tokens add **nothing** over a linear readout — the apparatus is not extracting
+  nonlinear signal it couldn't get for free.
+- **The layer selection is wrong.** The Stage-2 sweep picked TBG L12; ridge says TBG L22–L32 are
+  far better ID (0.59–0.60). The sweep trains the full 3B on a 600-example subsample for 3
+  epochs per (pos, layer) — too noisy/undertrained to select reliably. A ridge sweep is exact,
+  costs seconds, and picks correctly.
+- **ID-optimal and OOD-optimal layers differ, and SLT L15 nearly wins both** (ID 0.584, OOD
+  0.495) — beating the proxy on *both* axes by a wide margin. Late TBG layers are ID-strong but
+  OOD-brittle (0.24–0.30).
+- Corollary: the "response helps OOD" effect (+0.045 Spearman) is **dwarfed by simply choosing a
+  better layer** (+0.16 to +0.19). The text arm may be partly compensating for a poorly chosen z.
+
+Likely causes of the proxy shortfall, in order: (a) bad layer selection; (b) the projector's
+**256-dim bottleneck** (`projector_hidden_dim=256` compresses 4096-dim z ~16× before expanding
+to soft tokens) — ridge keeps all 4096 dims; (c) no nonlinear headroom for the backbone to add.
+
 ### Where results are saved
 
 - Stage-1 records: `amortized_ue/data/stage1/<run_name>/records/<id>.pt` + `manifest.json` (gitignored).
@@ -187,13 +242,24 @@ trivia's 0.59 / 0.59). OOD RMSE/R² are miscalibrated by design (label-scale shi
 - Stage-2 OOD multi-seed: `.../ood_results_<ood_dataset>_multiseed.json` in the same run dir.
 - Logs: `amortized_ue/stage2/logs/multiseed_{id,ood}.log`.
 - W&B artifacts (project `amortized_ue_stage1`): `stage1_records:v0` (n400), `stage1_records_n2000`.
+- Diagnostics: `label_noise_ceiling.py` / `linear_ceiling_probe.py` print to stdout; pass `--out`
+  to write JSON.
 
 ### To-do
 
 1. **(DONE 2026-07-02)** Per-arm reseeding + multi-seed run — implemented; 5-seed ID + OOD above.
-2. **Multi-layer projector ablation** — feed a band of layers (`n_layers_in > 1` already supported).
-3. **Full 2×2 OOD matrix** — also train on squad, eval on trivia_qa.
-4. **Hyperparameter pass** — lr, LoRA rank, epochs (winning arm is regime-dependent: z-only ID,
+2. **(NEW, do first) Fix layer selection** — replace the 3B sweep with the cheap exact ridge sweep
+   (`linear_ceiling_probe`), then retrain the proxy at the ridge-selected layer (TBG L22 for ID,
+   SLT L15 for a both-regimes operating point). Expected to move ID 0.467 → ~0.58–0.60.
+3. **(NEW) Widen the projector** — `projector_hidden_dim=256` is a 16× bottleneck on the 4096-dim
+   z; ablate 1024/2048 (or a linear pass-through) and re-check whether the backbone then beats ridge.
+4. **(NEW) Justify the 3B backbone at all** — ridge currently matches it at equal input. If a
+   widened projector at the right layer still doesn't beat ridge, the honest result is that the
+   SLM adds nothing for z-only and its value is confined to the text arms / OOD.
+5. **Multi-layer projector ablation** — feed a band of layers (`n_layers_in > 1` already supported);
+   the ID/OOD layer split (TBG-late vs SLT-mid) is direct motivation.
+6. **Full 2×2 OOD matrix** — also train on squad, eval on trivia_qa.
+7. **Hyperparameter pass** — lr, LoRA rank, epochs (winning arm is regime-dependent: z-only ID,
    z+q+resp OOD).
 
 ### Stage 2 files
