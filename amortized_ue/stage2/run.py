@@ -411,6 +411,10 @@ def _parse() -> tuple[Stage2Config, str]:
                    help="force the z layer (see --selected_position)")
     p.add_argument("--selected_k", type=int, default=None,
                    help="force k soft tokens (else read from the prior results.json)")
+    p.add_argument("--projector_hidden_dim", type=int, default=Stage2Config.projector_hidden_dim,
+                   help="projector bottleneck width (default 256, the original locked value). "
+                        "256 compresses a 4096-dim z ~16x -- and 32x when --z_inputs stacks two "
+                        "positions (h_in=8192). Widen to 1024/2048 when stacking.")
     p.add_argument("--z_inputs", default=None,
                    help="comma-separated POSITION:LAYER pairs to feed together, e.g. "
                         "'TBG:22,SLT:15'. Stacked to [B,n,H] and flattened by the projector "
@@ -443,6 +447,7 @@ def _parse() -> tuple[Stage2Config, str]:
         ckpt_dir=a.ckpt_dir, eval_datasets=eval_datasets,
         selected_position=a.selected_position, selected_layer=a.selected_layer,
         selected_k=a.selected_k, run_name=a.run_name, z_inputs=z_inputs,
+        projector_hidden_dim=a.projector_hidden_dim,
         smoke=a.smoke, smoke_num_prompts=a.smoke_num_prompts, smoke_steps=a.smoke_steps)
     return cfg, mode
 
