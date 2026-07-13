@@ -42,6 +42,13 @@ class Stage2Config:
     selected_position: str | None = None       # filled in after selection (or OOD override)
     selected_layer: int | None = None
     selected_k: int | None = None              # fixed k for OOD (else read from prior results.json)
+    # Multi-input z: feed several (position, layer) vectors at once, e.g. ("TBG:22","SLT:15").
+    # They are stacked to [B, n_inputs, H] and the projector flattens them to n_inputs*H, so
+    # the projector's existing [B, n_layers_in, H] interface covers this with no model change.
+    # Empty tuple => single (selected_position, selected_layer), i.e. the current behaviour.
+    # Motivation: the ridge diagnostic shows TBG and SLT are COMPLEMENTARY (ID 0.600 -> 0.642),
+    # whereas extra layers within one position are near-redundant (+0.005).
+    z_inputs: tuple = ()
     select_metric: str = "val_spearman"        # sweep selection: val Spearman (higher=better)
     select_arm: str = "z"                      # selection uses the z-only arm
     select_k_soft_tokens: int = 4              # (pos,layer) selection done at k=4

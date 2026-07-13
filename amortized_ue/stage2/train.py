@@ -94,7 +94,9 @@ class Trainer:
         self.rng = np.random.default_rng(cfg.seed)
         torch.manual_seed(cfg.seed)
         # `model` lets an eval path reuse an already-loaded backbone (see checkpoint.py)
-        self.model = model if model is not None else ProxyModel(cfg, h_in=data.hidden_size).to(self.device)
+        # h_in widens to n_inputs*H when cfg.z_inputs stacks several (position, layer) vectors
+        self.model = (model if model is not None
+                      else ProxyModel(cfg, h_in=data.h_in_for(cfg)).to(self.device))
         self._fresh_state = self._snapshot_trainable()
 
     # -- snapshot/restore every trainable param so candidates reuse the loaded backbone --
@@ -130,7 +132,8 @@ class Trainer:
         meta = {
             "arm": arm, "seed": int(seed),
             "position": position, "layer": int(layer), "k": int(self.cfg.k_soft_tokens),
-            "h_in": int(self.data.hidden_size),
+            "z_inputs": list(self.cfg.z_inputs),      # non-empty => multi-input z; h_in reflects it
+            "h_in": int(self.data.h_in_for(self.cfg)),
             "stage1_model_name": self.cfg.stage1_model_name,
             "train_dataset": self.cfg.stage1_dataset,
             "train_num_samples": int(self.cfg.stage1_num_samples),
@@ -203,7 +206,12 @@ class Trainer:
 
     def _forward_batch(self, rows, position, layer, arm, data=None):
         d = data or self.data
-        z = d.hidden[position][layer][rows].unsqueeze(1).to(self.device)   # [B,1,H]
+        if self.cfg.z_inputs:
+            # multi-input z: stack the configured (position, layer) pairs -> [B, n_inputs, H];
+            # the projector flattens them. `position`/`layer` are ignored in this mode.
+            z = d.z_multi(d.parse_z_inputs(self.cfg.z_inputs), rows).to(self.device)
+        else:
+            z = d.hidden[position][layer][rows].unsqueeze(1).to(self.device)   # [B,1,H]
         ids, attn = _tokenize_arm(
             self.model.tokenizer, [d.questions[r] for r in rows], [d.responses[r] for r in rows],
             arm, self.cfg.max_seq_len)

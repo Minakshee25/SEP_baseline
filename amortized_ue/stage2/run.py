@@ -200,18 +200,31 @@ def build(cfg: Stage2Config) -> dict:
 
 
 def _load_selected(cfg: Stage2Config) -> dict:
-    """Read the selected (position, layer, k) from the in-distribution run's results.json,
-    falling back to explicit config overrides."""
+    """Resolve the (position, layer, k) to train at.
+
+    An explicit config override WINS over a prior results.json: the 3B sweep's own
+    selection proved unreliable (it trains on a 600-example subsample for 3 epochs per
+    candidate, too noisy to rank layers), and the cheap exact ridge sweep in
+    `amortized_ue/linear_ceiling_probe.py` should be used to pick the layer instead.
+    Falls back to the saved sweep result when no override is given."""
+    if cfg.z_inputs:
+        # multi-input z: the forward path reads cfg.z_inputs directly, so (position, layer) is
+        # only a nominal label for logging/checkpoint meta. Take it from the first entry.
+        pos, layer = Stage2Data.parse_z_inputs(cfg.z_inputs)[0]
+        return {"position": pos, "layer": layer,
+                "k": cfg.selected_k or cfg.k_soft_tokens}
+    if (cfg.selected_position is not None and cfg.selected_layer is not None
+            and cfg.selected_k is not None):
+        return {"position": cfg.selected_position, "layer": cfg.selected_layer,
+                "k": cfg.selected_k}
     path = os.path.join(cfg.run_dir(), "results.json")
     if os.path.exists(path):
         sel = json.load(open(path)).get("selected", {})
         if sel.get("position") is not None:
             return {"position": sel["position"], "layer": sel["layer"], "k": sel["k"]}
-    if cfg.selected_position is None or cfg.selected_layer is None or cfg.selected_k is None:
-        raise RuntimeError(
-            "No prior results.json and no selected_position/layer/k in config; "
-            "run the in-distribution build first or set the overrides.")
-    return {"position": cfg.selected_position, "layer": cfg.selected_layer, "k": cfg.selected_k}
+    raise RuntimeError(
+        "No prior results.json and no selected_position/layer/k in config; "
+        "run the in-distribution build first or set the overrides.")
 
 
 def build_ood(cfg: Stage2Config) -> dict:
@@ -391,6 +404,21 @@ def _parse() -> tuple[Stage2Config, str]:
                    help="load saved checkpoints and score them (no retraining)")
     p.add_argument("--ckpt_dir", default=None,
                    help="eval: dir of *.pt checkpoints (default run_dir/checkpoints)")
+    p.add_argument("--selected_position", default=None, choices=["TBG", "SLT"],
+                   help="force the z position (skips/overrides the 3B sweep; use with "
+                        "--reuse_selection). Pick it with linear_ceiling_probe.py.")
+    p.add_argument("--selected_layer", type=int, default=None,
+                   help="force the z layer (see --selected_position)")
+    p.add_argument("--selected_k", type=int, default=None,
+                   help="force k soft tokens (else read from the prior results.json)")
+    p.add_argument("--z_inputs", default=None,
+                   help="comma-separated POSITION:LAYER pairs to feed together, e.g. "
+                        "'TBG:22,SLT:15'. Stacked to [B,n,H] and flattened by the projector "
+                        "(h_in widens to n*H). Overrides --selected_position/--selected_layer "
+                        "for the z input. Default: single selected (position, layer).")
+    p.add_argument("--run_name", default=None,
+                   help="output dir name; set it when overriding the layer so the run does "
+                        "not overwrite the reference TBG-L12 results")
     p.add_argument("--eval_datasets", default=None,
                    help="eval: extra OOD datasets as 'name:N,name:N' (scored on all rows)")
     a = p.parse_args()
@@ -404,6 +432,7 @@ def _parse() -> tuple[Stage2Config, str]:
     else:
         seeds = tuple(range(int(a.seeds)))
     eval_datasets = tuple(a.eval_datasets.split(",")) if a.eval_datasets else ()
+    z_inputs = tuple(s.strip() for s in a.z_inputs.split(",")) if a.z_inputs else ()
 
     cfg = Stage2Config(
         k_soft_tokens=a.k_soft_tokens, proxy_model=a.proxy_model, lr=a.lr, epochs=a.epochs,
@@ -412,6 +441,8 @@ def _parse() -> tuple[Stage2Config, str]:
         arm_trial_seeds=seeds, reuse_selection=a.reuse_selection,
         save_checkpoints=a.save_checkpoints, push_wandb=a.push_wandb,
         ckpt_dir=a.ckpt_dir, eval_datasets=eval_datasets,
+        selected_position=a.selected_position, selected_layer=a.selected_layer,
+        selected_k=a.selected_k, run_name=a.run_name, z_inputs=z_inputs,
         smoke=a.smoke, smoke_num_prompts=a.smoke_num_prompts, smoke_steps=a.smoke_steps)
     return cfg, mode
 
