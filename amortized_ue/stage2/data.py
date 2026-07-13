@@ -129,6 +129,30 @@ class Stage2Data:
         """z vectors [len(rows), H] at a physical position and layer."""
         return self.hidden[position][layer][rows]
 
+    @staticmethod
+    def parse_z_inputs(z_inputs) -> list[tuple[str, int]]:
+        """("TBG:22", "SLT:15") -> [("TBG", 22), ("SLT", 15)]."""
+        out = []
+        for spec in z_inputs:
+            pos, _, layer = str(spec).partition(":")
+            if not layer:
+                raise ValueError(f"z_inputs entry {spec!r} must be 'POSITION:LAYER', e.g. 'TBG:22'")
+            out.append((pos, int(layer)))
+        return out
+
+    def z_multi(self, inputs: list[tuple[str, int]], rows: np.ndarray) -> torch.Tensor:
+        """Stack several (position, layer) vectors -> [len(rows), n_inputs, H].
+
+        The projector flattens this to n_inputs*H, so feeding TBG and SLT together needs no
+        model change -- only a matching h_in (see `h_in_for`).
+        """
+        return torch.stack([self.hidden[p][l][rows] for p, l in inputs], dim=1)
+
+    def h_in_for(self, cfg) -> int:
+        """Projector input width: n_inputs * H (== H when z_inputs is empty)."""
+        n = len(cfg.z_inputs) if cfg.z_inputs else 1
+        return n * self.hidden_size
+
     def example_view(self, position: str, layer: int, split: str) -> dict:
         """Everything a training/eval loop needs for one split and one (pos, layer)."""
         rows = self.split_indices(split)
