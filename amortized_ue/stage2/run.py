@@ -259,6 +259,7 @@ def build_ood(cfg: Stage2Config) -> dict:
         logging.info("arm=%-9s OOD(%s) spearman %.4f±%.4f  auroc %.4f±%.4f",
                      arm, cfg.ood_dataset, sp["mean"], sp["std"], au["mean"], au["std"])
 
+    os.makedirs(cfg.run_dir(), exist_ok=True)   # build() creates it; --ood can run standalone
     out = os.path.join(cfg.run_dir(), f"ood_results_{cfg.ood_dataset}_multiseed.json")
     with open(out, "w") as f:
         json.dump({"config": cfg.as_dict(), **result}, f, indent=2)
