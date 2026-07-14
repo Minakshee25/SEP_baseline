@@ -255,9 +255,12 @@ def build_ood(cfg: Stage2Config) -> dict:
         arm_res = trainer.train_arms_trial(pos, layer, k, cfg.arms, trial_seed=s, ood_data=ood_data)
         trials.append({"seed": s, "arms": arm_res})
         for arm in cfg.arms:
-            idt, ood = arm_res[arm]["test"], arm_res[arm]["ood"]
-            logging.info("seed=%d arm=%-9s ID test sp=%.4f au=%.4f | OOD(%s) sp=%.4f au=%.4f",
-                         s, arm, idt["spearman"], idt["auroc"], cfg.ood_dataset,
+            tr_, idt, ood = arm_res[arm]["train"], arm_res[arm]["test"], arm_res[arm]["ood"]
+            # train-test gap = the direct overfitting diagnostic (ridge ref: 0.856/0.642, gap 0.21)
+            logging.info("seed=%d arm=%-11s TRAIN sp=%.4f | ID test sp=%.4f au=%.4f "
+                         "(gap %+.3f) | OOD(%s) sp=%.4f au=%.4f",
+                         s, arm, tr_["spearman"], idt["spearman"], idt["auroc"],
+                         tr_["spearman"] - idt["spearman"], cfg.ood_dataset,
                          ood["spearman"], ood["auroc"])
 
     result = {"selected": sel, "in_distribution": cfg.stage1_dataset, "ood": cfg.ood_dataset,

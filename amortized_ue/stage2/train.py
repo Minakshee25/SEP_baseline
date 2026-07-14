@@ -212,7 +212,13 @@ class Trainer:
                 os.makedirs(save_dir, exist_ok=True)
                 self.save_checkpoint(os.path.join(save_dir, f"{arm}_seed{trial_seed}.pt"),
                                      position, layer, arm, trial_seed)
-            entry = {"val": self.evaluate(position, layer, arm, "val"),
+            # "train" is a DIAGNOSTIC, never a result: train-vs-test is the direct measure of
+            # overfitting. Reference points on this data (ridge, TBG22+SLT15): a well-regularised
+            # fit has train 0.856 / test 0.642 (gap 0.21); a badly over-fit one has train 0.952 /
+            # test 0.472 (gap 0.48). A proxy train score near its OWN test score means UNDERfitting,
+            # and more regularisation would then hurt rather than help.
+            entry = {"train": self.evaluate(position, layer, arm, "train"),
+                     "val": self.evaluate(position, layer, arm, "val"),
                      "test": self.evaluate(position, layer, arm, "test")}
             if ood_data is not None:
                 entry["ood"] = self.evaluate_ood(position, layer, arm, ood_data)
