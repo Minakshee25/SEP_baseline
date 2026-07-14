@@ -423,6 +423,34 @@ small (~0.01 Spearman: ridge on LayerNorm'd z scores 0.599 vs 0.600 at TBG L22),
 carries only weak SE signal (ρ(‖z‖, SE) ≈ −0.21 at TBG L22). Not worth fixing; do not cite the
 docstring.
 
+## ⭐ THE HEADLINE RESULT (E12/E13, 2026-07-14) — text-only arms
+
+Every `z` arm needs a forward pass of the **target LLM**. But if you are running that pass anyway,
+ridge/SEP on the hidden states already solves the problem *and beats this proxy*. So the SLM's
+justification must come from what ridge **structurally cannot do** — running with **no hidden
+states at all**. Two new arms (`q_only`, `q_resp_only`) drop `z` entirely; sequence = `[text][REG]`,
+the projector is never called. Opt in via `--arms z,z_q,z_q_resp,q_only,q_resp_only`.
+
+| arm | needs target LLM? | ID Spearman | OOD Spearman | % ID ceiling |
+|---|---|---|---|---|
+| z | yes (hidden states) | 0.602 ± 0.019 | 0.368 ± 0.033 | 66% |
+| **q_only** | **NO — nothing at all** | **0.494 ± 0.049** | 0.259 ± 0.047 | **54%** |
+| **q_resp_only** | answer text only, no hidden states | **0.521 ± 0.049** | **0.399 ± 0.073** | 57% |
+
+**`q_only` predicts SE from the question alone, BEFORE running the target model** — 82% of the
+hidden state's ID performance at zero cost. `q_resp_only` OOD (0.399) **beats z-only** (0.368).
+
+**Control (E13, `text_baseline_probe.py`) — it is NOT a bag-of-words shortcut:** TF-IDF→ridge on the
+same text gets ID 0.351 and **collapses to 0.037 (chance) OOD**, vs the 3B's 0.259 — a **7× gap**.
+Question-length alone: 0.101. So the 3B is reading something *semantic* about question difficulty
+that transfers across a domain shift; n-grams only memorise dataset vocabulary.
+
+**The two-regime framing for the thesis:**
+- **Hidden states available** → a linear probe (≈ SEP) is all you need; **the proxy is redundant**.
+  Report this as a clean negative result.
+- **No target-LLM forward pass** → **only the SLM can run at all**, and no trivial text baseline
+  comes close. This is the regime that matters for routing / abstention / cascades.
+
 ## To-do list (pick up here)
 
 **Done (2026-07-13):** ridge-based layer selection (#2), projector widened to 1024 (#3), arm

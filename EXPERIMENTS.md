@@ -55,6 +55,8 @@ in each entry.
 | E9 | 07-13 | Fix the layer (TBG L12 → L22) | ID Spearman 0.467 → **0.517** | ✅ |
 | E10 | 07-13 | Stack 2 positions + widen projector | ID Spearman → **0.602**; all text effects vanish | ✅ **reference** |
 | E11 | 07-14 | Attribution ablation (isolate each change) | 2nd position +0.042, width +0.022, **synergistic** | ✅ |
+| E12 | 07-14 | **Text-only arms** (`q_only`, `q_resp_only`, no z) | **SE from the question alone, no target-LLM pass: 0.494** | ✅ **breakthrough** |
+| E13 | 07-14 | Bag-of-words control (TF-IDF → ridge) | TF-IDF 0.351 ID, **0.037 OOD (chance)** — 3B is not a shortcut | ✅ control passes |
 
 ---
 
@@ -399,6 +401,73 @@ and each is doing what the diagnostics predicted.
 
 ---
 
+## E12 — Text-only arms: SE with NO target-LLM forward pass (2026-07-14) — ✅ **BREAKTHROUGH**
+
+**Why:** every `z` arm needs a forward pass of the **target LLM** to produce `z`. But if you are
+running that pass anyway, a linear probe on the hidden states (SEP / our ridge baseline) already
+solves the problem — **and beats this proxy** (E8/E10). So the SLM can only be justified by
+something ridge **structurally cannot do**. Hence: drop `z` entirely.
+
+**Change (purely additive; the 3 existing arms are untouched and byte-identical).** Two new arms
+skip the projector; the sequence is just `[text][REG]`:
+- **`q_only`** — the question alone. **No target-LLM forward pass at all.** Uncertainty known
+  *before generation* → routing, abstention, cascades.
+- **`q_resp_only`** — question + the canonical answer text, but **no hidden states**.
+
+*Regression test:* re-ran seed 0 of the E10 config on the patched code — all three z-arms reproduce
+the pre-change log **to 4 dp**, ID and OOD. The working path is provably unperturbed.
+
+**Result** (5 arms × 5 seeds; `runs/stage2_textonly_5arm_p1024/`):
+
+| arm | needs target LLM? | ID Spearman | OOD Spearman | % of ID ceiling |
+|---|---|---|---|---|
+| z | yes (hidden states) | **0.602 ± 0.019** | 0.368 ± 0.033 | 66% |
+| z_q | yes (hidden states) | 0.590 ± 0.049 | 0.402 ± 0.033 | 65% |
+| z_q_resp | yes (hidden states) | 0.583 ± 0.015 | 0.398 ± 0.060 | 64% |
+| **q_only** | **NO — nothing at all** | **0.494 ± 0.049** | 0.259 ± 0.047 | **54%** |
+| **q_resp_only** | answer text only, no hidden states | **0.521 ± 0.049** | **0.399 ± 0.073** | 57% |
+
+**Two findings:**
+1. **`q_only` recovers 82% of the hidden state's ID performance (0.494 vs 0.602) at ZERO cost from
+   the target model** — 54% of the achievable ceiling, predicting how uncertain Llama-2 will be from
+   the question text alone, *before running Llama-2*. A hidden-state probe **cannot do this by
+   construction**.
+2. **Under shift, text-only matches the hidden state.** `q_resp_only` OOD **0.399** ≈ `z_q_resp`
+   0.398, and **beats `z` (0.368)** (AUROC 0.684 vs 0.669). Coherent: hidden states are model- and
+   domain-specific; text is not.
+
+---
+
+## E13 — Bag-of-words control: is `q_only` just a surface shortcut? (2026-07-14) — ✅ **control passes**
+
+**Why:** `q_only` could be learning nothing more than *"long / rare / odd-looking questions are
+hard"* — a shortcut a bag-of-words model would capture just as well, in which case the 3B adds
+nothing and the E12 novelty collapses. **This is exactly the discipline that caught the retracted
+findings (E6 → E8): establish the cheap exact baseline before believing the deep model.**
+
+**Change:** `amortized_ue/text_baseline_probe.py` — TF-IDF (word 1-2 grams + char 3-5 grams) → ridge,
+on the identical split and metric. Plus question-length-alone as a sanity floor. CPU, seconds.
+
+| model | needs target LLM? | ID Spearman | **OOD Spearman** |
+|---|---|---|---|
+| **q_only (3B)** | no | **0.494** | **0.259** |
+| TF-IDF(question) → ridge | no | 0.351 | **0.037** ← *chance* |
+| **q_resp_only (3B)** | answer text only | **0.521** | **0.399** |
+| TF-IDF(question+answer) → ridge | answer text only | 0.384 | **0.053** ← *chance* |
+| question length alone | no | 0.101 | −0.031 |
+
+**The control passes, and the OOD column is the decisive one.** In-distribution the 3B beats
+bag-of-words by ~+0.14 — real but arguable. **Out-of-distribution TF-IDF collapses to chance
+(0.037) while the 3B holds 0.259 — a 7× gap.** N-grams memorise dataset-specific vocabulary and
+transfer nothing; the 3B is reading something **semantic** about what makes a question hard, and it
+**survives a domain change**. Not a length shortcut either (length alone: 0.101).
+
+**⭐ This is the first unambiguously positive result for the SLM in the project.** It has a
+justified, unique niche: ridge/SEP **cannot run at all** without hidden states, and the trivial text
+baseline **cannot transfer**. The 3B occupies exactly that gap.
+
+---
+
 ## Where we stand
 
 **What improved:** ID Spearman **0.467 → 0.602** (+29% relative), recovering **66%** of achievable
@@ -406,18 +475,30 @@ signal (from 51%). OOD **0.289 → 0.368**. Both came from **fixing the input**,
 
 **What was retracted:** every text-arm claim (E4, E5, E6). Text adds nothing once `z` is well-fed.
 
-**The unresolved problem:** a **ridge regression still beats the 3B proxy** (0.642 vs 0.602 ID;
-0.437 vs 0.368 OOD), and an MLP loses to ridge, so there is **no nonlinear headroom** to win with.
+**The negative result (honest, and worth reporting):** when hidden states ARE available, a **ridge
+regression beats the 3B proxy** (0.642 vs 0.602 ID; 0.437 vs 0.368 OOD), and an MLP loses to ridge —
+so there is **no nonlinear headroom**. A linear probe on hidden states predicting SE is essentially
+**SEP** (arXiv:2406.15927), so that branch of the project re-derives existing work, and ridge does it
+better. **The SLM cannot be justified by "it models `z` better." Report this plainly.**
 
-This matters beyond a leaderboard: *a linear probe on hidden states predicting SE is essentially
-**SEP** (arXiv:2406.15927)* — so the z-only branch of this project **re-derives existing work, and
-ridge does it better.** The SLM cannot be justified by "it models `z` better."
+**The positive result (E12/E13) — this is the thesis.** Drop `z` entirely and the picture inverts:
 
-**Therefore the open question is: what can the SLM do that a linear probe structurally cannot?**
-The leading candidate — and the highest-value next experiment — is **text-only arms** (`q_only`,
-`q_resp_only`, with **no `z`**): can the proxy predict SE from the **question alone, with no target-LLM
-forward pass at all**? A hidden-state probe cannot do this by construction. Even 0.3–0.4 Spearman
-would be a genuinely new capability (uncertainty *before* generation → routing, abstention, cascades).
+| regime | best method | ID | OOD |
+|---|---|---|---|
+| **hidden states available** | ridge (≈ SEP) — *the proxy is redundant* | 0.642 | 0.437 |
+| **NO target-LLM forward pass** | **`q_only` (3B)** — *ridge cannot run at all* | **0.494** | **0.259** |
+| ...same regime, trivial baseline | TF-IDF → ridge | 0.351 | 0.037 *(chance)* |
+
+**`q_only` predicts a large model's semantic entropy from the question alone, before running it** —
+54% of the achievable ceiling at **zero cost from the target model**. A hidden-state probe cannot do
+this *by construction*; a bag-of-words baseline gets nowhere near it, and **collapses to chance under
+domain shift while the 3B holds** (0.037 vs 0.259, a 7× gap). The SLM is reading something *semantic*
+about question difficulty, and it transfers.
+
+**The framing for the write-up:** *when hidden states are available, a linear probe is all you need,
+and our proxy is redundant (a clean negative result). When they are not — which is the regime that
+actually matters for routing, abstention and cascades — the SLM delivers uncertainty estimates no
+probe can produce, and no trivial text baseline can match.*
 
 **Attribution (E11, now closed):** E10's gain is fully accounted for — the second position is worth
 +0.042 ID, the wider projector +0.022, and they are **synergistic** (+0.085 together). Both changes
