@@ -6,6 +6,11 @@
 > compatibility, and the `se_probes` env). Read both. Stage 2 runs in its **own separate
 > conda env** (`amortized_stage2`, see the Stage 2 section) — `se_probes` stays pinned.
 
+> 📓 **The chronological experiment log is `../EXPERIMENTS.md`** (repo root) — every experiment E0–E10,
+> what changed, what came out, and what was **retracted**, with the reasoning. Read it for *how we got
+> here*. This file is *current state + how to run things*. Keep both in sync: **when you run a new
+> experiment, add an entry to `EXPERIMENTS.md`.**
+
 ## What this module is
 
 MSc project: **amortized uncertainty estimation** — train a small model to predict a

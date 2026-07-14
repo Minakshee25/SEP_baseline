@@ -4,6 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A detailed read-only walkthrough of the data-generation and hidden-state-extraction internals lives in `SEP_TECHNICAL_REPORT.md`.
 
+> 📓 **`EXPERIMENTS.md` (repo root) is the chronological log of every experiment** — what was
+> changed each time, what came out, and which conclusions were **retracted**. Read it end-to-end to
+> understand how the project got here; it is the narrative document the write-up should be based on.
+> (This file and `amortized_ue/CLAUDE.md` describe *current state and how to run things*.)
+
 > **New work lives in `amortized_ue/` and has its own `amortized_ue/CLAUDE.md`.** That
 > module (amortized uncertainty estimation) reuses the SEP logic read-only and is governed
 > by its own scoped CLAUDE.md, which auto-loads when working under `amortized_ue/`. It now
