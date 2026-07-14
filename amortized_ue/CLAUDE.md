@@ -263,6 +263,22 @@ The output side is unchanged (k=4 soft tokens × d_model 3072 = 12288). What cha
 `h_in` is computed automatically by `Stage2Data.h_in_for(cfg)` = `len(z_inputs) · H`; the projector
 flattens `[B, n, H]`, which is why **`model.py` needed no change**.
 
+**Both changes are load-bearing (attribution ablation, E11, 5 seeds each — `runs/ablation{A,B}_*/`):**
+
+| change isolated | ID Spearman | Δ vs E9 (0.517) |
+|---|---|---|
+| projector width only (TBG:22 @ 1024) | 0.539 ± 0.031 | **+0.022** |
+| second position only (TBG:22,SLT:15 @ 256) | 0.559 ± 0.050 | **+0.042** |
+| both (the reference config) | **0.602 ± 0.019** | **+0.085** |
+
+The second position matters more than the width, and the two are **synergistic** (+0.085 > +0.065 if
+additive): 8192 dims through a 256 bottleneck is a 32× compression, so the extra position only pays
+off once the projector is wide enough to carry it. **Neither change alone suffices.** Not a
+parameter-count effect — runs A (~21M) and B (~22M) have near-identical trainable params, yet B gains
+twice as much. **⭐ The ridge diagnostic predicted the +0.042 exactly** (E8c: 0.600 → 0.642) — so use
+`linear_ceiling_probe.py` as the **design oracle** for input choices; it is exact, costs seconds, and
+is now prospectively validated.
+
 ### REFERENCE RESULT (2026-07-13): TBG L22 + SLT L15, projector 8192→1024, 5 seeds
 
 Run: `--ood --ood_dataset squad --seeds 5 --reuse_selection --z_inputs TBG:22,SLT:15

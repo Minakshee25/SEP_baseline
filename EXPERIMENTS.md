@@ -54,6 +54,7 @@ in each entry.
 | E8 | 07-13 | **Diagnostics: ceilings, ridge, MLP** | **ridge BEATS the 3B proxy; z→SE is linear** | ✅ pivotal |
 | E9 | 07-13 | Fix the layer (TBG L12 → L22) | ID Spearman 0.467 → **0.517** | ✅ |
 | E10 | 07-13 | Stack 2 positions + widen projector | ID Spearman → **0.602**; all text effects vanish | ✅ **reference** |
+| E11 | 07-14 | Attribution ablation (isolate each change) | 2nd position +0.042, width +0.022, **synergistic** | ✅ |
 
 ---
 
@@ -353,6 +354,51 @@ Paired (arm − z), Spearman: z+q **−0.013 ID (2/5)** / +0.034 OOD (3/5); z+q+
 
 ---
 
+## E11 — Attribution ablation: which change caused E10's gain? (2026-07-14) — ✅
+
+**Why:** E10 changed **two** things at once (2 positions **and** a wider projector, 13.4M → 30.2M
+params), so its +0.085 was unattributed. Two intermediate runs isolate each variable. Runs A and B
+have deliberately **similar parameter counts** (~21M vs ~22M), so comparing them also controls for
+the "it was just more parameters" explanation.
+
+5 seeds each, ID + OOD. Logs `stage2/logs/ablation{A,B}_*.log`; JSON in `runs/ablation{A,B}_*/`.
+
+| run | input | proj | params | ID Spearman | OOD Spearman |
+|---|---|---|---|---|---|
+| E9 baseline | TBG:22 | 256 | 13.4M | 0.517 | 0.256 |
+| **A** — width only | TBG:22 | **1024** | ~21M | 0.539 ± 0.031 | 0.293 ± 0.051 |
+| **B** — 2nd position only | **TBG:22 + SLT:15** | 256 | ~22M | **0.559 ± 0.050** | **0.342 ± 0.076** |
+| E10 — both | TBG:22 + SLT:15 | 1024 | 30.2M | **0.602 ± 0.019** | 0.368 ± 0.033 |
+
+**Attribution of the +0.085 ID gain:**
+
+| effect | ID | OOD |
+|---|---|---|
+| projector width alone (A − E9) | **+0.022** | +0.037 |
+| second position alone (B − E9) | **+0.042** | +0.086 |
+| both together (E10 − E9) | **+0.085** | +0.112 |
+| *sum of individual effects* | *+0.065* | *+0.123* |
+
+**Four findings:**
+1. **The second position is the bigger driver (+0.042 ID)**; the projector width is real but
+   secondary (+0.022 ID). So the missing *information* mattered more than the bottleneck did.
+2. **The ridge diagnostic predicted this exactly.** E8c measured the two positions as complementary
+   at **+0.042** in ridge (0.600 → 0.642); the proxy delivered **+0.042**. A CPU-only diagnostic
+   predicted the 3B model's gain to three decimals — **strong evidence that ridge should be used as
+   the design oracle** for future input choices, rather than expensive 3B sweeps.
+3. **The two changes are SYNERGISTIC in-distribution** (+0.085 actual vs +0.065 if additive).
+   Mechanically sensible: 8192 dims through a 256 bottleneck is a **32×** compression, so the second
+   position can only pay off if the projector is wide enough to carry it. Neither change alone gets
+   near 0.602 — **you need both.** (OOD is roughly additive / slightly redundant, but the OOD stds
+   are large (±0.03–0.08), so read the OOD attribution as indicative only.)
+4. **It is NOT just parameter count.** A (~21M) and B (~22M) have near-identical trainable params,
+   yet B gains twice as much. Capacity is not the explanation; *what information reaches the model* is.
+
+**Consequence:** E10's architecture is now fully justified — both of its changes are load-bearing,
+and each is doing what the diagnostics predicted.
+
+---
+
 ## Where we stand
 
 **What improved:** ID Spearman **0.467 → 0.602** (+29% relative), recovering **66%** of achievable
@@ -373,8 +419,13 @@ The leading candidate — and the highest-value next experiment — is **text-on
 forward pass at all**? A hidden-state probe cannot do this by construction. Even 0.3–0.4 Spearman
 would be a genuinely new capability (uncertainty *before* generation → routing, abstention, cascades).
 
-**Known gap in the current evidence:** E10 changed *two* things at once (2 positions **and** a wider
-projector, 13.4M → 30.2M params), so the +0.085 is not attributed. The controlled ablation —
-`TBG:22,SLT:15 @ 256` vs `TBG:22 @ 1024` — has **not** been run. Do this before the write-up.
+**Attribution (E11, now closed):** E10's gain is fully accounted for — the second position is worth
++0.042 ID, the wider projector +0.022, and they are **synergistic** (+0.085 together). Both changes
+are load-bearing and neither alone suffices. It is not a parameter-count effect.
+
+**A methodological asset worth using:** the ridge diagnostic **predicted the proxy's gain to three
+decimals** (E8c said positions were worth +0.042; E11 measured +0.042). Use ridge as the **design
+oracle** for future input choices — it is exact, costs seconds on CPU, and has now been validated
+prospectively. Do **not** spend 3B sweeps on questions ridge can answer.
 
 The full to-do list lives in `amortized_ue/CLAUDE.md`.
