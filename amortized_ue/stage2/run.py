@@ -81,9 +81,9 @@ def run_smoke(cfg: Stage2Config) -> dict:
     print(f"  trainable / total pars: {n_train:,} / {n_total:,}")
     print(f"  smoke (position,layer): ({pos}, {layer})")
 
-    for arm in ("z", "z_q", "z_q_resp"):
+    for arm in cfg.arms:          # default = the 3 z-arms; --arms can add the text-only ones
         out = trainer.train_arm(pos, layer, arm=arm, max_steps=cfg.smoke_steps, verbose=False)
-        print(f"  train arm={arm:9s} {cfg.smoke_steps} steps -> {out}")
+        print(f"  train arm={arm:12s} {cfg.smoke_steps} steps -> {out}")
 
     rows = data.split_indices("train")[: min(cfg.batch_size, len(data.train_idx))]
     trainer.model.eval()
@@ -412,6 +412,10 @@ def _parse() -> tuple[Stage2Config, str]:
                    help="force the z layer (see --selected_position)")
     p.add_argument("--selected_k", type=int, default=None,
                    help="force k soft tokens (else read from the prior results.json)")
+    p.add_argument("--arms", default=None,
+                   help="comma-separated arms to train. Default: z,z_q,z_q_resp. The TEXT-ONLY "
+                        "arms q_only / q_resp_only drop z entirely (no target-LLM forward pass) "
+                        "-- e.g. 'z,z_q,z_q_resp,q_only,q_resp_only' for the full 5-arm set.")
     p.add_argument("--projector_hidden_dim", type=int, default=Stage2Config.projector_hidden_dim,
                    help="projector bottleneck width (default 256, the original locked value). "
                         "256 compresses a 4096-dim z ~16x -- and 32x when --z_inputs stacks two "
@@ -438,6 +442,7 @@ def _parse() -> tuple[Stage2Config, str]:
         seeds = tuple(range(int(a.seeds)))
     eval_datasets = tuple(a.eval_datasets.split(",")) if a.eval_datasets else ()
     z_inputs = tuple(s.strip() for s in a.z_inputs.split(",")) if a.z_inputs else ()
+    arms = tuple(s.strip() for s in a.arms.split(",")) if a.arms else Stage2Config.arms
 
     cfg = Stage2Config(
         k_soft_tokens=a.k_soft_tokens, proxy_model=a.proxy_model, lr=a.lr, epochs=a.epochs,
@@ -448,7 +453,7 @@ def _parse() -> tuple[Stage2Config, str]:
         ckpt_dir=a.ckpt_dir, eval_datasets=eval_datasets,
         selected_position=a.selected_position, selected_layer=a.selected_layer,
         selected_k=a.selected_k, run_name=a.run_name, z_inputs=z_inputs,
-        projector_hidden_dim=a.projector_hidden_dim,
+        projector_hidden_dim=a.projector_hidden_dim, arms=arms,
         smoke=a.smoke, smoke_num_prompts=a.smoke_num_prompts, smoke_steps=a.smoke_steps)
     return cfg, mode
 

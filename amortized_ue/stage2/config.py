@@ -74,8 +74,12 @@ class Stage2Config:
     # Separate model per arm: each arm is trained on its own fixed, null-free
     # sequence (no modality dropout). z-only = [k soft][REG]; z+q drops the
     # response tokens; z+q+resp keeps both.
-    arm: str = "z_q_resp"                       # "z" | "z_q" | "z_q_resp" (smoke/eval default)
-    arms: tuple = ("z", "z_q", "z_q_resp")      # the three arms trained separately
+    # Text-only arms (`q_only`, `q_resp_only`) drop z entirely -> sequence is just [text][REG],
+    # the projector is never called. They test whether SE is predictable with NO target-LLM
+    # forward pass at all -- the one thing a hidden-state probe (SEP / ridge) cannot do.
+    # Default stays the three z-arms so existing runs reproduce; opt in via `--arms`.
+    arm: str = "z_q_resp"                       # smoke/eval default
+    arms: tuple = ("z", "z_q", "z_q_resp")      # trained separately; see --arms for the 5-arm set
 
     # --- LoRA (not to be changed) -----------------------------------------------
     lora_r: int = 16
