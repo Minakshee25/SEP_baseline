@@ -169,6 +169,20 @@ collapses into noise** (|mean| ≤ 0.03, signs inconsistent at 2–3 / 5 seeds).
 Lesson worth keeping: sign-consistency across seeds shows an effect isn't *seed* noise — it does
 **not** show the effect is real when the whole configuration is mis-specified.
 
+### Architecture change — input / projector dims, before vs after
+
+Output side unchanged (k=4 soft tokens × d_model 3072 = 12288). The input **doubled** (two
+complementary positions) while compression **halved** (16× → 8×) — strictly less lossy.
+
+| | BEFORE | AFTER (reference) |
+|---|---|---|
+| z input | **4096** (TBG L12, 1 pos × 1 layer) | **8192** (TBG L22 + SLT L15 stacked, flattened) |
+| projector | `LN(4096)→Lin(4096→256)→GELU→Drop→Lin(256→12288)` | `LN(8192)→Lin(8192→1024)→GELU→Drop→Lin(1024→12288)` |
+| bottleneck | 256 (16× compression) | 1024 (8× compression) |
+| projector params | 4,215,041 | 21,001,217 |
+| total trainable | 13.4M | 30.2M |
+| frozen backbone | 3.24B | 3.24B (untouched) |
+
 ### Results — REFERENCE (5 seeds; TBG L22 + SLT L15 stacked, projector 8192→1024, k=4)
 
 ID = trivia_qa N=2000 (held-out test); OOD = train trivia → eval squad N=1000 (all rows).

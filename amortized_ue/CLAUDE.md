@@ -240,6 +240,24 @@ prove the effect is real if the whole configuration is mis-specified.
 The superseded numbers live in `stage2/runs/..._n2000_full/results_multiseed.json` and
 `ood_results_squad_multiseed.json` (kept for provenance only — do not cite).
 
+### Architecture change (2026-07-13) — what the input/projector dims actually became
+
+The output side is unchanged (k=4 soft tokens × d_model 3072 = 12288). What changed: the input
+**doubled** (two complementary positions instead of one) while the compression ratio **halved**
+(16× → 8×), so the projector is strictly less lossy despite ingesting twice as much.
+
+| | BEFORE (original) | AFTER (reference) |
+|---|---|---|
+| z input | 1 pos × 1 layer → **4096** (TBG L12) | 2 pos stacked `[2,4096]` → flat **8192** (TBG L22 + SLT L15) |
+| projector | `LN(4096)→Lin(4096→256)→GELU→Drop→Lin(256→12288)` | `LN(8192)→Lin(8192→1024)→GELU→Drop→Lin(1024→12288)` |
+| bottleneck | 256 (**16×** compression) | 1024 (**8×** compression) |
+| projector params | 4,215,041 | 21,001,217 |
+| total trainable | **13.4M** | **30.2M** |
+| frozen backbone | 3.24B (untouched) | 3.24B (untouched) |
+
+`h_in` is computed automatically by `Stage2Data.h_in_for(cfg)` = `len(z_inputs) · H`; the projector
+flattens `[B, n, H]`, which is why **`model.py` needed no change**.
+
 ### REFERENCE RESULT (2026-07-13): TBG L22 + SLT L15, projector 8192→1024, 5 seeds
 
 Run: `--ood --ood_dataset squad --seeds 5 --reuse_selection --z_inputs TBG:22,SLT:15
