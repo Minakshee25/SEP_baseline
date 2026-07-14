@@ -6,16 +6,17 @@
 > compatibility, and the `se_probes` env). Read both. Stage 2 runs in its **own separate
 > conda env** (`amortized_stage2`, see the Stage 2 section) — `se_probes` stays pinned.
 
-> 📓 **The chronological experiment log is `../EXPERIMENTS.md`** (repo root) — every experiment E0–E10,
-> what changed, what came out, and what was **retracted**, with the reasoning. Read it for *how we got
-> here*. This file is *current state + how to run things*. Keep both in sync: **when you run a new
-> experiment, add an entry to `EXPERIMENTS.md`.**
+> 📓 **The chronological experiment log is `../EXPERIMENTS.md`** (repo root) — every experiment from
+> E0 onwards, what changed, what came out, and what was **retracted**, with the reasoning. Read it for
+> *how we got here*. This file is *current state + how to run things*. Keep both in sync: **when you
+> run a new experiment, add an entry to `EXPERIMENTS.md`.**
 
 ## What this module is
 
 MSc project: **amortized uncertainty estimation** — train a small model to predict a
 large LLM's semantic entropy in a **single forward pass**, avoiding the multi-sample
-cost at inference. Two stages, both now built:
+cost at inference — with the long-term goal of a proxy that **transfers across target
+LLMs** (next section). Two stages, both now built:
 
 - **Stage 1 (dataset):** for one target LLM + QA dataset, produce one **self-contained,
   id-keyed record per prompt** (canonical answer + TBG/SLT hidden states all layers, N
@@ -24,6 +25,30 @@ cost at inference. Two stages, both now built:
 - **Stage 2 (proxy):** train a frozen decoder-only SLM (Llama-3.2-3B) to regress that
   continuous SE label from the stored hidden state (injected as soft tokens) plus optional
   text. Consumes Stage-1 records read-only. See the **Stage 2** section below.
+
+## 🎯 Long-term goal — CROSS-LLM TRANSFER (the thesis; stated 2026-07-14)
+
+**The goal is a proxy whose uncertainty estimates carry across target LLMs** — e.g. train
+on one LLM's data and evaluate on another. This is why the proxy is an SLM and not a
+probe, and why question/response **text** is kept as an input alongside the hidden state:
+text is model-agnostic, so a text-reading proxy is not tied to any one target model. The
+scientific backing to be tested is the **Platonic Representation Hypothesis** (internal
+representations of different LLMs align more and more as their training data grows) — so
+the hidden-state input may carry across models too.
+
+**The targeted novelty:** amortized uncertainty estimation that is not locked to a single
+target LLM — something a per-model probe (SEP / ridge) cannot offer, since a probe fit on
+one model's hidden states cannot be applied to another without retraining. **The exact
+recipe is an open research question** — it may mean training on one LLM and transferring,
+mixing data from multiple LLMs, aligning representations across models, or something else.
+Do not lock in an experimental design here.
+
+**Status: cross-LLM work has NOT started.** The prerequisite is the current failure (see
+"⛔ Current failure" below): the proxy trained on a single LLM's data overfits, and
+memorising patterns specific to one training setup is exactly what will not carry over —
+single-LLM generalisation must be fixed first. The proxy being "unnecessarily big" for the
+single-LLM task is a deliberate choice in service of this goal, not an oversight; but its
+*regularisation* must match the task.
 
 ## Relationship to the SEP repo (read-only reuse)
 
@@ -213,7 +238,7 @@ bottleneck width (default stays 256 so old runs reproduce — pass 1024 when sta
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout — **not to
   be changed**. bf16 backbone; projector/head fp32, cast at the backbone boundary.
 
-## Current state (updated 2026-07-13)
+## Current state (updated 2026-07-14)
 
 **Stage 1 datasets (target LLM Llama-2-7b-chat):**
 - `trivia_qa ..._n400_full/` — 400 records (mean_acc 0.5775, mean_CAE 0.6138). W&B artifact
@@ -313,9 +338,12 @@ all text arms are now indistinguishable from z-only.**
 2. **The text arms add nothing once z is well-fed.** They were compensating for a weak z.
 3. **The proxy still LOSES to ridge on the same input** (0.602 vs 0.642 ID; 0.368 vs 0.437 OOD),
    even with the right layers and a 1024-wide projector. This is now a *fair fight* and a clean
-   **negative result**: the frozen-3B + LoRA + soft-token design extracts nothing a linear
-   readout cannot. Consistent with the MLP-vs-ridge test (below): the z→SE relation is linear,
-   so there is no nonlinear signal for a backbone to add.
+   **negative result within a single target LLM**: the frozen-3B + LoRA + soft-token design
+   extracts nothing a linear readout cannot. Consistent with the MLP-vs-ridge test (below): the
+   z→SE relation is linear, so there is no nonlinear signal for a backbone to add. (It does NOT
+   invalidate the SLM under the cross-LLM goal, where ridge-on-one-model cannot be applied to
+   another — see "🎯 Long-term goal". The overfitting behind this loss is dissected in
+   "⛔ Current failure".)
 
 **Checkpointing (2026-07-02) — train once, evaluate anywhere.** Previously OOD *retrained* the
 model (no weights were ever saved — only metrics JSON). Now `checkpoint.py` + `--save_checkpoints`
@@ -445,45 +473,73 @@ same text gets ID 0.351 and **collapses to 0.037 (chance) OOD**, vs the 3B's 0.2
 Question-length alone: 0.101. So the 3B is reading something *semantic* about question difficulty
 that transfers across a domain shift; n-grams only memorise dataset vocabulary.
 
-**The two-regime framing for the thesis:**
-- **Hidden states available** → a linear probe (≈ SEP) is all you need; **the proxy is redundant**.
-  Report this as a clean negative result.
+**The two-regime framing (within a single target LLM):**
+- **Hidden states available** → a linear probe (≈ SEP) is all you need; **the proxy is redundant**
+  *in this single-model setting*. Report this as a clean negative result — but note it is
+  conditional: under the cross-LLM goal (see "🎯 Long-term goal"), a probe fit on one model's
+  hidden states cannot be applied to another at all.
 - **No target-LLM forward pass** → **only the SLM can run at all**, and no trivial text baseline
-  comes close. This is the regime that matters for routing / abstention / cascades.
+  comes close (routing / abstention / cascades). The text arms are also the natural cross-LLM
+  vehicle: their input distribution does not change when the target model changes.
+
+## ⛔ Current failure (2026-07-14) — the proxy OVERFITS; fix before any cross-LLM work
+
+The direct diagnostic (TRAIN metrics added in commit `95065e9`): the z arm reaches train
+Spearman **0.891** but test **0.590**, while ridge on the *identical* input gets train
+0.856 / test **0.642**. The proxy fits the training set harder than ridge and generalises
+worse — and train 0.891 is nearly at the label-noise ceiling (0.914), so it is fitting noise.
+
+**Why:** the z→SE task is linear (MLP < ridge at every input) and small (1440 train rows vs
+8192-dim z), but the trainable capacity is much larger than the task (LoRA r16 across all
+backbone layers + the MLP projector) and the regularisation is far too weak
+(`weight_decay 0.01`, while ridge's CV-selected α on this data is ~1e4). The frozen backbone
+is untouched either way — the overfitting lives entirely in the adapters/projector/head.
+
+**Why it blocks the goal:** cross-LLM transfer requires the proxy to learn what generalises,
+not what is idiosyncratic to one model's training data. Regularising is aligned with the
+goal, not a retreat from it. Caveat: the right settings may differ per arm — the text arms
+(`q_only`) do genuinely nonlinear work, so do not assume the winning z-arm regularisation
+transfers to them; test both.
+
+**In flight (uncommitted in `stage2/run.py`, 2026-07-14):** four new CLI flags —
+`--weight_decay` (try ≫0.01), `--projector_type linear` (drops GELU + hidden layer),
+`--projector_dropout`, `--lora_r` (0 disables LoRA entirely). The corresponding
+`Stage2Config` fields already existed; this is wiring only. **The regularisation experiment
+has not been run yet** — it is the immediate next step.
 
 ## To-do list (pick up here)
 
-**Done (2026-07-13):** ridge-based layer selection (#2), projector widened to 1024 (#3), arm
-comparison re-run at the corrected input (#4 — all text effects turned out to be noise). The
+> ⚠️ **This list predates the cross-LLM goal statement (2026-07-14) and needs
+> re-prioritisation by the user around that goal** — treat the open items below as
+> candidates, not an agreed order.
+
+**Done (2026-07-13):** ridge-based layer selection, projector widened to 1024, arm
+comparison re-run at the corrected input (all text effects turned out to be noise). The
 multi-layer *band* ablation is **cancelled**: measured at +0.005, layers within a position are
 redundant; positions are what matter, and `--z_inputs` already exploits that.
 
-**The one thing that now matters: the proxy loses to ridge in a fair fight (0.602 vs 0.642 ID,
-0.368 vs 0.437 OOD).** Everything below is framed around that.
+**Done (2026-07-14):** text-only arms `q_only` / `q_resp_only` built and run (E12) with the
+bag-of-words control (E13) — see "⭐ THE HEADLINE RESULT" above. The old "decide the thesis
+framing" item is **resolved**: the thesis is **cross-LLM transfer** (see "🎯 Long-term goal").
 
-1. **Decide the thesis framing — talk to the supervisor first.** A linear probe on hidden states
-   predicting SE *is essentially SEP* (arXiv:2406.15927). Since ridge wins, the z-only branch of
-   this project re-derives existing work. The SLM cannot be justified by "it models z better" —
-   MLP < ridge proves there is no nonlinear signal to win with. Its value must come from something
-   ridge **structurally cannot do**. This is a real pivot; surface it as a result, not a failure.
-2. **(Highest value) Text-only arms — the one thing ridge cannot do.** Every current arm contains
-   z, which requires a **forward pass of the target LLM** — but if you are running that pass
-   anyway, SEP/ridge already solves the problem. Add **`q_only`** and **`q_resp_only`** arms (no z)
-   to test whether the SLM can predict SE from **text alone, with no target-model forward pass**.
-   Even ~0.3–0.4 Spearman would be a genuinely new capability (uncertainty *before* generation:
-   routing, abstention, cascades). A hidden-state probe cannot do this by construction.
-3. **Close the remaining ridge gap, or concede it.** Proxy 0.602 vs ridge 0.642 ID. Try
-   `--projector_hidden_dim 2048` / `projector_type=linear` (pass-through). If it still loses,
-   **report the negative result** — it is well-controlled and publishable.
-4. **Beat ridge OOD, or concede.** Best OOD known is ridge on **SLT L15 alone (0.495)**, well
+**The immediate next step: the regularisation experiment** (see "⛔ Current failure") — the
+four new flags in `stage2/run.py` are wired but uncommitted, and the experiment has not run.
+
+Open items carried over (pending re-prioritisation):
+
+1. **Close the remaining ridge gap, or concede it.** Proxy 0.602 vs ridge 0.642 ID. The
+   regularisation experiment (`--projector_type linear`, `--lora_r 0`, stronger
+   `--weight_decay`) is the direct attack on this. If it still loses, **report the negative
+   result** — it is well-controlled and publishable.
+2. **Beat ridge OOD, or concede.** Best OOD known is ridge on **SLT L15 alone (0.495)**, well
    above the proxy's 0.368. Try `--z_inputs SLT:15` (single position) — late TBG layers are
    OOD-brittle and may be *hurting* the OOD arm.
-5. **Report every result against the ridge baseline.** Ridge on `[TBG L22 + SLT L15]` = **0.642 ID
+3. **Report every result against the ridge baseline.** Ridge on `[TBG L22 + SLT L15]` = **0.642 ID
    / 0.437 OOD** (and SLT L15 = 0.495 OOD) is the number to beat. Cheap, exact, seconds on CPU.
-6. **Full 2×2 OOD matrix** — also train on squad and eval on trivia_qa. *Low priority.*
-7. **Hyperparameter pass** — lr, LoRA rank, epochs. *Low priority* (the arms are now equivalent,
-   so there is no regime-dependent arm choice to tune for).
-8. **(Only if reviving the nonlinear story) Scale Stage-1 to N≈10k.** The MLP had 1440 examples
+4. **Cross-LLM groundwork** — design still open (see "🎯 Long-term goal"; do not lock in a
+   recipe). Blocked on the overfitting fix.
+5. **Full 2×2 OOD matrix** — also train on squad and eval on trivia_qa. *Low priority.*
+6. **(Only if reviving the nonlinear story) Scale Stage-1 to N≈10k.** The MLP had 1440 examples
    for a 4096–8192-dim input, so "the relation is linear" is really "linear at N=2000". Expensive
    and speculative; do not lead with it.
-9. **(Housekeeping)** rotate the HF token that was pasted in chat (security).
+7. **(Housekeeping)** rotate the HF token that was pasted in chat (security).

@@ -13,10 +13,14 @@ A detailed read-only walkthrough of the data-generation and hidden-state-extract
 > module (amortized uncertainty estimation) reuses the SEP logic read-only and is governed
 > by its own scoped CLAUDE.md, which auto-loads when working under `amortized_ue/`. It now
 > has **Stage 1 (offline SE dataset)** and **Stage 2 (SLM proxy that predicts SE in one
-> forward pass)** — both built. **Stage 2 runs in a separate conda env `amortized_stage2`**
-> (cloned from `se_probes`, upgraded to transformers 4.52.4 + peft, for Llama-3.2-3B); this
-> root file's `se_probes` env stays pinned for the SEP baseline. This root file stays focused
-> on the SEP baseline + shared env/machine setup that `amortized_ue/` inherits.
+> forward pass)** — both built. **The long-term goal of that module — the actual thesis —
+> is CROSS-LLM TRANSFER:** train the proxy on one target LLM's data, then test it on a
+> *different* target LLM, motivated by the Platonic Representation Hypothesis. See
+> `amortized_ue/CLAUDE.md` § "Long-term goal". **Stage 2 runs in a separate conda env
+> `amortized_stage2`** (cloned from `se_probes`, upgraded to transformers 4.52.4 + peft,
+> for Llama-3.2-3B); this root file's `se_probes` env stays pinned for the SEP baseline.
+> This root file stays focused on the SEP baseline + shared env/machine setup that
+> `amortized_ue/` inherits.
 
 ## Environment Setup
 
@@ -130,7 +134,10 @@ The notebook is wired for the 4-dataset experiment (bioasq/trivia-qa/nq/squad) w
 
 ### `amortized_ue/` — amortized UE (new work; see `amortized_ue/CLAUDE.md`)
 
-Sibling module for the amortized-uncertainty MSc project. **Stage 1** builds one
+Sibling module for the amortized-uncertainty MSc project. **The end goal is a proxy that
+transfers ACROSS target LLMs** (train on LLM A's data, test on LLM B — a test of the
+Platonic Representation Hypothesis in the uncertainty domain); that is why the proxy is an
+SLM taking text alongside hidden states, not a per-model probe. **Stage 1** builds one
 self-contained, **id-keyed** record per prompt (canonical low-temp answer + TBG/SLT
 hidden states all layers, N high-temp samples, and a **continuous**
 `cluster_assignment_entropy` label) so Stage 2 can train a proxy without re-running the
@@ -164,7 +171,7 @@ This is a baseline I must reproduce faithfully, not code to improve.
 - Do NOT add new models (Gemma included). New targets are a separate task.
 - Never print or echo environment variables.
 
-## Current state (updated 2026-07-13)
+## Current state (updated 2026-07-14)
 
 **Pipeline proven end-to-end. Real Llama-2-7b-chat N=400 / trivia_qa baseline COMPLETE (Stages 1–4).**
 
@@ -173,12 +180,14 @@ This is a baseline I must reproduce faithfully, not code to improve.
 - **Llama-2-7b-chat baseline run COMPLETE:** N=400, trivia_qa, Stages 1→2 auto-chained. wandb run id `095l3ou2` (`celestial-night-5`), artifacts at `semantic_uncertainty/mn1025/uncertainty/wandb/run-20260624_170438-095l3ou2/files/`.
 - **Llama-2 probe training COMPLETE:** `run_llama2_probe.py` (pointed at run `095l3ou2`) trained SEP + Acc. Pr. at TBG/SLT, 33 layers, SE split 0.814. Per-layer test AUROC — **SEP TBG** mean 0.623 / best layer 18 = 0.695; **SEP SLT** mean 0.608 / best layer 22 = 0.726; **AccPr TBG** mean 0.665 / best layer 11 = 0.795; **AccPr SLT** mean 0.642 / best layer 20 = 0.731. Saved to `semantic_entropy_probes/models/Llama-2-7b-chat_probe_inference.pkl`. Still to do: compare against the SEP paper (arXiv:2406.15927) and reconcile (paper expects SEP highly probeable, often > direct Acc. probe).
 - **Falcon-7b (pipeline sanity, NOT the baseline):** N=400 run `9ddn5y2k` (`spring-planet-4`) + probe training validated the full pipeline; per-layer probes in `models/falcon-7b_smoke_inference.pkl`. N<400 is too few to train probes — `test_size=0.1` can leave a single-class test split and `roc_auc_score`/`log_loss` raise `ValueError: y_true contains only one label`.
-- **`amortized_ue/` (new work, separate from the baseline — Stages 1 & 2 built):** Stage 1 offline SE datasets for Llama-2-7b-chat: trivia_qa N=400 (`stage1_records:v0`) + N=2000 (`stage1_records_n2000`), and squad N=1000 (OOD, local). Stage 2 SLM proxy (Llama-3.2-3B, separate `amortized_stage2` env) COMPLETE.
+- **`amortized_ue/` (new work, separate from the baseline — Stages 1 & 2 built):** Stage 1 offline SE datasets for Llama-2-7b-chat: trivia_qa N=400 (`stage1_records:v0`) + N=2000 (`stage1_records_n2000`), and squad N=1000 (OOD, local). Stage 2 SLM proxy (Llama-3.2-3B, separate `amortized_stage2` env) built and running.
+  - **🎯 LONG-TERM GOAL (the thesis, stated 2026-07-14): CROSS-LLM TRANSFER.** Train the proxy on target-LLM A's data, then test whether it predicts SE for a *different* target LLM B — motivated by the **Platonic Representation Hypothesis** (representations of different LLMs align as training scale grows). This is *why* the proxy is an SLM taking question/response **text** alongside the hidden state: text is model-agnostic, so the trained proxy can in principle serve a target model it never saw. That is the targeted novelty — no per-model probe (SEP/ridge) can do it, since a probe fit on A's hidden states cannot even be *applied* to B without retraining/alignment. Cross-LLM experiments have **not started**; the prerequisite below blocks them.
+  - **⛔ CURRENT FAILURE / active work: the proxy OVERFITS on a single LLM.** Train Spearman **0.891** vs test **0.590**, while ridge on the identical input gets train 0.856 / test **0.642** — the proxy fits harder and generalises worse. Cause: the z→SE task is linear (MLP < ridge) but the trainable capacity is large (LoRA r16 × 28 layers + MLP projector) and regularisation weak (weight_decay 0.01; ridge's CV-selected α is ~1e4). Fixing this is a **prerequisite for the transfer goal** — memorising A-specific representation directions is exactly what cannot transfer. In flight (uncommitted, 2026-07-14): `stage2/run.py` now exposes `--weight_decay / --projector_type linear / --projector_dropout / --lora_r` (0 disables LoRA); the regularisation experiment has not yet been run.
   - **Reference result (2026-07-13, 5 seeds; z input = TBG L22 + SLT L15 stacked, projector 1024):** ID (trivia N=2000) Spearman **0.602 ± 0.019** / AUROC 0.807; OOD (trivia→squad) Spearman **0.368 ± 0.033**. **Spearman is the primary metric**, not AUROC.
   - ⚠️ **RETRACTED:** the earlier TBG-L12 claims (*"text hurts in-distribution"*, *"the response helps OOD"*) are **withdrawn**. The 3B (pos,layer) sweep had picked a poor layer; with z starved of information the text arms were *compensating* for it. At the corrected input every text effect collapses to noise. **Do not cite the TBG-L12 numbers.**
-  - **Key negative result:** a plain **ridge** regression on the *same* hidden states beats the 3B proxy (0.642 vs 0.602 ID; 0.437 vs 0.368 OOD), and an **MLP loses to ridge** at every input — the z→SE relation is **linear**, so the frozen backbone has no nonlinear signal to add. Two diagnostics now live in `amortized_ue/`: `linear_ceiling_probe.py` (ridge baseline + the correct way to pick the layer) and `label_noise_ceiling.py` (achievable ceiling ≈0.914 ID / 0.901 squad ⇒ the proxy recovers 66% of achievable ID).
-  - **⭐ Key POSITIVE result (E12/E13) — the thesis.** Drop the hidden state entirely and the picture inverts. The **`q_only`** arm predicts SE **from the question text alone, with no target-LLM forward pass at all**: ID Spearman **0.494** (54% of the achievable ceiling, 82% of what the hidden state gets) — something a hidden-state probe **cannot do by construction**. Controlled against a bag-of-words baseline (`text_baseline_probe.py`): TF-IDF→ridge gets 0.351 ID and **collapses to 0.037 (chance) OOD** vs the 3B's 0.259 — a **7× gap**, so it is *not* a surface shortcut. **Two-regime framing:** with hidden states, a linear probe is all you need and the proxy is redundant; **without them — the regime that matters for routing/abstention/cascades — only the SLM can run.**
-  - Full results, save locations, and the reprioritised to-do list are in `amortized_ue/CLAUDE.md` / `amortized_ue/README.md`.
+  - **Key negative result (single-target-LLM setting):** a plain **ridge** regression on the *same* hidden states beats the 3B proxy (0.642 vs 0.602 ID; 0.437 vs 0.368 OOD), and an **MLP loses to ridge** at every input — the z→SE relation is **linear**, so the frozen backbone has no nonlinear signal to add *within one model*. Note this result is **conditional on staying inside one target LLM**: under the cross-LLM goal, ridge-on-A cannot run on B at all, so there ridge becomes a baseline (via a linear alignment/stitch), not a replacement. Two diagnostics live in `amortized_ue/`: `linear_ceiling_probe.py` (ridge baseline + the correct way to pick the layer) and `label_noise_ceiling.py` (achievable ceiling ≈0.914 ID / 0.901 squad ⇒ the proxy recovers 66% of achievable ID).
+  - **⭐ Key POSITIVE result (E12/E13) — supports the transfer goal.** The **`q_only`** arm predicts SE **from the question text alone, with no target-LLM forward pass at all**: ID Spearman **0.494** (54% of the achievable ceiling, 82% of what the hidden state gets) — something a hidden-state probe **cannot do by construction**. Controlled against a bag-of-words baseline (`text_baseline_probe.py`): TF-IDF→ridge gets 0.351 ID and **collapses to 0.037 (chance) OOD** vs the 3B's 0.259 — a **7× gap**, so it is *not* a surface shortcut. The text arms are also the natural cross-LLM vehicle: their input distribution does not change when the target model changes, only the label does.
+  - Full results, save locations, and the to-do list are in `amortized_ue/CLAUDE.md` / `amortized_ue/README.md` (⚠️ the to-do list there predates the cross-LLM goal statement and is being re-prioritised).
 
 ## Outstanding tasks
 
