@@ -157,20 +157,31 @@ class ProxyModel(nn.Module):
 
     # --- forward ----------------------------------------------------------------
     def forward(self, z, text_input_ids=None, text_attention_mask=None):
-        """z: [B, n_layers_in, H_in]; text_* optional (None => z-only arm).
+        """z: [B, n_layers_in, H_in] or None; text_* optional.
 
         Builds [k soft] (+ [text]) + [REG]; regresses SE from the REG token's final
         hidden state. Returns pred [B] in standardised target space.
+
+        `z=None` is the TEXT-ONLY arm (q_only / q_resp_only): the projector is skipped
+        entirely and the sequence is just [text][REG]. The projector's params then receive
+        no gradient, which AdamW and clip_grad_norm_ both handle (they skip params whose
+        .grad is None). `z=None` requires text; at least one of the two must be present.
         """
-        B = z.shape[0]
         d = self.d_model
         md = self.model_dtype
         dev = self.emb_norm.device
 
-        # soft tokens in fp32 (stable projector) -> cast to backbone dtype at the boundary
-        soft = self.projector(z.to(dev)).to(md)                       # [B, k, d]
-        parts = [soft]
-        attn_parts = [torch.ones(B, soft.shape[1], device=dev, dtype=torch.long)]
+        parts, attn_parts = [], []
+        if z is not None:
+            # soft tokens in fp32 (stable projector) -> cast to backbone dtype at the boundary
+            soft = self.projector(z.to(dev)).to(md)                   # [B, k, d]
+            B = soft.shape[0]
+            parts.append(soft)
+            attn_parts.append(torch.ones(B, soft.shape[1], device=dev, dtype=torch.long))
+        elif text_input_ids is not None:
+            B = text_input_ids.shape[0]                                # text-only arm
+        else:
+            raise ValueError("forward() needs z, text_input_ids, or both — got neither")
 
         if text_input_ids is not None and text_input_ids.shape[1] > 0:
             text_emb = self.embed_tokens(text_input_ids.to(dev)).to(md)   # [B, T, d]

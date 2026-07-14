@@ -28,14 +28,38 @@ from amortized_ue.stage2.data import Stage2Data
 from amortized_ue.stage2.model import ProxyModel
 
 
-# ------------------------------- text batching --------------------------------
+# ------------------------------- arms -----------------------------------------
+# Five arms — a 2x2 of {no text, question, question+response} x {with z, without z}:
+#
+#   arm          z?    text                  sequence
+#   z            yes   --                    [k soft][REG]
+#   z_q          yes   Question:             [k soft][text][REG]
+#   z_q_resp     yes   Question: + Answer:   [k soft][text][REG]
+#   q_only       NO    Question:             [text][REG]
+#   q_resp_only  NO    Question: + Answer:   [text][REG]
+#
+# Why the TEXT-ONLY arms exist: every z-arm needs a forward pass of the TARGET LLM to produce z
+# — and if you are running that pass anyway, a linear probe on the hidden states (SEP / our ridge
+# baseline) already solves the problem, and beats this proxy. The text-only arms ask something a
+# hidden-state probe CANNOT answer by construction: can we predict SE with NO target-LLM forward
+# pass at all? `q_only` is the strong version (uncertainty known BEFORE generation -> routing,
+# abstention, cascades). `q_resp_only` still needs the target's answer text, but not its hidden
+# states. These arms never touch the projector.
+_Z_FREE_ARMS = ("q_only", "q_resp_only")
+
+
+def _arm_uses_z(arm: str) -> bool:
+    """True for every z-arm (z, z_q, z_q_resp); False only for the text-only arms."""
+    return arm not in _Z_FREE_ARMS
+
+
 def _arm_text(arm: str, question: str, response: str):
     """The text string an arm reveals (None for the z-only arm)."""
     if arm == "z":
         return None
-    if arm == "z_q":
+    if arm in ("z_q", "q_only"):
         return f"Question: {question}\nAnswer:"
-    if arm == "z_q_resp":
+    if arm in ("z_q_resp", "q_resp_only"):
         return f"Question: {question}\nAnswer: {response}"
     raise ValueError(f"unknown arm {arm!r}")
 
@@ -206,7 +230,9 @@ class Trainer:
 
     def _forward_batch(self, rows, position, layer, arm, data=None):
         d = data or self.data
-        if self.cfg.z_inputs:
+        if not _arm_uses_z(arm):
+            z = None                       # text-only arm: no soft tokens, no projector
+        elif self.cfg.z_inputs:
             # multi-input z: stack the configured (position, layer) pairs -> [B, n_inputs, H];
             # the projector flattens them. `position`/`layer` are ignored in this mode.
             z = d.z_multi(d.parse_z_inputs(self.cfg.z_inputs), rows).to(self.device)
