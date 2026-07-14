@@ -419,6 +419,20 @@ def _parse() -> tuple[Stage2Config, str]:
                    help="comma-separated arms to train. Default: z,z_q,z_q_resp. The TEXT-ONLY "
                         "arms q_only / q_resp_only drop z entirely (no target-LLM forward pass) "
                         "-- e.g. 'z,z_q,z_q_resp,q_only,q_resp_only' for the full 5-arm set.")
+    # --- regularisation knobs (the proxy is UNDER-regularised: train 0.891 / test 0.590,
+    #     vs optimal ridge's 0.856 / 0.642 -- it memorises harder and generalises worse) ---
+    p.add_argument("--weight_decay", type=float, default=Stage2Config.weight_decay,
+                   help="AdamW weight decay (default 0.01). The analogue of ridge's alpha, which "
+                        "is selected at ~1e4 on this data — so 0.01 is very weak. Try 0.1 / 1.0.")
+    p.add_argument("--projector_type", default=Stage2Config.projector_type,
+                   choices=["mlp", "linear"],
+                   help="'linear' drops the GELU + hidden layer. The z->SE relation is LINEAR "
+                        "(MLP loses to ridge at every input), so the MLP is capacity to overfit with.")
+    p.add_argument("--projector_dropout", type=float, default=Stage2Config.projector_dropout,
+                   help="projector dropout (default 0.1)")
+    p.add_argument("--lora_r", type=int, default=Stage2Config.lora_r,
+                   help="LoRA rank (default 16). 0 DISABLES LoRA entirely — the backbone is frozen "
+                        "and the task is linear, so LoRA across 28 layers is pure overfitting capacity.")
     p.add_argument("--projector_hidden_dim", type=int, default=Stage2Config.projector_hidden_dim,
                    help="projector bottleneck width (default 256, the original locked value). "
                         "256 compresses a 4096-dim z ~16x -- and 32x when --z_inputs stacks two "
@@ -457,6 +471,8 @@ def _parse() -> tuple[Stage2Config, str]:
         selected_position=a.selected_position, selected_layer=a.selected_layer,
         selected_k=a.selected_k, run_name=a.run_name, z_inputs=z_inputs,
         projector_hidden_dim=a.projector_hidden_dim, arms=arms,
+        weight_decay=a.weight_decay, projector_type=a.projector_type,
+        projector_dropout=a.projector_dropout, lora_r=a.lora_r,
         smoke=a.smoke, smoke_num_prompts=a.smoke_num_prompts, smoke_steps=a.smoke_steps)
     return cfg, mode
 
