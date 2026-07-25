@@ -513,6 +513,13 @@ has not been run yet** — it is the immediate next step.
 > re-prioritisation by the user around that goal** — treat the open items below as
 > candidates, not an agreed order.
 
+**📋 TODO (user, high priority): compile & VERIFY a complete "all models + results" record.**
+A draft table was assembled (5 reference arms; superseded/diagnostic proxy configs; ridge, TF-IDF
+and SEP baselines; ceilings) but the user wants to read it in detail first to ensure **no trained
+model is missing** before it is committed as `amortized_ue/RESULTS.md`. Numbers are pulled from
+`runs/*/ood_results_*_multiseed.json` and the diagnostic scripts. Cross-check every `runs/` dir and
+every experiment E0–E17 against the table before finalising.
+
 **Done (2026-07-13):** ridge-based layer selection, projector widened to 1024, arm
 comparison re-run at the corrected input (all text effects turned out to be noise). The
 multi-layer *band* ablation is **cancelled**: measured at +0.005, layers within a position are
