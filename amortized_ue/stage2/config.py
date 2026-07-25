@@ -122,7 +122,12 @@ class Stage2Config:
     # trainable params (projector, REG, head, LoRA) + metadata — never the frozen
     # backbone. This lets one trained proxy be evaluated on many datasets and target
     # models without retraining (the `--eval` mode). See checkpoint.py.
-    save_checkpoints: bool = False               # build: save each arm/seed after training
+    save_checkpoints: bool = True                # DEFAULT ON: always save each arm/seed's trainable
+                                                 # params after training (needed for cross-LLM eval /
+                                                 # reload). Only the ~30M trainable params are stored,
+                                                 # never the frozen backbone. Pass --no_save_checkpoints
+                                                 # to opt out. (Was False; flipped 2026-07 after the
+                                                 # E10/E12 reference models were trained and lost.)
     push_wandb: bool = False                     # build: also push the checkpoint dir as a W&B artifact
     wandb_project: str = "amortized_ue_stage2"   # W&B project for stage-2 checkpoint artifacts
     ckpt_dir: str | None = None                  # eval: dir of *.pt checkpoints (default run_dir/checkpoints)

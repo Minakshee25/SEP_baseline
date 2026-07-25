@@ -400,8 +400,13 @@ def _parse() -> tuple[Stage2Config, str]:
                    help="arm trial seeds: comma list '0,1,2' or an int N -> 0..N-1")
     p.add_argument("--reuse_selection", action="store_true",
                    help="skip the sweep/k-ablation; reuse the saved (pos,layer,k)")
-    p.add_argument("--save_checkpoints", action="store_true",
-                   help="build: save a checkpoint per (arm, seed) under run_dir/checkpoints")
+    # checkpoints save by DEFAULT now (Stage2Config.save_checkpoints=True). --save_checkpoints
+    # is kept as a harmless explicit opt-in; --no_save_checkpoints opts out.
+    p.add_argument("--save_checkpoints", dest="save_checkpoints", action="store_true",
+                   help="save a checkpoint per (arm, seed) under run_dir/checkpoints (default ON)")
+    p.add_argument("--no_save_checkpoints", dest="save_checkpoints", action="store_false",
+                   help="opt OUT of saving checkpoints")
+    p.set_defaults(save_checkpoints=Stage2Config.save_checkpoints)
     p.add_argument("--push_wandb", action="store_true",
                    help="build: also push the checkpoint dir as a W&B artifact")
     p.add_argument("--eval", action="store_true",
