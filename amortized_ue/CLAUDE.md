@@ -311,11 +311,19 @@ Run: `--ood --ood_dataset squad --seeds 5 --reuse_selection --z_inputs TBG:22,SL
 Output: `stage2/runs/..._n2000_multipos_p1024/ood_results_squad_multiseed.json`;
 log `stage2/logs/multipos_p1024.log`. **Spearman is primary; AUROC secondary.**
 
-| arm | ID Spearman | OOD Spearman | ID AUROC | OOD AUROC |
-|-----|-------------|--------------|----------|-----------|
-| **z (hidden only)** | **0.602 ± 0.019** | 0.368 ± 0.033 | **0.807 ± 0.013** | 0.669 ± 0.014 |
-| z + question | 0.590 ± 0.049 | 0.402 ± 0.033 | 0.808 ± 0.025 | 0.684 ± 0.018 |
-| z + question + resp | 0.583 ± 0.015 | 0.398 ± 0.060 | 0.799 ± 0.012 | 0.682 ± 0.025 |
+**✅ SAVED MODEL (2026-07-27):** retrained with checkpoints at
+`stage2/runs/REFERENCE_multipos_p1024_5arm_ckpt/` — **25 checkpoints** (5 arms × 5 seeds,
+`<arm>_seed<n>.pt`, ~30M trainable params each, no frozen backbone). Numbers reproduce the table
+below **to 4 dp** (verified against the original `..._multipos_p1024` / `..._textonly_5arm` runs).
+Full 5-arm table, mean ± std over 5 seeds:
+
+| arm | needs target LLM? | ID Spearman | OOD Spearman | ID AUROC | OOD AUROC |
+|-----|-------------------|-------------|--------------|----------|-----------|
+| **z (hidden only)** | yes (hidden states) | **0.602 ± 0.019** | 0.368 ± 0.033 | **0.807 ± 0.013** | 0.669 ± 0.014 |
+| z + question | yes | 0.590 ± 0.049 | **0.402 ± 0.033** | 0.808 ± 0.025 | 0.684 ± 0.018 |
+| z + question + resp | yes | 0.583 ± 0.015 | 0.398 ± 0.060 | 0.799 ± 0.012 | 0.682 ± 0.025 |
+| **q_only** | **NO — nothing** | 0.494 ± 0.049 | 0.259 ± 0.047 | 0.758 ± 0.031 | 0.614 ± 0.026 |
+| **q_resp_only** | answer text only | 0.521 ± 0.049 | 0.399 ± 0.073 | 0.768 ± 0.028 | 0.684 ± 0.038 |
 
 Paired (arm − z), Spearman: z_q **−0.013 ID (2/5)** / +0.034 OOD (3/5); z_q_resp **−0.020 ID
 (2/5)** / +0.030 OOD (3/5). **No text effect is sign-consistent or larger than its own std —
