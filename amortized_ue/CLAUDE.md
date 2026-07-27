@@ -513,6 +513,24 @@ has not been run yet** — it is the immediate next step.
 > re-prioritisation by the user around that goal** — treat the open items below as
 > candidates, not an agreed order.
 
+**⛔ BLOCKED ON INFRASTRUCTURE (2026-07, resume later): `/vol/bitbucket` NFS is degraded.**
+Two runs were launched and **wedged in uninterruptible disk-I/O wait** (`D` state,
+`folio_wait_bit_common`) for ~5h with zero progress, then killed. Root cause: the shared NFS
+export `fs-vol-bitbucket.doc.ic.ac.uk:/export/vol/bitbucket` (mounted at `/vol/bitbucket`, **100%
+full, ~1.1T free of 174T**) has collapsed I/O — reading the 2GB of Stage-1 records **times out
+(>40s)** even though a bare `ls` is fast (metadata only). `mn1025` is NOT a separate disk — it is a
+subfolder on that same NFS export, so no path change escapes it. **All Stage-2 work is blocked**
+(data, conda env `amortized_stage2`, and HF cache all live on that volume).
+- **Recovery test (use this, NOT `ls`):** `time cat <records-dir>/*.pt > /dev/null` — when it
+  finishes in seconds, the FS is usable and the two runs below can relaunch as-is.
+- **Escape route if NFS stays bad:** node-local `/data2` (ext4, **11T free**, not NFS). Stage the
+  records + HF cache there once (needs one clean NFS read window), then run from local disk.
+- **Two runs to resume (commands saved, code committed):** (1) regenerate the reference model WITH
+  checkpoints — `--arms z,z_q,z_q_resp,q_only,q_resp_only --z_inputs TBG:22,SLT:15
+  --projector_hidden_dim 1024 --run_name REFERENCE_multipos_p1024_5arm_ckpt` (checkpoints now save
+  by default); (2) proxy learning curve — `python -m amortized_ue.stage2.proxy_learning_curve
+  --sizes 250,500,1000,1440 --seeds 3` (answers "is the proxy data-hungry / do we build more data").
+
 **📋 TODO (user, high priority): compile & VERIFY a complete "all models + results" record.**
 A draft table was assembled (5 reference arms; superseded/diagnostic proxy configs; ridge, TF-IDF
 and SEP baselines; ceilings) but the user wants to read it in detail first to ensure **no trained

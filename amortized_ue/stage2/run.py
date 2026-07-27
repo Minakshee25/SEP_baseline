@@ -247,12 +247,18 @@ def build_ood(cfg: Stage2Config) -> dict:
     logging.info("Using in-distribution selection: position=%s layer=%d k=%d", pos, layer, k)
 
     trainer = Trainer(cfg, data)
+    # save checkpoints here too (build() did, build_ood() did NOT — that bug meant --ood runs
+    # trained and discarded every model despite save_checkpoints=True).
+    ckpt_dir = os.path.join(cfg.run_dir(), "checkpoints") if cfg.save_checkpoints else None
+    if ckpt_dir:
+        logging.info("Saving per-(arm,seed) checkpoints under %s", ckpt_dir)
     # multi-seed: each trial reuses the same (seed,trial,arm) streams as build(), so the
     # ID test numbers here match build()'s for the same trial_seed (removes the caveat).
     trials = []
     for s in cfg.arm_trial_seeds:
         logging.info("=== OOD arm trial seed=%d ===", s)
-        arm_res = trainer.train_arms_trial(pos, layer, k, cfg.arms, trial_seed=s, ood_data=ood_data)
+        arm_res = trainer.train_arms_trial(pos, layer, k, cfg.arms, trial_seed=s,
+                                           ood_data=ood_data, save_dir=ckpt_dir)
         trials.append({"seed": s, "arms": arm_res})
         for arm in cfg.arms:
             tr_, idt, ood = arm_res[arm]["train"], arm_res[arm]["test"], arm_res[arm]["ood"]
