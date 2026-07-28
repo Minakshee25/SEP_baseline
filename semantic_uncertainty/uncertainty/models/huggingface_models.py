@@ -120,7 +120,10 @@ class HuggingfaceModel(BaseModel):
                 base = 'NousResearch'
                 model_name = model_name + '-hf'
             elif 'Llama-3' in model_name:
-                base = 'meta-llama'
+                # blocks-execution: meta-llama/Meta-Llama-3-* is gated (this HF acct is not on the
+                # authorized list — 403). NousResearch mirrors it ungated, same weights/tokenizer.
+                # Same redirect pattern as Llama-2 above. Original: base = 'meta-llama'.
+                base = 'NousResearch'
             else:
                 base = 'huggyllama'
 

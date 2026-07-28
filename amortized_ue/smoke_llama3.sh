@@ -27,10 +27,12 @@
 # If yes -> clear to build the real Llama-3-8B Stage-1 dataset. If run-on/garbled -> add Llama-3's
 # stop tokens / chat prompt format before building.
 
-set -e
 cd "$(dirname "$0")/.."                                   # repo root
 source /data/sv/miniconda3/etc/profile.d/conda.sh
-conda activate amortized_stage2                          # transformers 4.52.4 — loads Llama-3
+# Dedicated env: clone of se_probes + transformers 4.44 — loads Llama-3 (needs >=4.40) AND
+# loads DeBERTa's .bin (predates the torch.load CVE block added ~4.49). Keeps se_probes and
+# amortized_stage2 (and the shared HF cache) untouched. See amortized_ue/CLAUDE.md.
+conda activate se_probes_llama3
 export HF_HOME=/vol/bitbucket/mn1025/hf_cache
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 export PYTHONUNBUFFERED=1
