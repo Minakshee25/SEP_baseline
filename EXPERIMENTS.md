@@ -57,6 +57,13 @@ in each entry.
 | E11 | 07-14 | Attribution ablation (isolate each change) | 2nd position +0.042, width +0.022, **synergistic** | ✅ |
 | E12 | 07-14 | **Text-only arms** (`q_only`, `q_resp_only`, no z) | **SE from the question alone, no target-LLM pass: 0.494** | ✅ **breakthrough** |
 | E13 | 07-14 | Bag-of-words control (TF-IDF → ridge) | TF-IDF 0.351 ID, **0.037 OOD (chance)** — 3B is not a shortcut | ✅ control passes |
+| E14 | 07-14 | Proxy on SLT:15 only (OOD-optimal input) | OOD +0.032, ID −0.075; real ID/OOD trade-off | ⚠️ partial |
+| E15 | 07-14 | Overfitting + learning-curve diagnostics | gap normal; **more data won't help** (ridge flat past 400) | ✅ pivotal |
+| E16 | 07-16 | Regularisation sweep (`weight_decay`, projector form) | flat/noise; single-seed overfit claim RETRACTED | ✅ |
+| E17 | 07-16 | Capacity curve + 20-fold CV | width flat past 1024; **proxy NOT over/under-fitting** | ✅ **confirmed** |
+| E18 | 07-27 | Reference model SAVED (25 checkpoints) + 2 bugs | best model persisted; reproduces E12 to 4 dp | ✅ |
+| E19 | 07-28 | Llama-3-8B dedicated env + Stage-1 smoke | Stage-1 runs, answers sane → **cross-LLM unblocked** | ✅ |
+| E20 | — | Cross-LLM transfer (frozen proxy → Llama-3-8B) | all 5 arms; the PRH test | ⏳ **next** |
 
 ---
 
@@ -468,45 +475,110 @@ baseline **cannot transfer**. The 3B occupies exactly that gap.
 
 ---
 
-## Where we stand
+## E14 — Proxy on SLT:15 only, the OOD-optimal input (2026-07-14) — ⚠️ partial
 
-**What improved:** ID Spearman **0.467 → 0.602** (+29% relative), recovering **66%** of achievable
-signal (from 51%). OOD **0.289 → 0.368**. Both came from **fixing the input**, not from the model.
+**Why:** ridge showed SLT L15 *alone* is better OOD (0.495) than TBG22+SLT15 (0.437) — late TBG
+layers are OOD-brittle, so the proxy might be *hurt* OOD by its TBG input.
+**Result** (5 seeds, `runs/stage2_SLT15only_p1024/`): z arm **ID 0.527 / OOD 0.400** vs the reference
+0.602 / 0.368. Directionally right — OOD **+0.032**, but at **−0.075 ID** (a real ID/OOD trade-off in
+which layer you feed), and the gap to ridge *widened* (−0.095 OOD). The proxy now trails ridge at
+**every** input tested → a *modelling* cause, pinned down in E15–E17.
 
-**What was retracted:** every text-arm claim (E4, E5, E6). Text adds nothing once `z` is well-fed.
+## E15 — Is the proxy over/under-fitting, and would more data help? (2026-07-14) — ✅ pivotal
 
-**The negative result (honest, and worth reporting):** when hidden states ARE available, a **ridge
-regression beats the 3B proxy** (0.642 vs 0.602 ID; 0.437 vs 0.368 OOD), and an MLP loses to ridge —
-so there is **no nonlinear headroom**. A linear probe on hidden states predicting SE is essentially
-**SEP** (arXiv:2406.15927), so that branch of the project re-derives existing work, and ridge does it
-better. **The SLM cannot be justified by "it models `z` better." Report this plainly.**
+Two CPU diagnostics. **(a) Overfitting via the train–test gap.** Ridge on TBG22+SLT15 swept over
+alpha (20-fold CV): test **rises then falls**, peaking at alpha=1e4 (test 0.637, gap 0.213).
+Regularising more makes test *worse* → **the best model still memorises heavily; a ~0.2 train–test
+gap is what OPTIMAL looks like** at N=1440, D=8192, label reliability 0.835. **(b) Learning curve.**
+Ridge test plateaus at ~400 rows (400→1440 = 3.6× data buys only +0.026), and the MLP trails ridge
+by a constant margin at every size → **more data will NOT help, and "z→SE is linear" is solid, not a
+small-N artifact.** ⛔ Do not build a bigger Stage-1 dataset. **SEP itself used only 2000 samples
+across tasks** (arXiv:2406.15927 §B.3), so we are already at/above SEP's data scale.
 
-**The positive result (E12/E13) — this is the thesis.** Drop `z` entirely and the picture inverts:
+## E16 — Regularisation sweep (2026-07-16) — ✅ (a self-correction)
 
-| regime | best method | ID | OOD |
+**Prediction:** the proxy is under-regularised → raising `weight_decay` should close the gap to
+ridge. **Falsified.** `weight_decay` ∈ {0.01,0.1,1.0} → flat (early stopping pre-empts it: a **dead
+knob**). `projector_type` linear vs mlp, resolved at 5 seeds paired: **+0.007 ± 0.047 → noise** (the
+projector's functional form does not matter).
+> ⚠️ **RETRACTED (my own error, same session):** a single-seed reading (proxy train 0.891 vs ridge
+> 0.856) had suggested "under-regularised". The **5-seed** mean train is **0.829**, gap **0.227 ≈
+> optimal ridge's 0.213**. Drawing an overfitting conclusion from n=1 repeated the E6 mistake — caught
+> by re-running at 5 seeds. `Trainer` now logs TRAIN metrics so the gap is always visible.
+
+## E17 — Capacity curve + CV: IS it over/under-fitting? (2026-07-16) — ✅ **CONFIRMED: neither**
+
+To hold the proxy to ridge's standard it needs its own rise-and-fall on a *working* dial.
+`projector_hidden_dim` (5 seeds each): 256→0.559 · **1024→0.602** · 2048→0.585 · 4096→0.606 → **rises
+then FLAT past 1024** ⇒ not underfitting from capacity. Ridge's own peak proven by 20-fold repeated
+CV (peak at alpha=1e4, significant both sides, p<0.001).
+**VERDICT — the proxy is neither over- nor under-fitting.** Every failure mode ruled out: overfitting
+(gap 0.227 ≈ optimal 0.213), capacity (flat past 1024), data (plateau at 400), architecture form
+(linear=mlp; MLP<ridge). The residual **−0.04 to ridge is structural** — routing `z` through 4 soft
+tokens into a *frozen* backbone vs ridge reading all 8192 dims directly. **The architecture is sound
+and correctly sized** — required before cross-LLM transfer, so a future transfer failure can't be
+blamed on a mistuned/Llama-2-memorised projector.
+
+## E18 — Reference model SAVED with checkpoints (2026-07-27) — ✅
+
+The E10/E12 reference models had been trained **without `--save_checkpoints`** and discarded. Two
+bugs fixed: (1) `Stage2Config.save_checkpoints` flipped **default → True**; (2) **`build_ood` never
+wired the checkpoint dir at all** — so `--ood` runs discarded every model even with the flag on.
+Retrained the reference (TBG22+SLT15, proj1024, k4, 5 arms, 5 seeds) → **25 checkpoints** at
+`runs/REFERENCE_multipos_p1024_5arm_ckpt/checkpoints/` (~30M trainable params each, no frozen
+backbone). Numbers reproduce E12 **to 4 dp**. `q_only`/`q_resp_only` checkpoints (no hidden states)
+are directly reusable on any target LLM; the 3 z-arms need a same-hidden-dim target.
+
+## E19 — Llama-3-8B dedicated env + Stage-1 smoke PASSED (2026-07-28) — ✅ unblocks cross-LLM
+
+**Goal:** a *different-family, 4096-dim* second target so **all 5 arms** can transfer (unlike 13b,
+5120-dim, where only text arms transfer). Llama-3 can't load in `se_probes` (transformers 4.35.2
+predates it; the tokenizer fails), and running Stage-1 in `amortized_stage2` (4.52.4) hit protobuf +
+`torch.load(.bin)`-CVE walls with the DeBERTa entailment model. **Fix:** a dedicated env
+`se_probes_llama3` = clone of `se_probes` + **transformers 4.44.2** (loads Llama-3 ≥4.40, loads
+DeBERTa's `.bin` — predates the CVE block ~4.49), torch stays 2.1.1. Leaves `se_probes`,
+`amortized_stage2`, and the shared cache untouched. Code (blocks-execution, Llama-3 only): added
+`'8b'` to the model-load branch + redirected Llama-3 to the ungated **NousResearch** mirror (gated on
+meta-llama), same pattern as Llama-2. **Smoke passed** (`bash amortized_ue/smoke_llama3.sh`, GPU with
+~32GB free): 3 records, answers correct+clean-stopping (trump / hong kong / romania), SE signal
+meaningful (record 2: 5 clusters, CAE 1.557 on a wrong answer vs 1 cluster on the two right ones).
+
+## E20 — Cross-LLM transfer plan (the thesis experiment) — ⏳ NEXT
+
+Evaluate the **frozen Llama-2-trained proxy on Llama-3-8B's data** — no retraining. For each arm:
+feed Llama-3's input (question text, and/or Llama-3's TBG L22 + SLT L15 hidden states) → proxy
+predicts SE → compare to **Llama-3's TRUE SE**. All 5 arms run (Llama-3-8B is 4096-dim, matching the
+projector). The z-arm transfer number is the real **Platonic Representation Hypothesis** test: does a
+projector fit on Llama-2's hidden geometry predict Llama-3's SE? Evaluate on the **200 held-out
+(Llama-2 test-split) questions** (proxy never trained on them; same questions, Llama-3 labels →
+directly comparable to the in-dist numbers). **Needs:** (1) build Llama-3-8B Stage-1 on those
+questions; (2) a small cross-LLM eval (the current `--eval` only swaps dataset, not target model).
+
+---
+
+## Where we stand (2026-07-28)
+
+**The proxy is finished and characterised — attention now moves to CROSS-LLM TRANSFER.**
+
+**In-distribution result (reference model, saved, all 5 arms — Spearman / AUROC):**
+
+| arm | needs target LLM? | ID | OOD |
 |---|---|---|---|
-| **hidden states available** | ridge (≈ SEP) — *the proxy is redundant* | 0.642 | 0.437 |
-| **NO target-LLM forward pass** | **`q_only` (3B)** — *ridge cannot run at all* | **0.494** | **0.259** |
-| ...same regime, trivial baseline | TF-IDF → ridge | 0.351 | 0.037 *(chance)* |
+| z (hidden only) | yes | 0.602 / 0.807 | 0.368 / 0.669 |
+| z_q · z_q_resp | yes | ~0.59 / ~0.80 | ~0.40 / ~0.68 |
+| **q_only** | **NO — nothing** | 0.494 / 0.758 | 0.259 / 0.614 |
+| q_resp_only | answer text only | 0.521 / 0.768 | 0.399 / 0.684 |
 
-**`q_only` predicts a large model's semantic entropy from the question alone, before running it** —
-54% of the achievable ceiling at **zero cost from the target model**. A hidden-state probe cannot do
-this *by construction*; a bag-of-words baseline gets nowhere near it, and **collapses to chance under
-domain shift while the 3B holds** (0.037 vs 0.259, a 7× gap). The SLM is reading something *semantic*
-about question difficulty, and it transfers.
+**Three settled conclusions:**
+1. **The proxy is neither over- nor under-fitting** (E15–E17); its −0.04 gap to ridge is structural.
+2. **Negative result:** with hidden states available, ridge (≈ SEP) beats the proxy (0.642 vs 0.602),
+   MLP loses to ridge, and more data won't help. The z-branch re-derives SEP and does it worse.
+   Report this plainly.
+3. **Positive result / the thesis (E12/E13):** `q_only` predicts SE from the **question alone, no
+   target-LLM forward pass** (0.494, 54% of ceiling), which a hidden-state probe cannot do; a
+   bag-of-words baseline collapses to chance OOD (0.037) while the 3B holds (0.259).
 
-**The framing for the write-up:** *when hidden states are available, a linear probe is all you need,
-and our proxy is redundant (a clean negative result). When they are not — which is the regime that
-actually matters for routing, abstention and cascades — the SLM delivers uncertainty estimates no
-probe can produce, and no trivial text baseline can match.*
+**Next: cross-LLM transfer (E20).** Llama-3-8B Stage-1 env is ready and validated (E19). Build its
+data, then evaluate the frozen proxy on it — the PRH test.
 
-**Attribution (E11, now closed):** E10's gain is fully accounted for — the second position is worth
-+0.042 ID, the wider projector +0.022, and they are **synergistic** (+0.085 together). Both changes
-are load-bearing and neither alone suffices. It is not a parameter-count effect.
-
-**A methodological asset worth using:** the ridge diagnostic **predicted the proxy's gain to three
-decimals** (E8c said positions were worth +0.042; E11 measured +0.042). Use ridge as the **design
-oracle** for future input choices — it is exact, costs seconds on CPU, and has now been validated
-prospectively. Do **not** spend 3B sweeps on questions ridge can answer.
-
-The full to-do list lives in `amortized_ue/CLAUDE.md`.
+**The consolidated to-do list lives in `amortized_ue/CLAUDE.md`.**

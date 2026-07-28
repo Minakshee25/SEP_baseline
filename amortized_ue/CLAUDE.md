@@ -1,321 +1,170 @@
 # CLAUDE.md — `amortized_ue/` (amortized UE: Stage 1 dataset + Stage 2 proxy)
 
-> **Scope: amortized-UE Stage 1 (offline dataset) and Stage 2 (SLM proxy).** This file
-> governs the `amortized_ue/` module only. The repo-root `../CLAUDE.md` is also in effect
-> (it owns the SEP baseline, the Imperial-DoC machine quirks, wandb auth, model
-> compatibility, and the `se_probes` env). Read both. Stage 2 runs in its **own separate
-> conda env** (`amortized_stage2`, see the Stage 2 section) — `se_probes` stays pinned.
+> **Scope:** this file governs the `amortized_ue/` module (Stage 1 offline dataset + Stage 2 SLM
+> proxy). The repo-root `../CLAUDE.md` is also in effect (SEP baseline, Imperial-DoC machine quirks,
+> wandb auth, model compatibility, the `se_probes` env). Read both.
 
-> 📓 **The chronological experiment log is `../EXPERIMENTS.md`** (repo root) — every experiment from
-> E0 onwards, what changed, what came out, and what was **retracted**, with the reasoning. Read it for
-> *how we got here*. This file is *current state + how to run things*. Keep both in sync: **when you
-> run a new experiment, add an entry to `EXPERIMENTS.md`.**
+> 📓 **The chronological experiment log is `../EXPERIMENTS.md`** (E0→E20) — what changed each step,
+> what came out, what was **retracted**, and why. Read it for *how we got here*. **This file is
+> current-state + how-to-run + the single to-do list.** When you run a new experiment, add an
+> `EXPERIMENTS.md` entry.
 
 ## What this module is
 
-MSc project: **amortized uncertainty estimation** — train a small model to predict a
-large LLM's semantic entropy in a **single forward pass**, avoiding the multi-sample
-cost at inference — with the long-term goal of a proxy that **transfers across target
-LLMs** (next section). Two stages, both now built:
+MSc project: **amortized uncertainty estimation** — train a small model to predict a large LLM's
+semantic entropy in **one forward pass**, avoiding the multi-sample cost at inference. Two stages:
 
-- **Stage 1 (dataset):** for one target LLM + QA dataset, produce one **self-contained,
-  id-keyed record per prompt** (canonical answer + TBG/SLT hidden states all layers, N
-  high-temp samples, continuous `cluster_assignment_entropy` label) so Stage 2 never
-  re-runs the target LLM.
-- **Stage 2 (proxy):** train a frozen decoder-only SLM (Llama-3.2-3B) to regress that
-  continuous SE label from the stored hidden state (injected as soft tokens) plus optional
-  text. Consumes Stage-1 records read-only. See the **Stage 2** section below.
+- **Stage 1 (dataset):** for one target LLM + QA dataset, produce one **self-contained, id-keyed
+  record per prompt** (canonical answer + TBG/SLT hidden states all layers, N high-temp samples,
+  continuous `cluster_assignment_entropy` label) so Stage 2 never re-runs the target LLM.
+- **Stage 2 (proxy):** train a frozen decoder-only SLM (Llama-3.2-3B) to regress that continuous SE
+  label from the stored hidden state (as soft tokens) plus optional text. Consumes Stage-1 read-only.
 
-## 🎯 Long-term goal — CROSS-LLM TRANSFER (the thesis; stated 2026-07-14)
+## 🎯 Long-term goal — CROSS-LLM TRANSFER (the thesis)
 
-**The goal is a proxy whose uncertainty estimates carry across target LLMs** — e.g. train
-on one LLM's data and evaluate on another. This is why the proxy is an SLM and not a
-probe, and why question/response **text** is kept as an input alongside the hidden state:
-text is model-agnostic, so a text-reading proxy is not tied to any one target model. The
-scientific backing to be tested is the **Platonic Representation Hypothesis** (internal
-representations of different LLMs align more and more as their training data grows) — so
-the hidden-state input may carry across models too.
+**A proxy whose uncertainty estimates carry across target LLMs** — train on one LLM's data, evaluate
+on another. This is *why* the proxy is an SLM taking **text** alongside the hidden state: text is
+model-agnostic, so a text-reading proxy is not tied to one target. Scientific backing to test: the
+**Platonic Representation Hypothesis** (different LLMs' internal representations align as training
+scale grows), so the hidden-state input may transfer too. A per-model probe (SEP/ridge) *cannot* do
+this — a probe fit on model A's hidden states can't even be applied to model B without retraining.
 
-**The targeted novelty:** amortized uncertainty estimation that is not locked to a single
-target LLM — something a per-model probe (SEP / ridge) cannot offer, since a probe fit on
-one model's hidden states cannot be applied to another without retraining. **The exact
-recipe is an open research question** — it may mean training on one LLM and transferring,
-mixing data from multiple LLMs, aligning representations across models, or something else.
-Do not lock in an experimental design here.
-
-**Status: cross-LLM work has NOT started.** The prerequisite is the current failure (see
-"⛔ Current failure" below): the proxy trained on a single LLM's data overfits, and
-memorising patterns specific to one training setup is exactly what will not carry over —
-single-LLM generalisation must be fixed first. The proxy being "unnecessarily big" for the
-single-LLM task is a deliberate choice in service of this goal, not an oversight; but its
-*regularisation* must match the task.
+**Status (2026-07-28): cross-LLM work is STARTING.** The single-LLM proxy is fully characterised
+(see Current state) and the Llama-3-8B Stage-1 env is built and validated (E19). Next: build
+Llama-3-8B's Stage-1 data and evaluate the frozen Llama-2-trained proxy on it (E20).
 
 ## Relationship to the SEP repo (read-only reuse)
 
-`amortized_ue/` is a sibling folder inside this repo, not a separate project. It
-**imports SEP's working logic read-only** via `sys.path` (`sep_bridge.py` adds
-`../semantic_uncertainty`). **Nothing under `semantic_uncertainty/` or
-`semantic_entropy_probes/` is edited.** The SEP baseline rules in the root
-CLAUDE.md still apply to anything reused: do not modify `get_semantic_ids`,
-`cluster_assignment_entropy`, `logsumexp_by_id`, the entailment model, the
-TBG/SLT extraction, or the sampling. Stage 1 only *calls* them.
+`amortized_ue/` imports SEP's logic read-only via `sys.path` (`sep_bridge.py` adds
+`../semantic_uncertainty`). **Nothing under `semantic_uncertainty/` or `semantic_entropy_probes/` is
+edited** (except the sanctioned blocks-execution model-loading redirects in `huggingface_models.py`
+— NousResearch mirrors for gated Llama-2/Llama-3, and the `'8b'` load branch; no SE/probe logic
+touched). Do not modify `get_semantic_ids`, `cluster_assignment_entropy`, `logsumexp_by_id`, the
+entailment model, TBG/SLT extraction, or the sampling.
 
-Reused unchanged: `HuggingfaceModel.predict(return_latent=True)`, `load_ds`,
-prompt construction (`get_make_prompt`, `construct_fewshot_prompt_from_indices`,
-`BRIEF_PROMPTS`), `get_metric`, `get_reference`, `split_dataset`,
-`EntailmentDeberta`, `get_semantic_ids`, `cluster_assignment_entropy`.
+Reused unchanged: `HuggingfaceModel.predict(return_latent=True)`, `load_ds`, prompt construction,
+`get_metric`, `get_reference`, `split_dataset`, `EntailmentDeberta`, `get_semantic_ids`,
+`cluster_assignment_entropy`.
 
 ## Files
 
-- `config.py`     — `Stage1Config` dataclass; every knob. Defaults mirror the SEP baseline.
-- `sep_bridge.py` — registers `../semantic_uncertainty` on `sys.path`, re-exports the
-  reused SEP functions, and builds the SEP argparse `args` (from SEP's own parser
-  defaults, then overrides) so reuse stays baseline-faithful.
-- `record.py`     — record schema (`stage1-v1`), `save_record`/`load_record`, manifest
-  helpers, `describe_record`, filesystem-safe filenames.
-- `stage1.py`     — the builder: `build()`, `run_smoke()`, and a CLI.
-- `loaders.py`    — `load_local` / `load_wandb` / `load_records` (single source switch).
-- `wandb_io.py`   — optional: upload the same local files as a versioned W&B artifact.
-- `data/stage1/`  — outputs (gitignored; tensors are GB-scale).
-- `sanity_probe.py`        — throwaway SEP-style *classification* probe (binarised SE, per-layer AUROC).
-- **`linear_ceiling_probe.py`** — ridge from one hidden state → *continuous* SE. **Use this to pick
-  the (position, layer)**, and as the baseline every Stage-2 result must be reported against.
-- **`label_noise_ceiling.py`**  — split-half reliability of the SE label → the achievable ceiling,
-  which turns a raw Spearman into "% of achievable signal recovered".
+**Stage 1:** `config.py` (`Stage1Config`), `sep_bridge.py` (path + reused-fn re-exports),
+`record.py` (schema `stage1-v1`, save/load), `stage1.py` (builder + `--smoke` CLI),
+`loaders.py` (`load_records`, local|wandb switch), `wandb_io.py`, `data/stage1/` (gitignored).
+
+**Diagnostics (se_probes env, no GPU) — run BEFORE any Stage-2 training:**
+- **`linear_ceiling_probe.py`** — ridge from hidden state → continuous SE. **Use it to pick the
+  (position, layer)** and as the baseline every Stage-2 result is reported against.
+- **`label_noise_ceiling.py`** — split-half reliability of the SE label → achievable ceiling
+  (turns raw Spearman into "% of achievable signal recovered").
+- `text_baseline_probe.py` — TF-IDF→ridge control for the text-only arms.
+- `sanity_probe.py` — throwaway SEP-style classification probe (binarised SE, per-layer AUROC).
+
+**Stage 2:** `stage2/{config,data,model,train,run,checkpoint}.py`,
+`stage2/proxy_learning_curve.py` (drives Trainer read-only to measure data-appetite),
+`smoke_llama3.sh` (Llama-3 Stage-1 smoke in the `se_probes_llama3` env).
 
 ## Record schema (`stage1-v1`, one `.pt` per prompt, keyed by `id`)
 
 ```
 id, question, context, reference
-canonical:                       # the low-temperature (0.1) "most likely" answer
+canonical:                       # low-temperature (0.1) "most likely" answer
   response, accuracy, token_log_likelihoods
   hidden_states: { TBG: [L+1,1,H], SLT: [L+1,1,H] }   # all layers, native dtype
 samples: [ {response, token_log_likelihoods, semantic_id}, ... ]   # N high-temp
-labels:
-  cluster_assignment_entropy     # PRIMARY label, stored CONTINUOUS (raw float)
-  semantic_ids, n_clusters, n_samples
+labels: cluster_assignment_entropy (PRIMARY, CONTINUOUS float), semantic_ids, n_clusters, n_samples
 meta: { model, dataset, temperatures, entailment settings, git_commit, positions... }
 ```
 
-The SE label lives in the same record as the text and hidden states, joined **by id**
-— never by list position (this deliberately fixes SEP's positional-join fragility,
-see root `SEP_TECHNICAL_REPORT.md` §7).
+Joined **by id**, never by list position (fixes SEP's positional-join fragility, `SEP_TECHNICAL_REPORT.md` §7).
 
-### Hidden-state positions — IMPORTANT (true-position labelling)
+### Hidden-state positions — true-position labelling
 
-We label by the real token position, per the project spec:
+| record key | position | HF index |
+|------------|----------|----------|
+| `TBG` | token before generation (last input token) | `hidden[0]` |
+| `SLT` | second-last generated token | `hidden[n_gen-2]` |
 
-| record key | position                                   | HF index          |
-|------------|--------------------------------------------|-------------------|
-| `TBG`      | token before generation (last input token) | `hidden[0]`       |
-| `SLT`      | second-last generated token                | `hidden[n_gen-2]` |
+`predict()` returns `(scalar, sec_last=SLT, last_tok_before_gen=TBG)`; `stage1.py` unpacks
+`(embedding, slt_emb, tbg_emb)` — so our keys are correct. **⚠️ SEP's own stored keys are inverted**:
+amortized `TBG` == SEP `emb_tok_before_eos` == SEP probe `slt_dataset`; amortized `SLT` == SEP
+`emb_last_tok_before_gen` == SEP probe `tbg_dataset`. Mind this when comparing to SEP.
 
-`predict()` returns `(scalar, sec_last=SLT, last_tok_before_gen=TBG)`; `stage1.py`
-unpacks it as `(embedding, slt_emb, tbg_emb)`, matching that order — so our keys are
-correct. **SEP's own stored keys are inverted** relative to position: amortized `TBG`
-== SEP key `emb_tok_before_eos` == SEP probe `slt_dataset`; amortized `SLT` == SEP key
-`emb_last_tok_before_gen` == SEP probe `tbg_dataset`. Keep this in mind when comparing
-to SEP/the paper.
+## Environments (three; keep separate)
+
+| env | transformers | used for |
+|-----|-------------|----------|
+| `se_probes` | 4.35.2 (pinned baseline) | Stage-1 generation for **Llama-2**; the diagnostics |
+| `amortized_stage2` | 4.52.4 (+peft) | **Stage-2 proxy** training (Llama-3.2-3B; se_probes rejects its rope config) |
+| `se_probes_llama3` | 4.44.2 | Stage-1 generation for **Llama-3** (E19; se_probes too old, amortized_stage2 hit DeBERTa `.bin`/protobuf walls) |
+
+All are clones of `se_probes` (hardlinks) with transformers upgraded; torch stays 2.1.1. Llama-2 and
+Llama-3 load via ungated **NousResearch** mirrors (meta-llama is gated for acct Minakshee25).
 
 ## Commands
 
-Run from the repo root with the `se_probes` env active (see root CLAUDE.md for env).
-
+**Stage 1** (repo root, `se_probes` env for Llama-2 / `se_probes_llama3` for Llama-3):
 ```bash
-# smoke test: a few prompts end to end, prints one record's structure
-python -m amortized_ue.stage1 --smoke --smoke_num_samples 3
-
-# full run (defaults mirror SEP Llama-2-7b-chat / trivia_qa)
-python -m amortized_ue.stage1 --model_name Llama-2-7b-chat --dataset trivia_qa --num_samples 400
-
-# optional: also push the same files to W&B as a versioned artifact
-python -m amortized_ue.stage1 --num_samples 400 --push_to_wandb
+python -m amortized_ue.stage1 --smoke --smoke_num_samples 3      # smoke, prints a record
+python -m amortized_ue.stage1 --model_name Llama-2-7b-chat --dataset trivia_qa --num_samples 2000
+bash amortized_ue/smoke_llama3.sh                                # Llama-3 smoke (se_probes_llama3 env)
 ```
+Build is **resumable** (`overwrite=False` skips existing records). Shared GPUs are often full —
+pin `CUDA_VISIBLE_DEVICES` to a GPU with ≥~16 GB free (Llama-3-8B loads fp32, needs ~32 GB).
 
-Loading (identical records from either source; default local, fully offline):
-```python
-from amortized_ue.config import Stage1Config
-from amortized_ue.loaders import load_records
-records = load_records(Stage1Config(num_samples=400))                       # local
-records = load_records(Stage1Config(num_samples=400, load_source="wandb"))  # W&B copy
-```
-
-Shared GPUs here are often full; launch via a poll-and-retry wrapper that pins
-`CUDA_VISIBLE_DEVICES` to a GPU with ≥~16 GB free. The build is **resumable**
-(`overwrite=False` skips existing records), so an OOM mid-run just continues on
-relaunch.
-
-## Locked design decisions (do not change without asking)
-
-- SE stored **continuous** (raw float), never binarised in Stage 1; primary label is
-  `cluster_assignment_entropy`. Also keep `semantic_ids` + per-sample log-probs so the
-  label is recomputable without re-sampling.
-- Hidden states at **TBG and SLT, all layers**, for the **low-temp canonical** answer
-  only (high-temp samples store text + log-probs, no hidden states).
-- Everything joined **by id** inside one self-contained record.
-- Single target LLM, raw hidden states (native dtype), no cross-model alignment yet.
-- Local disk is the source of truth and must work fully offline; **W&B is an additional
-  copy** (same files uploaded), never the only place the data lives. Load source is a
-  single config switch defaulting to `local`.
-
-## Stage 2 — SLM proxy (`amortized_ue/stage2/`)
-
-Frozen **Llama-3.2-3B** backbone reads, in one forward pass,
-`[k soft tokens] (+ [text]) + [REG readout]` and a linear head on the REG token's final
-hidden state regresses the standardised SE label. Only the projector, LoRA adapters, REG
-embedding, and head train.
-
-**Files:** `config.py` (`Stage2Config`, every knob), `data.py` (id-keyed load, split,
-target standardise, `best_split` binarisation for AUROC, strict-train sweep subsample,
-label report), `model.py` (`Projector` + `ProxyModel`), `train.py` (`Trainer`: per-arm
-train/eval, sweep, k-ablation), `run.py` (`--report` / `--smoke` / full run).
-
-**Separate env (do not use `se_probes`).** `se_probes` (transformers 4.35.2) rejects
-Llama-3.2's `rope_type:"llama3"`. Stage 2 runs in `amortized_stage2` at
-`/vol/bitbucket/<user>/conda_envs/amortized_stage2`, made by **cloning `se_probes`**
-(hardlinks; avoids a 5 GB torch re-download) then upgrading in the clone to
-`transformers==4.52.4` + `peft` + `accelerate` (torch stays 2.1.1). `meta-llama/Llama-3.2-3B`
-gated access is cleared for acct Minakshee25 (official weights, no mirror).
-
-**Commands** (repo root, `amortized_stage2` env, pin a free GPU):
+**Stage 2** (repo root, `amortized_stage2` env, free GPU). **Checkpoints save by DEFAULT now**
+(`--no_save_checkpoints` to opt out). **Do NOT use the built-in 3B (pos,layer) sweep** — it is
+unreliable (picked TBG L12, costing ~0.12 Spearman); pick the layer with `linear_ceiling_probe.py`.
 ```bash
-python -m amortized_ue.stage2.run --report   # label distribution + subsample checks, no GPU work
-python -m amortized_ue.stage2.run --smoke     # full path, few prompts, 2 steps
-
-# THE REFERENCE COMMAND (2026-07-13). Reproduces the current best result.
-# Do NOT use the built-in 3B (pos,layer) sweep — it is unreliable (it picked TBG L12,
-# which costs ~0.12 Spearman). Pick the layer with linear_ceiling_probe.py instead.
+# THE REFERENCE COMMAND — reproduces the current best result + saves 25 checkpoints
 python -m amortized_ue.stage2.run \
   --ood --ood_dataset squad --ood_num_samples 1000 \
   --seeds 5 --reuse_selection \
-  --z_inputs TBG:22,SLT:15 --selected_k 4 \
-  --projector_hidden_dim 1024 \
-  --run_name stage2_Llama-2-7b-chat_trivia_qa_n2000_multipos_p1024
-#   -> ID Spearman 0.602±0.019, OOD 0.368±0.033 (z arm)
+  --arms z,z_q,z_q_resp,q_only,q_resp_only \
+  --z_inputs TBG:22,SLT:15 --selected_k 4 --projector_hidden_dim 1024 \
+  --run_name REFERENCE_multipos_p1024_5arm_ckpt
+#  -> z ID Spearman 0.602±0.019 / OOD 0.368±0.033  (full 5-arm table in Current state)
 
-# Diagnostics (se_probes env, no GPU) — run these BEFORE any Stage-2 training:
-python -m amortized_ue.linear_ceiling_probe    # exact ridge layer sweep + the baseline to beat
-python -m amortized_ue.label_noise_ceiling     # achievable ceiling; converts Spearman -> % recovered
+python -m amortized_ue.stage2.run --eval --eval_datasets squad:1000   # reload checkpoints, no retrain
 ```
+**Key flags:** `--z_inputs POS:LAYER,...` stacks positions (h_in widens to n·H automatically);
+`--selected_position/layer/k` force the input (override wins over a saved `results.json`);
+`--projector_hidden_dim` (default 256; use 1024 when stacking); `--arms` (adds `q_only`/`q_resp_only`,
+the text-only arms — no hidden states); `--weight_decay`/`--projector_type`/`--lora_r` (regularisation
+knobs, all swept — none is a live dial, see E16/E17); `--run_name`.
 
-**New CLI flags (2026-07-13):** `--selected_position/--selected_layer/--selected_k` force the z
-input (an explicit override now WINS over a saved `results.json`); `--z_inputs TBG:22,SLT:15`
-stacks several positions (h_in widens to n·H automatically); `--projector_hidden_dim` sets the
-bottleneck width (default stays 256 so old runs reproduce — pass 1024 when stacking);
-`--run_name` keeps a new run from overwriting the reference results.
+## Locked design (do not change without asking)
 
-**Where results are saved** (all gitignored — tensors/JSON are large / run-specific):
-- Stage-1 records: `amortized_ue/data/stage1/<run_name>/records/<id>.pt` + `manifest.json`.
-- **Reference Stage-2 result:** `stage2/runs/..._n2000_multipos_p1024/ood_results_squad_multiseed.json`
-  (log `stage2/logs/multipos_p1024.log`) — TBG22+SLT15, projector 1024, 5 seeds, ID + OOD.
-- **Superseded (provenance only, DO NOT CITE):** `..._n2000_full/results_multiseed.json` and
-  `ood_results_squad_multiseed.json` (TBG L12 — the retracted text-arm claims), and
-  `..._n2000_TBG_L22/` (layer-only fix; its JSON was lost to the `build_ood` mkdir bug, now fixed
-  — the numbers survive in `stage2/logs/tbg_L22_multiseed.log`).
-- W&B: Stage-1 datasets pushed as artifacts (`stage1_records:v0` for n400,
-  `stage1_records_n2000` for n2000) in project `amortized_ue_stage1`.
+**Stage 1:** SE stored **continuous** (never binarised); keep `semantic_ids` + per-sample log-probs
+so the label is recomputable. Hidden states at **TBG & SLT, all layers**, canonical answer only.
+Joined by id. Local disk is source of truth (offline-first); W&B is an extra copy.
 
-**Locked Stage-2 design (do not change without asking):**
-- Projector: `LayerNorm(H_in) → Linear(H_in, hidden) → GELU → Dropout(0.1) → Linear(hidden,
-  k·d_model) → reshape → per-token unit-normalise × learnable scalar (init emb_norm)`.
-  `hidden` is `--projector_hidden_dim` (default 256; **use 1024 when stacking positions** — at 256
-  it is a 16–32× bottleneck and it measurably binds). Interface takes `[B, n_layers_in, H]` and
-  flattens, which is what makes `--z_inputs` work with **no change to `model.py`**.
-  *(The docstring's claim that the learnable scalar preserves z's magnitude is FALSE — see
-  "Known wart" below. Measured cost ~0.01 Spearman, so it is left alone.)*
-- **Separate model per arm** (`z` / `z_q` / `z_q_resp`), each trained on its own fixed,
-  **null-free** sequence — no modality dropout, no z-dropout, no learned nulls. z-only =
-  `[k soft][REG]`; z+q drops the response tokens; z+q+resp keeps both.
-- **z input: pick the (position, layer) with `linear_ceiling_probe.py` (exact ridge sweep), NOT
-  with the built-in 3B sweep.** ⚠️ The 3B sweep (600-example subsample, 3 epochs per candidate)
-  is too noisy to rank layers — it selected TBG L12, costing ~0.12 Spearman. It is retained in
-  the code but **should not be used**; pass `--reuse_selection` with an explicit
-  `--z_inputs` / `--selected_*`. Current best input: **`TBG:22,SLT:15`** (the two positions are
-  complementary; extra *layers* within a position are not). `k=4`.
-- Target z-score standardised on train; metrics in original space: **Spearman (primary)**,
-  RMSE, MAE, R², AUROC (via train `best_split`), per arm. *(R² is meaningless OOD — the label
-  scale shifts, so it goes strongly negative. Rank metrics only, under shift.)*
-- Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout — **not to
-  be changed**. bf16 backbone; projector/head fp32, cast at the backbone boundary.
+**Stage 2:**
+- Projector: `LayerNorm(H_in) → Linear(H_in, hidden) → GELU → Dropout(0.1) → Linear(hidden, k·d_model)
+  → per-token unit-norm × learnable scalar`. `hidden` = `--projector_hidden_dim` (**1024 when
+  stacking positions**; 256 is a 16–32× bottleneck that measurably binds). Interface takes
+  `[B, n_layers_in, H]` and flattens → `--z_inputs` works with **no `model.py` change**. *(The
+  docstring's "preserves z magnitude" claim is false; measured cost ~0.01 Spearman, left alone.)*
+- **Separate model per arm** (`z`/`z_q`/`z_q_resp`/`q_only`/`q_resp_only`), each on its own fixed,
+  null-free sequence — no modality dropout. Text-only arms skip the projector entirely (`[text][REG]`).
+- **z input picked with `linear_ceiling_probe.py` (exact ridge sweep), NOT the 3B sweep.** Current
+  best: **`TBG:22,SLT:15`, k=4** (the two positions are complementary; extra *layers* within a
+  position are not, +0.005).
+- Target z-scored on train; metrics in original space: **Spearman (primary)**, AUROC (via train
+  `best_split`), RMSE/MAE/R². *(R² meaningless OOD — label scale shifts; use rank metrics under shift.)*
+- Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
+  projector/head fp32.
 
-## Current state (updated 2026-07-14)
+## Current state (2026-07-28)
 
-**Stage 1 datasets (target LLM Llama-2-7b-chat):**
-- `trivia_qa ..._n400_full/` — 400 records (mean_acc 0.5775, mean_CAE 0.6138). W&B artifact
-  `stage1_records:v0` (run `4d2lvwzc`). Sanity probe: best test AUROC **0.805 (SLT L31)**.
-- `trivia_qa ..._n2000_full/` — **2000 records** (mean_acc 0.5905, mean_CAE 0.5857). Built by
-  reusing the 400 (verified: `random.sample` is nested, so the n2000 sample's first 400 == the
-  n400 set) + generating 1600 new. Split 1440/360/200 (seed 42). W&B artifact
-  `stage1_records_n2000`.
-- `squad ..._n1000_full/` — **1000 records** (mean_acc 0.236, mean_CAE 1.498 — a real shift vs
-  trivia's 0.59/0.59). Built for OOD evaluation only. Local; not pushed to W&B.
+**Stage-1 datasets (target LLM Llama-2-7b-chat):** trivia_qa n400 (`stage1_records:v0`), **n2000**
+(`stage1_records_n2000`; split 1440/360/200 seed 42; the ID dataset), squad n1000 (OOD; mean_acc
+0.236 / mean_CAE 1.498 — a real shift vs trivia 0.59/0.59). **Llama-3-8B Stage-1: env ready (E19),
+data not yet built** (that's E20).
 
-### ⚠️ RETRACTED (2026-07-13): the text-arm findings from the TBG-L12 runs
-
-The 5-seed TBG-L12 run (2026-07-02) was the reference result and produced two headline
-claims. **Both are now retracted.** They were artefacts of a badly chosen z, not real
-effects. Kept here so they are not re-derived by accident:
-
-- ~~"in-distribution **text HURTS**" (z+q+resp − z = −0.041 AUROC, 5/5 seeds)~~
-- ~~"under domain shift the **canonical response HELPS**" (+0.027 AUROC / +0.045 Spearman, 5/5)~~
-
-The 3B (pos, layer) sweep had selected **TBG L12**, which the ridge diagnostic shows is a
-poor layer (ridge: 0.481 at L12 vs 0.600 at L22). With z starved of information, the text
-arms partly *compensated* for it, producing consistent-looking text effects. Once z is fed
-properly (TBG L22 + SLT L15, projector 1024), **every text effect collapses into noise**
-(see the reference result below: |mean| ≤ 0.03, signs inconsistent at 2–3 / 5 seeds).
-Lesson: sign-consistency across seeds proves the effect is not *seed* noise; it does **not**
-prove the effect is real if the whole configuration is mis-specified.
-
-The superseded numbers live in `stage2/runs/..._n2000_full/results_multiseed.json` and
-`ood_results_squad_multiseed.json` (kept for provenance only — do not cite).
-
-### Architecture change (2026-07-13) — what the input/projector dims actually became
-
-The output side is unchanged (k=4 soft tokens × d_model 3072 = 12288). What changed: the input
-**doubled** (two complementary positions instead of one) while the compression ratio **halved**
-(16× → 8×), so the projector is strictly less lossy despite ingesting twice as much.
-
-| | BEFORE (original) | AFTER (reference) |
-|---|---|---|
-| z input | 1 pos × 1 layer → **4096** (TBG L12) | 2 pos stacked `[2,4096]` → flat **8192** (TBG L22 + SLT L15) |
-| projector | `LN(4096)→Lin(4096→256)→GELU→Drop→Lin(256→12288)` | `LN(8192)→Lin(8192→1024)→GELU→Drop→Lin(1024→12288)` |
-| bottleneck | 256 (**16×** compression) | 1024 (**8×** compression) |
-| projector params | 4,215,041 | 21,001,217 |
-| total trainable | **13.4M** | **30.2M** |
-| frozen backbone | 3.24B (untouched) | 3.24B (untouched) |
-
-`h_in` is computed automatically by `Stage2Data.h_in_for(cfg)` = `len(z_inputs) · H`; the projector
-flattens `[B, n, H]`, which is why **`model.py` needed no change**.
-
-**Both changes are load-bearing (attribution ablation, E11, 5 seeds each — `runs/ablation{A,B}_*/`):**
-
-| change isolated | ID Spearman | Δ vs E9 (0.517) |
-|---|---|---|
-| projector width only (TBG:22 @ 1024) | 0.539 ± 0.031 | **+0.022** |
-| second position only (TBG:22,SLT:15 @ 256) | 0.559 ± 0.050 | **+0.042** |
-| both (the reference config) | **0.602 ± 0.019** | **+0.085** |
-
-The second position matters more than the width, and the two are **synergistic** (+0.085 > +0.065 if
-additive): 8192 dims through a 256 bottleneck is a 32× compression, so the extra position only pays
-off once the projector is wide enough to carry it. **Neither change alone suffices.** Not a
-parameter-count effect — runs A (~21M) and B (~22M) have near-identical trainable params, yet B gains
-twice as much. **⭐ The ridge diagnostic predicted the +0.042 exactly** (E8c: 0.600 → 0.642) — so use
-`linear_ceiling_probe.py` as the **design oracle** for input choices; it is exact, costs seconds, and
-is now prospectively validated.
-
-### REFERENCE RESULT (2026-07-13): TBG L22 + SLT L15, projector 8192→1024, 5 seeds
-
-Run: `--ood --ood_dataset squad --seeds 5 --reuse_selection --z_inputs TBG:22,SLT:15
---selected_k 4 --projector_hidden_dim 1024`.
-Output: `stage2/runs/..._n2000_multipos_p1024/ood_results_squad_multiseed.json`;
-log `stage2/logs/multipos_p1024.log`. **Spearman is primary; AUROC secondary.**
-
-**✅ SAVED MODEL (2026-07-27):** retrained with checkpoints at
-`stage2/runs/REFERENCE_multipos_p1024_5arm_ckpt/` — **25 checkpoints** (5 arms × 5 seeds,
-`<arm>_seed<n>.pt`, ~30M trainable params each, no frozen backbone). Numbers reproduce the table
-below **to 4 dp** (verified against the original `..._multipos_p1024` / `..._textonly_5arm` runs).
-Full 5-arm table, mean ± std over 5 seeds:
+**Reference model — SAVED, 25 checkpoints** at `runs/REFERENCE_multipos_p1024_5arm_ckpt/checkpoints/`
+(5 arms × 5 seeds, ~30M trainable params each, no frozen backbone; reproduces the run below to 4 dp).
+TBG L22 + SLT L15, projector 1024, k=4, 5 seeds — **mean ± std:**
 
 | arm | needs target LLM? | ID Spearman | OOD Spearman | ID AUROC | OOD AUROC |
 |-----|-------------------|-------------|--------------|----------|-----------|
@@ -325,254 +174,72 @@ Full 5-arm table, mean ± std over 5 seeds:
 | **q_only** | **NO — nothing** | 0.494 ± 0.049 | 0.259 ± 0.047 | 0.758 ± 0.031 | 0.614 ± 0.026 |
 | **q_resp_only** | answer text only | 0.521 ± 0.049 | 0.399 ± 0.073 | 0.768 ± 0.028 | 0.684 ± 0.038 |
 
-Paired (arm − z), Spearman: z_q **−0.013 ID (2/5)** / +0.034 OOD (3/5); z_q_resp **−0.020 ID
-(2/5)** / +0.030 OOD (3/5). **No text effect is sign-consistent or larger than its own std —
-all text arms are now indistinguishable from z-only.**
+### The three settled conclusions (details in EXPERIMENTS.md)
 
-**Trajectory of the z arm (what the fixes bought):**
+1. **The proxy is neither over- nor under-fitting** (E15–E17). Its 5-seed train–test gap (0.227) ≈
+   optimally-tuned ridge's (0.213) — a ~0.2 gap is what *optimal* looks like at N=1440/D=8192.
+   Confirmed by: `weight_decay` is a dead knob; projector-form linear=mlp (noise); the capacity curve
+   is flat past width 1024; more data won't help (ridge plateaus at ~400 rows; we're already at SEP's
+   2000-across-tasks data scale). The residual **−0.04 to ridge is structural** — routing z through
+   soft tokens into a frozen backbone vs ridge reading all 8192 dims directly. *(An earlier
+   single-seed "the proxy overfits" claim was **RETRACTED** at 5 seeds — E16.)*
 
-| config | ID | OOD | % of ID ceiling (0.914) |
-|--------|-----|-----|------------------------|
-| proxy TBG L12 (original sweep pick) | 0.467 | 0.289 | 51% |
-| proxy TBG L22 (layer fixed) | 0.517 | 0.256 | 57% |
-| **proxy TBG22+SLT15, projector 1024** | **0.602** | **0.368** | **66%** |
-| *ridge, same input (TBG22+SLT15)* | *0.642* | *0.437* | *70%* |
-| *ridge SLT L15 alone (best OOD)* | *0.584* | *0.495* | — |
+2. **Negative result (single target LLM):** with hidden states available, a plain **ridge beats the
+   3B proxy** (0.642 vs 0.602 ID; 0.437 vs 0.368 OOD; ridge on SLT L15 alone = 0.495 OOD), and an
+   **MLP loses to ridge** at every input → the z→SE relation is **linear**; the frozen backbone has
+   no nonlinear signal to add. A linear probe on hidden states ≈ **SEP**, so the z-branch re-derives
+   existing work and does it worse. *(Conditional on staying in one target LLM: under the cross-LLM
+   goal, ridge-on-A can't run on B at all, so there it's a baseline via alignment, not a replacement.)*
 
-**Honest interpretation (three parts):**
-1. **The proxy's shortfall was input selection, not a bug.** Fixing the layer and feeding both
-   positions through a wider projector moved ID 0.467 → 0.602 (+0.135) and recovered 51% → 66%
-   of the label-noise ceiling. ID AUROC 0.807 now edges the direct SEP-style sanity probe (0.805).
-2. **The text arms add nothing once z is well-fed.** They were compensating for a weak z.
-3. **The proxy still LOSES to ridge on the same input** (0.602 vs 0.642 ID; 0.368 vs 0.437 OOD),
-   even with the right layers and a 1024-wide projector. This is now a *fair fight* and a clean
-   **negative result within a single target LLM**: the frozen-3B + LoRA + soft-token design
-   extracts nothing a linear readout cannot. Consistent with the MLP-vs-ridge test (below): the
-   z→SE relation is linear, so there is no nonlinear signal for a backbone to add. (It does NOT
-   invalidate the SLM under the cross-LLM goal, where ridge-on-one-model cannot be applied to
-   another — see "🎯 Long-term goal". The overfitting behind this loss is dissected in
-   "⛔ Current failure".)
+3. **⭐ Positive result / the thesis (E12/E13):** the **`q_only`** arm predicts SE **from the question
+   text alone, no target-LLM forward pass** — ID Spearman **0.494** (54% of the achievable ceiling,
+   82% of what the hidden state gets). A hidden-state probe cannot do this by construction. Controlled
+   against TF-IDF→ridge (E13): bag-of-words gets 0.351 ID and **collapses to 0.037 = chance OOD** vs
+   the 3B's 0.259 (**7× gap**) → not a surface shortcut; the 3B reads something *semantic* that
+   transfers. `q_resp_only` OOD (0.399) beats z-only (0.368).
 
-**Checkpointing (2026-07-02) — train once, evaluate anywhere.** Previously OOD *retrained* the
-model (no weights were ever saved — only metrics JSON). Now `checkpoint.py` + `--save_checkpoints`
-write one file per `(arm, seed)` under `run_dir/checkpoints/` holding **only the ~13–17M trainable
-params** (projector/REG/head/LoRA) + metadata (selected `(pos,layer,k)`, target-model `h_in`,
-training label transform, provenance) — **never the frozen 3B backbone** (~50 MB/ckpt). `--eval`
-(`run_eval`) reloads them (reusing one backbone load) and scores the ID dataset's held-out **test**
-split plus any `--eval_datasets name:N` on **all rows**, aggregating per arm across seeds — **no
-retraining**. **Reload verified 2026-07-08** (`--eval --eval_datasets squad:1000`, log
-`stage2/logs/eval_reload.log`, output `checkpoints/eval_summary.json`): reloaded ID-test AUROCs
-reproduce the training log to 4 dp (z 0.7626±0.0101, z_q 0.7440±0.0323, z_q_resp 0.7218±0.0170 —
-exact match), and OOD-squad matches the earlier retrain-based OOD run (z 0.622, z_q 0.586,
-z_q_resp 0.650) — confirming the saved checkpoints ARE the trained models and the round-trip is
-correct. (`run_eval` scores each reloaded checkpoint independently; it does not itself assert an
-in-memory-vs-reload diff — the 4-dp reproduction is the evidence.) This is the
-mechanism for "one proxy → many datasets" and, via a second training run, across target models
-(the projector input dim is rebuilt from each checkpoint's `h_in`). `Trainer` now accepts a
-prebuilt `model=` (eval reuses the backbone). Storage: local `/vol/bitbucket` (gitignored) +
-optional `--push_wandb` versioned artifact (`type=model`, project `amortized_ue_stage2`).
+**Two ceilings (do not conflate):** label-noise ceiling ≈ **0.914 ID / 0.901 squad** (unreachable —
+the SE label is a 10-sample estimate; squad's labels are as reliable as trivia's, so the OOD drop is
+real transfer failure, not noisier labels). Information ceiling ≈ **0.64 ID** (the most a single
+hidden state yields — the 0.64→0.91 gap is information absent from one forward pass). The proxy
+recovers 66% of achievable ID.
 
-## Diagnostics (2026-07-13) — the proxy is UNDERPERFORMING a ridge regression
+**Provenance / do-not-cite:** `runs/..._n2000_full/` (TBG L12 — the **retracted** text-arm claims,
+E6); `runs/..._n2000_TBG_L22/` (layer-only fix; JSON lost to the fixed `build_ood` mkdir bug, numbers
+in `logs/tbg_L22_multiseed.log`). Reference numbers: `runs/REFERENCE_multipos_p1024_5arm_ckpt/` and
+`runs/stage2_textonly_5arm_p1024/`.
 
-Two read-only scripts, both run from the repo root in the **`se_probes`** env (they need no
-GPU and touch nothing under `semantic_uncertainty/`). They were added to answer "is Spearman
-0.467 any good?" and "why isn't it higher?". The answer to the second is uncomfortable and
-should drive the next work.
+---
 
-**`label_noise_ceiling.py` — the SE label is RELIABLE, so noise does not excuse the gap.**
-The label is estimated from N=10 samples, so it carries measurement noise, and no model can
-rank against it better than it ranks against itself. Split-half reliability over the stored
-`semantic_id`s (200 draws, Spearman–Brown corrected; the subset's ids are relabelled to
-contiguous before calling SEP's `cluster_assignment_entropy`, because `np.bincount` on a subset
-otherwise yields `0*log 0 = nan`):
+## 📋 TO-DO (single source of truth — other docs point here)
 
-| dataset | rows | split-half r | reliability | **ceiling = sqrt(rel)** |
-|---------|------|--------------|-------------|-------------------------|
-| trivia (ID test) | 200 | 0.717 ± 0.028 | 0.835 | **0.914** |
-| trivia (all) | 2000 | 0.773 ± 0.007 | 0.872 | 0.934 |
-| squad (all, OOD basis) | 1000 | 0.682 ± 0.013 | 0.811 | **0.901** |
+**NOW — cross-LLM experiment #1 (E20):** evaluate the frozen Llama-2 proxy on **Llama-3-8B** (a
+different-family, 4096-dim target → all 5 arms transfer). Steps:
+1. **Build Llama-3-8B Stage-1 data** on the **200 held-out (Llama-2 test-split) questions** — env
+   `se_probes_llama3` is ready and smoke-passed (E19). Gives Llama-3's SE labels + canonical answers
+   + hidden states. Needs a builder option to target those specific questions (or build the same 2000
+   same-seed and eval on the test indices). Same questions the proxy never trained on → leakage-free,
+   directly comparable to the in-dist numbers.
+2. **Cross-LLM eval** — the current `--eval` only swaps the *dataset*, not the *target model*; add a
+   small path (or standalone script) to score the q_only/q_resp_only/z checkpoints against Llama-3's
+   records. Feed Llama-3's input → proxy predicts SE → compare to Llama-3's TRUE SE → transfer
+   Spearman/AUROC per arm, beside the in-dist numbers. **z-arm transfer = the PRH test.**
 
-So the achievable ceiling is ~0.91, not ~0.6 — **label noise accounts for only ~9 points**.
-Recovered signal (z arm): **51%** ID at the original TBG L12 → **66%** ID at the fixed input
-(0.602/0.914). **Useful control:** squad's labels are as reliable as trivia's (0.901 vs 0.914),
-so the OOD drop is a *genuine transfer failure*, not noisier OOD labels.
-Caveats: holds DeBERTa clustering fixed (measures sampling noise only → true ceiling slightly
-lower → true recovered% slightly higher); zero-entropy prompts agree trivially across halves and
-prop up `r_half`.
+**Pending / carried over:**
+3. **Compile & VERIFY the complete "all models + results" record** → commit as `amortized_ue/RESULTS.md`.
+   A draft table exists (5 reference arms; superseded/diagnostic configs; ridge, TF-IDF, SEP baselines;
+   ceilings) — cross-check every `runs/` dir + E0–E20 so **no trained model is missing** before committing.
+4. **Proxy learning curve** (`stage2/proxy_learning_curve.py --sizes 250,500,1000,1440 --seeds 3`) —
+   confirm the *proxy* (not just ridge) plateaus with data. Was launched then killed by the FS outage.
+5. **SEP-comparison write-up** — the honest framing (proxy ~ comparable to a SEP-style probe on the
+   same data; ridge slightly beats it; the real edge is `q_only`). User will decide when to write it.
+6. **(Housekeeping)** rotate the HF token that was pasted in chat (security).
 
-**IMPORTANT — two DIFFERENT ceilings; do not conflate them.**
-- **Label-noise ceiling ≈ 0.91** — an upper bound imposed by the noisy target. Unreachable by
-  anyone. Says nothing about whether the input *contains* the needed information.
-- **Information ceiling ≈ 0.64 ID / ≈ 0.50 OOD** — how much SE is actually recoverable from
-  hidden states at all (measured below). This is the ceiling that actually binds.
-The 0.64 → 0.91 gap is **information genuinely absent from the hidden states**, not model
-failure: SE is a property of the *distribution over 10 stochastic samples*, and one
-deterministic forward pass cannot fully encode it. Chasing 0.91 with a bigger model is chasing
-something that is not there.
+**Cancelled / resolved:** multi-layer *band* ablation (layers within a position redundant, +0.005);
+the regularisation experiment (done — E16, no live dial); the "decide the thesis framing" item
+(resolved — the thesis is cross-LLM transfer); the E18 checkpoint bugs (fixed).
 
-**`linear_ceiling_probe.py` — plain ridge from ONE hidden state beats the 3B proxy.**
-Same split, same continuous target, same Spearman; ID test + OOD (all squad rows):
-
-| model | input | ID test Spearman | OOD Spearman |
-|-------|-------|------------------|--------------|
-| Stage-2 proxy (3B + LoRA + soft tokens) | TBG L12 | 0.467 (51% of ceiling) | 0.289 / 0.334 w/ text |
-| **ridge** | **TBG L12** (identical input) | **0.481** | **0.301** |
-| **ridge** | **TBG L22** (best ID) | **0.600** (66%) | 0.301 |
-| **ridge** | **SLT L15** (best OOD) | **0.584** | **0.495** (55%) |
-
-Conclusions:
-- **The (pos, layer) selection was wrong.** The Stage-2 sweep chose TBG L12; ridge shows TBG
-  L22–L32 are far stronger ID (0.59–0.60). The sweep trains the full 3B on a 600-example
-  subsample for 3 epochs per (pos, layer) — too noisy/undertrained to rank layers. **Ridge selects
-  exactly, in seconds — always pick the layer this way, never with the 3B sweep.**
-- **ID-optimal ≠ OOD-optimal.** Late TBG layers are ID-strong but OOD-brittle (0.24–0.30); SLT
-  L15 nearly wins both (ID 0.584 / OOD 0.495) and is still the best single OOD input known.
-- **At equal input the backbone adds nothing** — see the fair-fight result above: even with the
-  right layers and a 1024 projector the proxy (0.602 / 0.368) loses to ridge (0.642 / 0.437).
-
-**`info_ceiling` experiment — the z→SE relation is LINEAR; there is no nonlinear headroom.**
-MLP (unbottlenecked, on the full 4096/8192-dim z) vs ridge, same split:
-
-| input | ridge ID | **MLP ID** | ridge OOD | **MLP OOD** |
-|-------|----------|-----------|-----------|-------------|
-| TBG L22 | 0.600 | **0.564** | 0.301 | **0.293** |
-| SLT L15 | 0.584 | **0.567** | 0.495 | **0.463** |
-| TBG L22 + SLT L15 | **0.642** | **0.584** | 0.437 | 0.420 |
-
-**MLP LOSES to ridge at every input.** This is the root explanation for the whole Stage-2 story:
-the backbone adds nothing because *there is nothing nonlinear to add*. Two more structural facts
-from the same sweep:
-- **Extra layers within a position are near-redundant** (TBG L22 alone 0.600 → TBG every-4th
-  0.605, i.e. +0.005). A multi-layer *band* is NOT worth pursuing.
-- **The two positions ARE complementary** (TBG L22 + SLT L15 → 0.642, +0.042). This is what
-  motivated `--z_inputs` and it is where the real gain lives.
-
-*Caveat:* only 1440 train examples for a 4096–8192-dim input, so the MLP is data-starved — the
-honest claim is "**no nonlinear signal recoverable at N=2000**", not "none exists". Scaling
-Stage-1 to N≈10k is the one experiment that could overturn this.
-
-**Known wart (measured, minor):** `Projector` destroys z's magnitude twice — `LayerNorm` on the
-input strips ‖z‖ per example, and the output is per-token unit-normalised then scaled by a
-**single global learnable scalar** (`model.py:66,74`). The docstring claim that this preserves
-z's magnitude is **false** (a learned constant scales all examples identically). Measured cost is
-small (~0.01 Spearman: ridge on LayerNorm'd z scores 0.599 vs 0.600 at TBG L22), because ‖z‖
-carries only weak SE signal (ρ(‖z‖, SE) ≈ −0.21 at TBG L22). Not worth fixing; do not cite the
-docstring.
-
-## ⭐ THE HEADLINE RESULT (E12/E13, 2026-07-14) — text-only arms
-
-Every `z` arm needs a forward pass of the **target LLM**. But if you are running that pass anyway,
-ridge/SEP on the hidden states already solves the problem *and beats this proxy*. So the SLM's
-justification must come from what ridge **structurally cannot do** — running with **no hidden
-states at all**. Two new arms (`q_only`, `q_resp_only`) drop `z` entirely; sequence = `[text][REG]`,
-the projector is never called. Opt in via `--arms z,z_q,z_q_resp,q_only,q_resp_only`.
-
-| arm | needs target LLM? | ID Spearman | OOD Spearman | % ID ceiling |
-|---|---|---|---|---|
-| z | yes (hidden states) | 0.602 ± 0.019 | 0.368 ± 0.033 | 66% |
-| **q_only** | **NO — nothing at all** | **0.494 ± 0.049** | 0.259 ± 0.047 | **54%** |
-| **q_resp_only** | answer text only, no hidden states | **0.521 ± 0.049** | **0.399 ± 0.073** | 57% |
-
-**`q_only` predicts SE from the question alone, BEFORE running the target model** — 82% of the
-hidden state's ID performance at zero cost. `q_resp_only` OOD (0.399) **beats z-only** (0.368).
-
-**Control (E13, `text_baseline_probe.py`) — it is NOT a bag-of-words shortcut:** TF-IDF→ridge on the
-same text gets ID 0.351 and **collapses to 0.037 (chance) OOD**, vs the 3B's 0.259 — a **7× gap**.
-Question-length alone: 0.101. So the 3B is reading something *semantic* about question difficulty
-that transfers across a domain shift; n-grams only memorise dataset vocabulary.
-
-**The two-regime framing (within a single target LLM):**
-- **Hidden states available** → a linear probe (≈ SEP) is all you need; **the proxy is redundant**
-  *in this single-model setting*. Report this as a clean negative result — but note it is
-  conditional: under the cross-LLM goal (see "🎯 Long-term goal"), a probe fit on one model's
-  hidden states cannot be applied to another at all.
-- **No target-LLM forward pass** → **only the SLM can run at all**, and no trivial text baseline
-  comes close (routing / abstention / cascades). The text arms are also the natural cross-LLM
-  vehicle: their input distribution does not change when the target model changes.
-
-## ⛔ Current failure (2026-07-14) — the proxy OVERFITS; fix before any cross-LLM work
-
-The direct diagnostic (TRAIN metrics added in commit `95065e9`): the z arm reaches train
-Spearman **0.891** but test **0.590**, while ridge on the *identical* input gets train
-0.856 / test **0.642**. The proxy fits the training set harder than ridge and generalises
-worse — and train 0.891 is nearly at the label-noise ceiling (0.914), so it is fitting noise.
-
-**Why:** the z→SE task is linear (MLP < ridge at every input) and small (1440 train rows vs
-8192-dim z), but the trainable capacity is much larger than the task (LoRA r16 across all
-backbone layers + the MLP projector) and the regularisation is far too weak
-(`weight_decay 0.01`, while ridge's CV-selected α on this data is ~1e4). The frozen backbone
-is untouched either way — the overfitting lives entirely in the adapters/projector/head.
-
-**Why it blocks the goal:** cross-LLM transfer requires the proxy to learn what generalises,
-not what is idiosyncratic to one model's training data. Regularising is aligned with the
-goal, not a retreat from it. Caveat: the right settings may differ per arm — the text arms
-(`q_only`) do genuinely nonlinear work, so do not assume the winning z-arm regularisation
-transfers to them; test both.
-
-**In flight (uncommitted in `stage2/run.py`, 2026-07-14):** four new CLI flags —
-`--weight_decay` (try ≫0.01), `--projector_type linear` (drops GELU + hidden layer),
-`--projector_dropout`, `--lora_r` (0 disables LoRA entirely). The corresponding
-`Stage2Config` fields already existed; this is wiring only. **The regularisation experiment
-has not been run yet** — it is the immediate next step.
-
-## To-do list (pick up here)
-
-> ⚠️ **This list predates the cross-LLM goal statement (2026-07-14) and needs
-> re-prioritisation by the user around that goal** — treat the open items below as
-> candidates, not an agreed order.
-
-**⛔ BLOCKED ON INFRASTRUCTURE (2026-07, resume later): `/vol/bitbucket` NFS is degraded.**
-Two runs were launched and **wedged in uninterruptible disk-I/O wait** (`D` state,
-`folio_wait_bit_common`) for ~5h with zero progress, then killed. Root cause: the shared NFS
-export `fs-vol-bitbucket.doc.ic.ac.uk:/export/vol/bitbucket` (mounted at `/vol/bitbucket`, **100%
-full, ~1.1T free of 174T**) has collapsed I/O — reading the 2GB of Stage-1 records **times out
-(>40s)** even though a bare `ls` is fast (metadata only). `mn1025` is NOT a separate disk — it is a
-subfolder on that same NFS export, so no path change escapes it. **All Stage-2 work is blocked**
-(data, conda env `amortized_stage2`, and HF cache all live on that volume).
-- **Recovery test (use this, NOT `ls`):** `time cat <records-dir>/*.pt > /dev/null` — when it
-  finishes in seconds, the FS is usable and the two runs below can relaunch as-is.
-- **Escape route if NFS stays bad:** node-local `/data2` (ext4, **11T free**, not NFS). Stage the
-  records + HF cache there once (needs one clean NFS read window), then run from local disk.
-- **Two runs to resume (commands saved, code committed):** (1) regenerate the reference model WITH
-  checkpoints — `--arms z,z_q,z_q_resp,q_only,q_resp_only --z_inputs TBG:22,SLT:15
-  --projector_hidden_dim 1024 --run_name REFERENCE_multipos_p1024_5arm_ckpt` (checkpoints now save
-  by default); (2) proxy learning curve — `python -m amortized_ue.stage2.proxy_learning_curve
-  --sizes 250,500,1000,1440 --seeds 3` (answers "is the proxy data-hungry / do we build more data").
-
-**📋 TODO (user, high priority): compile & VERIFY a complete "all models + results" record.**
-A draft table was assembled (5 reference arms; superseded/diagnostic proxy configs; ridge, TF-IDF
-and SEP baselines; ceilings) but the user wants to read it in detail first to ensure **no trained
-model is missing** before it is committed as `amortized_ue/RESULTS.md`. Numbers are pulled from
-`runs/*/ood_results_*_multiseed.json` and the diagnostic scripts. Cross-check every `runs/` dir and
-every experiment E0–E17 against the table before finalising.
-
-**Done (2026-07-13):** ridge-based layer selection, projector widened to 1024, arm
-comparison re-run at the corrected input (all text effects turned out to be noise). The
-multi-layer *band* ablation is **cancelled**: measured at +0.005, layers within a position are
-redundant; positions are what matter, and `--z_inputs` already exploits that.
-
-**Done (2026-07-14):** text-only arms `q_only` / `q_resp_only` built and run (E12) with the
-bag-of-words control (E13) — see "⭐ THE HEADLINE RESULT" above. The old "decide the thesis
-framing" item is **resolved**: the thesis is **cross-LLM transfer** (see "🎯 Long-term goal").
-
-**The immediate next step: the regularisation experiment** (see "⛔ Current failure") — the
-four new flags in `stage2/run.py` are wired but uncommitted, and the experiment has not run.
-
-Open items carried over (pending re-prioritisation):
-
-1. **Close the remaining ridge gap, or concede it.** Proxy 0.602 vs ridge 0.642 ID. The
-   regularisation experiment (`--projector_type linear`, `--lora_r 0`, stronger
-   `--weight_decay`) is the direct attack on this. If it still loses, **report the negative
-   result** — it is well-controlled and publishable.
-2. **Beat ridge OOD, or concede.** Best OOD known is ridge on **SLT L15 alone (0.495)**, well
-   above the proxy's 0.368. Try `--z_inputs SLT:15` (single position) — late TBG layers are
-   OOD-brittle and may be *hurting* the OOD arm.
-3. **Report every result against the ridge baseline.** Ridge on `[TBG L22 + SLT L15]` = **0.642 ID
-   / 0.437 OOD** (and SLT L15 = 0.495 OOD) is the number to beat. Cheap, exact, seconds on CPU.
-4. **Cross-LLM groundwork** — design still open (see "🎯 Long-term goal"; do not lock in a
-   recipe). Blocked on the overfitting fix.
-5. **Full 2×2 OOD matrix** — also train on squad and eval on trivia_qa. *Low priority.*
-6. **(Only if reviving the nonlinear story) Scale Stage-1 to N≈10k.** The MLP had 1440 examples
-   for a 4096–8192-dim input, so "the relation is linear" is really "linear at N=2000". Expensive
-   and speculative; do not lead with it.
-7. **(Housekeeping)** rotate the HF token that was pasted in chat (security).
+**⚠️ Infra caveat:** `/vol/bitbucket` is a shared NFS that periodically degrades (bulk reads time out
+while `ls`/writes stay fast). It has frozen jobs for hours. Test real recovery with
+`time cat <records>/*.pt >/dev/null` (NOT `ls`). Node-local `/data2` (ext4, ~11T, non-NFS) is an
+escape route if it stays bad. Run long jobs with a watchdog that pings on done/crash/stall.
