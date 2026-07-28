@@ -131,7 +131,10 @@ class HuggingfaceModel(BaseModel):
             llama65b = '65b' in model_name.lower() and base == 'huggyllama'
             llama2or3_70b = '70b' in model_name.lower() and base == 'meta-llama'
 
-            if ('7b' in model_name or '13b' in model_name) or eightbit:
+            # blocks-execution: '8b' added by mn1025 (2026-07) so Llama-3-8B loads via the
+            # standard from_pretrained path; original ('7b'|'13b') hit `raise ValueError` for 8B.
+            # No SE/probe logic touched; loads Meta-Llama-3-8B-Instruct like the 7b/13b models.
+            if ('7b' in model_name or '13b' in model_name or '8b' in model_name.lower()) or eightbit:
                 self.model = AutoModelForCausalLM.from_pretrained(
                     f"{base}/{model_name}", device_map="auto",
                     max_memory={0: '80GIB'}, **kwargs,)
