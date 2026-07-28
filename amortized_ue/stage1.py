@@ -101,9 +101,30 @@ def build(config: Stage1Config) -> dict:
     logging.info("Few-shot prompt:\n%s", fewshot_prompt)
 
     # --- choose validation prompts --------------------------------------------
+    # The seed-driven selection is drawn at `selection_num_samples` (default:
+    # num_samples). When `only_ids` is given we draw the SAME pool as the run those
+    # ids came from, then keep only the requested ids -- so a second target LLM is
+    # built on exactly another run's held-out questions (identical prompts).
     possible_indices = list(range(len(validation_dataset)))
-    n = min(args.num_samples, len(validation_dataset))
-    indices = random.sample(possible_indices, n)
+    selection_n = config.selection_num_samples or config.num_samples
+    selection_n = min(selection_n, len(validation_dataset))
+    selected = random.sample(possible_indices, selection_n)
+    if config.only_ids:
+        target = set(config.only_ids)
+        indices = [i for i in selected if validation_dataset[i]["id"] in target]
+        found = {validation_dataset[i]["id"] for i in indices}
+        missing = target - found
+        if missing:
+            raise RuntimeError(
+                f"only_ids: {len(missing)}/{len(target)} requested ids are NOT in the "
+                f"seed-{args.random_seed} selection of {selection_n} prompts "
+                f"(selection mismatch -- check selection_num_samples / seed / few_shot). "
+                f"e.g. {sorted(missing)[:5]}")
+        logging.info("only_ids: building %d records (of %d selected) matching %d target ids",
+                     len(indices), selection_n, len(target))
+    else:
+        indices = selected[: min(args.num_samples, len(validation_dataset))]
+    n = len(indices)
 
     # --- load models -----------------------------------------------------------
     logging.info("Loading target model %s ...", args.model_name)
@@ -241,6 +262,13 @@ def _config_from_cli() -> Stage1Config:
     p.add_argument("--model_name", default=Stage1Config.model_name)
     p.add_argument("--dataset", default=Stage1Config.dataset)
     p.add_argument("--num_samples", type=int, default=Stage1Config.num_samples)
+    p.add_argument("--only_ids", default=None,
+                   help="path to a newline-delimited file of prompt ids to build (cross-LLM: "
+                        "build only another run's held-out ids). Reproduces that run's selection "
+                        "via --selection_num_samples, then keeps only these ids.")
+    p.add_argument("--selection_num_samples", type=int, default=Stage1Config.selection_num_samples,
+                   help="pool size for the seed-driven selection when --only_ids is set "
+                        "(must match the source run's num_samples, e.g. 2000). 0 -> num_samples.")
     p.add_argument("--num_generations", type=int, default=Stage1Config.num_generations)
     p.add_argument("--temperature", type=float, default=Stage1Config.temperature)
     p.add_argument("--num_few_shot", type=int, default=Stage1Config.num_few_shot)
@@ -252,12 +280,17 @@ def _config_from_cli() -> Stage1Config:
     p.add_argument("--smoke", action="store_true")
     p.add_argument("--smoke_num_samples", type=int, default=Stage1Config.smoke_num_samples)
     a = p.parse_args()
+    only_ids = ()
+    if a.only_ids:
+        with open(a.only_ids) as fh:
+            only_ids = tuple(line.strip() for line in fh if line.strip())
     return Stage1Config(
         model_name=a.model_name, dataset=a.dataset, num_samples=a.num_samples,
         num_generations=a.num_generations, temperature=a.temperature,
         num_few_shot=a.num_few_shot, model_max_new_tokens=a.model_max_new_tokens,
         output_dir=a.output_dir, run_name=a.run_name, overwrite=a.overwrite,
-        push_to_wandb=a.push_to_wandb, smoke=a.smoke, smoke_num_samples=a.smoke_num_samples)
+        push_to_wandb=a.push_to_wandb, smoke=a.smoke, smoke_num_samples=a.smoke_num_samples,
+        only_ids=only_ids, selection_num_samples=a.selection_num_samples)
 
 
 if __name__ == "__main__":

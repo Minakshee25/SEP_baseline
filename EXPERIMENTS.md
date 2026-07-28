@@ -543,42 +543,78 @@ meta-llama), same pattern as Llama-2. **Smoke passed** (`bash amortized_ue/smoke
 ~32GB free): 3 records, answers correct+clean-stopping (trump / hong kong / romania), SE signal
 meaningful (record 2: 5 clusters, CAE 1.557 on a wrong answer vs 1 cluster on the two right ones).
 
-## E20 — Cross-LLM transfer plan (the thesis experiment) — ⏳ NEXT
+## E20 — Cross-LLM transfer, the thesis experiment (2026-07-28) — ✅ DONE. Text transfers, hidden states do NOT.
 
-Evaluate the **frozen Llama-2-trained proxy on Llama-3-8B's data** — no retraining. For each arm:
-feed Llama-3's input (question text, and/or Llama-3's TBG L22 + SLT L15 hidden states) → proxy
-predicts SE → compare to **Llama-3's TRUE SE**. All 5 arms run (Llama-3-8B is 4096-dim, matching the
-projector). The z-arm transfer number is the real **Platonic Representation Hypothesis** test: does a
-projector fit on Llama-2's hidden geometry predict Llama-3's SE? Evaluate on the **200 held-out
-(Llama-2 test-split) questions** (proxy never trained on them; same questions, Llama-3 labels →
-directly comparable to the in-dist numbers). **Needs:** (1) build Llama-3-8B Stage-1 on those
-questions; (2) a small cross-LLM eval (the current `--eval` only swaps dataset, not target model).
+Evaluated the **frozen Llama-2-trained proxy (25 reference checkpoints) on Llama-3-8B's data** — no
+retraining. Built Llama-3-8B Stage-1 on the **200 held-out (Llama-2 test-split) questions** (same
+questions the proxy never trained on → leakage-free, directly comparable), scored each arm on those
+200 with Llama-3's own SE labels. Llama-3-8B is 4096-dim so all 5 arms transfer; the z-arm is the
+**Platonic Representation Hypothesis** test.
+
+**Result (Spearman, 5 seeds; control = the SAME harness on Llama-2's own 200 held-out records):**
+
+| arm | control (→Llama-2, = ID) | **transfer (→Llama-3)** | retained |
+|---|---|---|---|
+| **z** (hidden only) | 0.602 ± 0.019 | **0.056 ± 0.082** | ~0% (**chance**) |
+| z_q | 0.590 ± 0.049 | 0.116 ± 0.042 | ~20% |
+| z_q_resp | 0.583 ± 0.015 | 0.102 ± 0.217 | ~17% |
+| **q_only** (no target LLM) | 0.494 ± 0.049 | **0.436 ± 0.048** | **88%** |
+| **q_resp_only** (answer text) | 0.521 ± 0.049 | **0.562 ± 0.040** | **>100%** |
+
+**Two findings — the thesis:**
+1. **Hidden states do NOT transfer.** z collapses 0.602 → **0.056 (chance)**: a projector fit on
+   Llama-2's hidden geometry carries *no* SE signal to Llama-3. The naive PRH reading ("reuse the
+   frozen z-pathway across models") **fails** for SE across these two families. Bolting text onto the
+   broken z-pathway (z_q, z_q_resp ≈ 0.1) does not rescue it — the misaligned z actively drags those
+   arms *below* the pure-text ones.
+2. **Text DOES transfer.** `q_only` keeps **88%** of its ID signal (0.436) with **no target-LLM
+   forward pass**; `q_resp_only` transfers **fully** (0.562, above its own ID 0.521). The
+   question-difficulty signal is intrinsic and **model-agnostic** → validates the *text-reading*
+   proxy design. A per-model probe (SEP/ridge) cannot run cross-model at all; a learned hidden-state
+   projector doesn't survive the jump either — only the text pathway does.
+
+**Control validates the harness:** re-running the identical eval on Llama-2's own 200 held-out
+records reproduces the reference ID numbers to 4 sig figs (z 0.6024, q_only 0.4939, q_resp_only
+0.5208), so the z-collapse is a true model-swap effect, not a harness artifact.
+
+**Blocks-execution fix (approved) needed to build Llama-3 Stage-1:** Llama-3's tokenizer normalises
+" ?"→"?" on decode, so `full_answer.startswith(input_data)` failed on 9/200 prompts (space-before-
+punctuation) → the `huggingface_models.py` else-branch raised. Fix recovers the offset from the
+**token boundary** (`decode(input_tokens)`); Llama-2 keeps the startswith path byte-identical. No
+SE/clustering/TBG-SLT/probe logic touched. Verified: the 9 affected prompts extracted correct answers
+(e.g. "…Republican President of the United States ?" → "abraham lincoln").
+
+**Artifacts:** Llama-3 data `amortized_ue/data/stage1/Meta-Llama-3-8B-Instruct_trivia_qa_n200_full/`
+(mean_acc 0.685, mean_CAE 0.448); transfer JSON + control JSON under the reference checkpoints dir
+(`cross_llm_Meta-Llama-3-8B-Instruct_trivia_qa.json`). Tooling: `amortized_ue/stage1.py --only_ids`
+(build another run's held-out ids on a new target), `amortized_ue/stage2/eval_cross_llm.py`.
 
 ---
 
 ## Where we stand (2026-07-28)
 
-**The proxy is finished and characterised — attention now moves to CROSS-LLM TRANSFER.**
+**Cross-LLM transfer is DONE (E20): the thesis holds — text transfers, hidden states do not.**
 
 **In-distribution result (reference model, saved, all 5 arms — Spearman / AUROC):**
 
-| arm | needs target LLM? | ID | OOD |
-|---|---|---|---|
-| z (hidden only) | yes | 0.602 / 0.807 | 0.368 / 0.669 |
-| z_q · z_q_resp | yes | ~0.59 / ~0.80 | ~0.40 / ~0.68 |
-| **q_only** | **NO — nothing** | 0.494 / 0.758 | 0.259 / 0.614 |
-| q_resp_only | answer text only | 0.521 / 0.768 | 0.399 / 0.684 |
+| arm | needs target LLM? | ID | OOD | **Llama-3 transfer (Spearman)** |
+|---|---|---|---|---|
+| z (hidden only) | yes | 0.602 / 0.807 | 0.368 / 0.669 | **0.056 (chance)** |
+| z_q · z_q_resp | yes | ~0.59 / ~0.80 | ~0.40 / ~0.68 | ~0.10 |
+| **q_only** | **NO — nothing** | 0.494 / 0.758 | 0.259 / 0.614 | **0.436 (88%)** |
+| q_resp_only | answer text only | 0.521 / 0.768 | 0.399 / 0.684 | **0.562 (full)** |
 
-**Three settled conclusions:**
+**Settled conclusions:**
 1. **The proxy is neither over- nor under-fitting** (E15–E17); its −0.04 gap to ridge is structural.
-2. **Negative result:** with hidden states available, ridge (≈ SEP) beats the proxy (0.642 vs 0.602),
-   MLP loses to ridge, and more data won't help. The z-branch re-derives SEP and does it worse.
-   Report this plainly.
+2. **Negative result (single LLM):** with hidden states available, ridge (≈ SEP) beats the proxy
+   (0.642 vs 0.602), MLP loses to ridge, more data won't help. The z-branch re-derives SEP, worse.
 3. **Positive result / the thesis (E12/E13):** `q_only` predicts SE from the **question alone, no
    target-LLM forward pass** (0.494, 54% of ceiling), which a hidden-state probe cannot do; a
    bag-of-words baseline collapses to chance OOD (0.037) while the 3B holds (0.259).
+4. **⭐ Cross-LLM transfer (E20):** the frozen Llama-2 proxy on Llama-3-8B — **hidden-state transfer
+   FAILS** (z 0.602→0.056, chance; PRH does not hold for SE across Llama-2→Llama-3), **text transfer
+   SUCCEEDS** (q_only 88%, q_resp_only full). This is the argument for the text-based proxy: only the
+   model-agnostic text pathway survives a target-model swap.
 
-**Next: cross-LLM transfer (E20).** Llama-3-8B Stage-1 env is ready and validated (E19). Build its
-data, then evaluate the frozen proxy on it — the PRH test.
-
-**The consolidated to-do list lives in `amortized_ue/CLAUDE.md`.**
+**Next:** a 2nd cross-LLM target to test generality of E20 (e.g. a non-Llama family); compile
+`amortized_ue/RESULTS.md`. **The consolidated to-do list lives in `amortized_ue/CLAUDE.md`.**

@@ -152,4 +152,7 @@ amortized_ue/data/
 # Amortized-UE Stage 2 run outputs (regenerable; results.json + checkpoints)
 amortized_ue/stage2/runs/
 
+# Cross-LLM (E20) scratch: regenerable test-id list, build/eval logs, control JSON
+scratch_xllm/
+
 .env

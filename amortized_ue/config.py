@@ -28,6 +28,14 @@ class Stage1Config:
     num_few_shot: int = 5                     # few-shot examples drawn from the train split
     random_seed: int = 10                     # matches SEP default for reproducible sampling
 
+    # --- targeted subset build (cross-LLM: build only specific held-out ids) ----
+    # When `only_ids` is set, the seed-driven selection still runs at
+    # `selection_num_samples` (so the SAME questions are drawn as the full run this
+    # subset comes from), and only the prompts whose id is in `only_ids` are built.
+    # This lets a second target LLM be run on exactly another run's held-out ids.
+    only_ids: tuple = ()                      # empty -> build the full selection as usual
+    selection_num_samples: int = 0            # 0 -> use num_samples; else the pool to select from
+
     # --- generation / sampling (mirrors SEP baseline) ---------------------------
     num_generations: int = 10                 # high-temperature samples per prompt
     temperature: float = 1.0                  # high-temperature value

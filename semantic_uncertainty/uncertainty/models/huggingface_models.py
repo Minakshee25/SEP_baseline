@@ -294,7 +294,19 @@ class HuggingfaceModel(BaseModel):
         if full_answer.startswith(input_data):
             input_data_offset = len(input_data)
         else:
-            raise ValueError('Have not tested this in a while.')
+            # Blocks-execution fix (Llama-3): its tokenizer normalises whitespace before
+            # punctuation on decode (" ?" -> "?"), so the decoded full_answer is NOT a
+            # verbatim prefix of the raw input string and the startswith check fails.
+            # Recover the offset from the token boundary instead: decoding the input tokens
+            # yields exactly the prefix of full_answer, so full_answer[offset:] is the
+            # generated answer. Llama-2 keeps the startswith path above (byte-identical);
+            # only tokenizers that don't round-trip the prompt reach this branch.
+            n_input_token = len(inputs['input_ids'][0])
+            decoded_input = self.tokenizer.decode(
+                outputs.sequences[0][:n_input_token], skip_special_tokens=True)
+            if not full_answer.startswith(decoded_input):
+                raise ValueError('Have not tested this in a while.')
+            input_data_offset = len(decoded_input)
 
         # Remove input from answer.
         answer = full_answer[input_data_offset:]

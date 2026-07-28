@@ -29,9 +29,11 @@ model-agnostic, so a text-reading proxy is not tied to one target. Scientific ba
 scale grows), so the hidden-state input may transfer too. A per-model probe (SEP/ridge) *cannot* do
 this — a probe fit on model A's hidden states can't even be applied to model B without retraining.
 
-**Status (2026-07-28): cross-LLM work is STARTING.** The single-LLM proxy is fully characterised
-(see Current state) and the Llama-3-8B Stage-1 env is built and validated (E19). Next: build
-Llama-3-8B's Stage-1 data and evaluate the frozen Llama-2-trained proxy on it (E20).
+**Status (2026-07-28): cross-LLM experiment #1 DONE (E20) — the thesis holds.** The frozen Llama-2
+proxy was evaluated on Llama-3-8B's 200 held-out questions: **hidden-state transfer FAILS** (z
+0.602→0.056, chance) but **text transfer SUCCEEDS** (q_only 88% retained, q_resp_only full). Only the
+model-agnostic text pathway survives a target-model swap — the core argument for a text-reading proxy.
+See Current state + E20. Next: a 2nd cross-LLM target (ideally a non-Llama family) to test generality.
 
 ## Relationship to the SEP repo (read-only reuse)
 
@@ -159,8 +161,29 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 
 **Stage-1 datasets (target LLM Llama-2-7b-chat):** trivia_qa n400 (`stage1_records:v0`), **n2000**
 (`stage1_records_n2000`; split 1440/360/200 seed 42; the ID dataset), squad n1000 (OOD; mean_acc
-0.236 / mean_CAE 1.498 — a real shift vs trivia 0.59/0.59). **Llama-3-8B Stage-1: env ready (E19),
-data not yet built** (that's E20).
+0.236 / mean_CAE 1.498 — a real shift vs trivia 0.59/0.59). **Llama-3-8B Stage-1 (E20):** trivia_qa
+**n200** on the exact Llama-2 held-out test ids (`Meta-Llama-3-8B-Instruct_trivia_qa_n200_full`;
+mean_acc 0.685 / mean_CAE 0.448) — built with `stage1.py --only_ids` (reproduces the seed-10 n2000
+selection, keeps the 200 test ids). A Llama-2 `n200_full` copy of the same ids exists as the eval
+control.
+
+**Cross-LLM transfer (E20) — the thesis result.** Frozen Llama-2 proxy → Llama-3-8B, 5-seed Spearman
+(control = same harness on Llama-2's own 200, reproduces ID to 4 sig figs):
+
+| arm | control (=ID) | **transfer** | retained |
+|-----|---------------|--------------|----------|
+| **z** (hidden only) | 0.602 | **0.056** | ~0% (chance) |
+| z_q · z_q_resp | 0.590 / 0.583 | 0.116 / 0.102 | ~20% |
+| **q_only** (no target LLM) | 0.494 | **0.436** | **88%** |
+| **q_resp_only** (answer text) | 0.521 | **0.562** | **full** |
+
+**Hidden states do NOT transfer** (naive PRH fails for SE across Llama-2→Llama-3; z-arms with text
+bolted on stay broken, ~0.1). **Text DOES transfer** (q_only 88%, q_resp_only full) → validates the
+text-reading proxy: only the model-agnostic text pathway survives a target-model swap. Tooling:
+`eval_cross_llm.py` (scores any checkpoint set on another target's records, split=all); JSONs under
+`runs/REFERENCE_multipos_p1024_5arm_ckpt/checkpoints/cross_llm_*.json`. Fix that unblocked the Llama-3
+build: `huggingface_models.py` token-boundary offset recovery (Llama-3 decodes " ?"→"?"; Llama-2 path
+byte-identical; no SE/probe logic touched).
 
 **Reference model — SAVED, 25 checkpoints** at `runs/REFERENCE_multipos_p1024_5arm_ckpt/checkpoints/`
 (5 arms × 5 seeds, ~30M trainable params each, no frozen backbone; reproduces the run below to 4 dp).
@@ -213,17 +236,17 @@ in `logs/tbg_L22_multiseed.log`). Reference numbers: `runs/REFERENCE_multipos_p1
 
 ## 📋 TO-DO (single source of truth — other docs point here)
 
-**NOW — cross-LLM experiment #1 (E20):** evaluate the frozen Llama-2 proxy on **Llama-3-8B** (a
-different-family, 4096-dim target → all 5 arms transfer). Steps:
-1. **Build Llama-3-8B Stage-1 data** on the **200 held-out (Llama-2 test-split) questions** — env
-   `se_probes_llama3` is ready and smoke-passed (E19). Gives Llama-3's SE labels + canonical answers
-   + hidden states. Needs a builder option to target those specific questions (or build the same 2000
-   same-seed and eval on the test indices). Same questions the proxy never trained on → leakage-free,
-   directly comparable to the in-dist numbers.
-2. **Cross-LLM eval** — the current `--eval` only swaps the *dataset*, not the *target model*; add a
-   small path (or standalone script) to score the q_only/q_resp_only/z checkpoints against Llama-3's
-   records. Feed Llama-3's input → proxy predicts SE → compare to Llama-3's TRUE SE → transfer
-   Spearman/AUROC per arm, beside the in-dist numbers. **z-arm transfer = the PRH test.**
+**DONE — cross-LLM experiment #1 (E20):** frozen Llama-2 proxy → Llama-3-8B evaluated on the 200
+held-out questions. **Hidden states do NOT transfer (z 0.602→0.056), text DOES (q_only 88%,
+q_resp_only full).** Full result table + tooling in Current state / EXPERIMENTS.md E20. Built with
+`stage1.py --only_ids`; scored with `stage2/eval_cross_llm.py`.
+
+**NOW — cross-LLM experiment #2 (generality of E20):** repeat E20 on a **second, ideally non-Llama
+target family** to test whether the text-transfers / hidden-states-don't finding generalises beyond
+Llama-2→Llama-3 (same family). Same recipe: build that target's Stage-1 on the 200 held-out ids
+(`stage1.py --only_ids scratch_xllm/llama2_test_ids.txt --selection_num_samples 2000`, in an env that
+loads it), then `eval_cross_llm.py --target_model <it>`. Text-only arms (q_only/q_resp_only) transfer
+to ANY hidden size; the z-arms only if it's 4096-dim. Mind model-load env walls (see Environments).
 
 **Pending / carried over:**
 3. **Compile & VERIFY the complete "all models + results" record** → commit as `amortized_ue/RESULTS.md`.
