@@ -227,7 +227,9 @@ def build(config: Stage1Config) -> dict:
     del model, entailment_model
     torch.cuda.empty_cache()
 
-    if config.push_to_wandb:
+    # Push to W&B by default, but never for throwaway smoke builds (avoids spamming the
+    # project with 3-record artifacts). Local disk already has the data either way.
+    if config.push_to_wandb and not config.smoke:
         from amortized_ue import wandb_io
         wandb_io.sync_to_wandb(config, metrics)
 

@@ -185,6 +185,17 @@ text-reading proxy: only the model-agnostic text pathway survives a target-model
 build: `huggingface_models.py` token-boundary offset recovery (Llama-3 decodes " ?"→"?"; Llama-2 path
 byte-identical; no SE/probe logic touched).
 
+**Cross-LLM #2 (E21) — REPLICATES E20 on a different family.** Target **Mistral-7B-Instruct-v0.2**
+(4096-dim, non-Llama; loads in `se_probes_llama3`, no code change), same 200 held-out ids. z 0.044
+(chance) / q_only 0.410 (76% of the 0.540 ceiling) / q_resp_only 0.511 (~full). So "text transfers,
+hidden geometry doesn't" is now **two-family** (Llama-3 same-family + Mistral different-family), with a
+consistent ~0.5 shared-difficulty ceiling. **Ceilings:** Llama-2↔Llama-3 SE Spearman **0.505**,
+Llama-2↔Mistral **0.540** — the model-independent "question difficulty" the text arms target.
+
+**Storage:** all Stage-1 datasets live on `/vol/bitbucket` (source of truth) AND W&B (`push_to_wandb`
+now defaults True, smokes excluded; artifact names auto-distinct per (model,dataset,N), reloadable via
+`load_source=wandb`). Back-fill existing sets with `push_dataset_wandb.py`.
+
 **Reference model — SAVED, 25 checkpoints** at `runs/REFERENCE_multipos_p1024_5arm_ckpt/checkpoints/`
 (5 arms × 5 seeds, ~30M trainable params each, no frozen backbone; reproduces the run below to 4 dp).
 TBG L22 + SLT L15, projector 1024, k=4, 5 seeds — **mean ± std:**
@@ -241,12 +252,19 @@ held-out questions. **Hidden states do NOT transfer (z 0.602→0.056), text DOES
 q_resp_only full).** Full result table + tooling in Current state / EXPERIMENTS.md E20. Built with
 `stage1.py --only_ids`; scored with `stage2/eval_cross_llm.py`.
 
-**NOW — cross-LLM experiment #2 (generality of E20):** repeat E20 on a **second, ideally non-Llama
-target family** to test whether the text-transfers / hidden-states-don't finding generalises beyond
-Llama-2→Llama-3 (same family). Same recipe: build that target's Stage-1 on the 200 held-out ids
-(`stage1.py --only_ids scratch_xllm/llama2_test_ids.txt --selection_num_samples 2000`, in an env that
-loads it), then `eval_cross_llm.py --target_model <it>`. Text-only arms (q_only/q_resp_only) transfer
-to ANY hidden size; the z-arms only if it's 4096-dim. Mind model-load env walls (see Environments).
+**DONE — cross-LLM experiment #2 (E21):** Mistral-7B-Instruct-v0.2 (different family, 4096-dim)
+**replicates E20** — z 0.044 (chance), q_only 0.410 (76%), q_resp_only 0.511 (~full); ceiling 0.540.
+Two-family generality established. See Current state / EXPERIMENTS.md E21.
+
+**NOW — pick the next thrust (both open):**
+- **Cross-LLM #3 (more breadth):** a 3rd family, ideally testing z-transfer at a *different* hidden dim
+  too (e.g. Falcon-7b 4544-dim → text arms only; or a 4096 non-Llama for all arms). Same recipe:
+  `stage1.py --only_ids scratch_xllm/llama2_test_ids.txt --selection_num_samples 2000` then
+  `eval_cross_llm.py --target_model <it>`. Mind model-load env walls (see Environments).
+- **The Procrustes alignment experiment (deferred Option A):** can z be *made* to transfer? Fit a
+  linear/orthogonal map target→Llama-2 hidden space on a *disjoint* anchor set of shared questions,
+  apply it, re-run the frozen z-proxy. There's a concrete ~0.5 ceiling to recover. Needs one more
+  target build on some Llama-2 *train* questions (leakage-free anchors).
 
 **Pending / carried over:**
 3. **Compile & VERIFY the complete "all models + results" record** → commit as `amortized_ue/RESULTS.md`.

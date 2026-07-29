@@ -44,7 +44,7 @@ def load_wandb(config: Stage1Config, download_root: str | None = None) -> dict:
 
     download_root = download_root or os.path.join(config.run_dir(), "_wandb_download")
     entity = config.wandb_entity
-    ref = f"{entity + '/' if entity else ''}{config.wandb_project}/{config.wandb_artifact_name}:latest"
+    ref = f"{entity + '/' if entity else ''}{config.wandb_project}/{config.resolved_artifact_name()}:latest"
 
     api = wandb.Api()
     artifact = api.artifact(ref, type="dataset")

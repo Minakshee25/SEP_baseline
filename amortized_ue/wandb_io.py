@@ -24,7 +24,7 @@ def sync_to_wandb(config: Stage1Config, metrics: dict) -> None:
     run.log(metrics)
 
     artifact = wandb.Artifact(
-        name=config.wandb_artifact_name,
+        name=config.resolved_artifact_name(),
         type="dataset",
         metadata={**config.as_dict(), **metrics},
     )
@@ -34,4 +34,4 @@ def sync_to_wandb(config: Stage1Config, metrics: dict) -> None:
     run.log_artifact(artifact)
     run.finish()
     logging.info("Pushed Stage 1 artifact %s to W&B project %s",
-                 config.wandb_artifact_name, config.wandb_project)
+                 config.resolved_artifact_name(), config.wandb_project)

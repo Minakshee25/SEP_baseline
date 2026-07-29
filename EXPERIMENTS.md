@@ -589,9 +589,40 @@ SE/clustering/TBG-SLT/probe logic touched. Verified: the 9 affected prompts extr
 (`cross_llm_Meta-Llama-3-8B-Instruct_trivia_qa.json`). Tooling: `amortized_ue/stage1.py --only_ids`
 (build another run's held-out ids on a new target), `amortized_ue/stage2/eval_cross_llm.py`.
 
+## E21 — Cross-LLM #2: Mistral-7B (different family) — ✅ REPLICATES E20. Generality confirmed.
+
+Repeated E20 with a **non-Llama** 2nd target to test generality. **Mistral-7B-Instruct-v0.2** chosen:
+4096-dim (= Llama-2 → all 5 arms transfer) AND a different family. It loads in `se_probes_llama3`
+(transformers 4.44 — the old 4.35.2 tokenizer failure is gone) with **no code change** (the Mistral
+load branch already existed) and no fix-A trigger. Built Stage-1 on the **same 200 held-out ids**
+(`stage1.py --only_ids`; mean_acc 0.67 / mean_CAE 0.476), scored the frozen Llama-2 proxy on it.
+
+**Result (Spearman) — replicates E20 on a different family:**
+
+| arm | **Mistral transfer** | Llama-3 transfer (E20) | in-dist (ID) |
+|---|---|---|---|
+| **z** (hidden only) | **0.044 (chance)** | 0.056 | 0.602 |
+| z_q / z_q_resp | 0.104 / 0.065 | 0.116 / 0.102 | ~0.59 |
+| **q_only** (no target LLM) | **0.410 (76% of ceiling)** | 0.436 (86%) | 0.494 |
+| **q_resp_only** (answer text) | **0.511 (~full)** | 0.562 | 0.521 |
+| SE-label ceiling (corr w/ Llama-2) | **0.540** | 0.505 | — |
+
+**Generality confirmed.** The E20 pattern is not a Llama-3 (same-family) quirk: on a *different family*
+(Mistral) it holds identically — **hidden states do NOT transfer** (z ≈ chance, 0.044, despite matching
+4096 dims → dimension-match ≠ representational alignment) and **text DOES** (q_only 76%, q_resp_only
+~full). The shared cross-model difficulty ceiling is again ~0.5 (0.540 vs Llama-3's 0.505). q_only
+recovers slightly less of the ceiling than for Llama-3 (76% vs 86%), consistent with Mistral being a
+more distant model. Two-family evidence for "text transfers, hidden-state geometry doesn't."
+
+**Infra:** `push_to_wandb` default flipped **→ True** (smoke builds excluded) and W&B artifact names
+made auto-distinct per (model, dataset, N) so each dataset is independently reloadable; both cross-LLM
+datasets pushed (`stage1_records_{Meta-Llama-3-8B-Instruct,Mistral-7B-Instruct-v0.2}_trivia_qa_n200`).
+New helper `amortized_ue/push_dataset_wandb.py` back-fills existing datasets. All Stage-1 datasets live
+on `/vol/bitbucket` (source of truth) + now W&B (extra copy). Tooling: `build_mistral_*.sh`.
+
 ---
 
-## Where we stand (2026-07-28)
+## Where we stand (2026-07-29)
 
 **Cross-LLM transfer is DONE (E20): the thesis holds — text transfers, hidden states do not.**
 
@@ -611,10 +642,12 @@ SE/clustering/TBG-SLT/probe logic touched. Verified: the 9 affected prompts extr
 3. **Positive result / the thesis (E12/E13):** `q_only` predicts SE from the **question alone, no
    target-LLM forward pass** (0.494, 54% of ceiling), which a hidden-state probe cannot do; a
    bag-of-words baseline collapses to chance OOD (0.037) while the 3B holds (0.259).
-4. **⭐ Cross-LLM transfer (E20):** the frozen Llama-2 proxy on Llama-3-8B — **hidden-state transfer
-   FAILS** (z 0.602→0.056, chance; PRH does not hold for SE across Llama-2→Llama-3), **text transfer
-   SUCCEEDS** (q_only 88%, q_resp_only full). This is the argument for the text-based proxy: only the
-   model-agnostic text pathway survives a target-model swap.
+4. **⭐ Cross-LLM transfer (E20 + E21) — the thesis, now two-family:** the frozen Llama-2 proxy on
+   **Llama-3-8B** (same family) AND **Mistral-7B** (different family) — **hidden-state transfer FAILS**
+   both times (z 0.602→0.056 / 0.044, chance; despite matching 4096 dims → PRH does not hold for SE),
+   **text transfer SUCCEEDS** both times (q_only 86% / 76% of ceiling, q_resp_only ~full). Shared
+   cross-model difficulty ceiling ≈ 0.5 (0.505 / 0.540). Only the model-agnostic text pathway survives
+   a target-model swap → the argument for the text-based proxy.
 
-**Next:** a 2nd cross-LLM target to test generality of E20 (e.g. a non-Llama family); compile
-`amortized_ue/RESULTS.md`. **The consolidated to-do list lives in `amortized_ue/CLAUDE.md`.**
+**Next:** possibly a 3rd family or the Procrustes alignment experiment (can z be *made* to transfer?);
+compile `amortized_ue/RESULTS.md`. **The consolidated to-do list lives in `amortized_ue/CLAUDE.md`.**

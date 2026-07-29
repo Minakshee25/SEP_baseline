@@ -61,11 +61,16 @@ class Stage1Config:
     # --- load source ------------------------------------------------------------
     load_source: str = "local"                # "local" | "wandb" (default local; fully offline-capable)
 
-    # --- W&B (optional extra copy; never the only place data lives) -------------
-    push_to_wandb: bool = False               # upload the local files as a versioned artifact
+    # --- W&B (an extra copy; local disk stays the source of truth) --------------
+    # Default ON so every real build is mirrored off the shared NFS (which periodically
+    # degrades and has no offsite backup). Smoke builds never push (guarded in stage1.build).
+    push_to_wandb: bool = True                 # upload the local files as a versioned artifact
     wandb_project: str = "amortized_ue_stage1"
     wandb_entity: str | None = field(default_factory=lambda: os.getenv("WANDB_ENT"))
-    wandb_artifact_name: str = "stage1_records"
+    # None -> auto-distinct name per (model, dataset, N) so each dataset is its OWN artifact
+    # (reusable independently) instead of stacking as versions of one shared name. Set a
+    # string to override.
+    wandb_artifact_name: str | None = None
 
     # --- smoke test -------------------------------------------------------------
     smoke: bool = False
@@ -89,6 +94,16 @@ class Stage1Config:
 
     def effective_num_samples(self) -> int:
         return self.smoke_num_samples if self.smoke else self.num_samples
+
+    def resolved_artifact_name(self) -> str:
+        """W&B artifact name: the explicit override, else a name unique to this dataset so
+        each (model, dataset, N) is its own reloadable artifact (not a version of a shared
+        name). W&B artifact names allow [A-Za-z0-9._-] only, so sanitize like filenames."""
+        if self.wandb_artifact_name:
+            return self.wandb_artifact_name
+        import re
+        stem = f"stage1_records_{self.model_name}_{self.dataset}_n{self.effective_num_samples()}"
+        return re.sub(r"[^A-Za-z0-9._-]", "-", stem)
 
     def as_dict(self) -> dict:
         return asdict(self)
