@@ -1,0 +1,28 @@
+{
+  "source": "Llama-2-7b-chat",
+  "target": "Mistral-7B-Instruct-v0.2",
+  "dataset": "trivia_qa",
+  "num_samples": 2000,
+  "n_test": 200,
+  "L_a_target_ridge": 31,
+  "L_m_source_skyline": 30,
+  "raw_z_transfer_floor": -0.1389452197895004,
+  "aligned_transfer": 0.5554939713945304,
+  "ctrl_meanshift_only": -0.1389452197895004,
+  "ctrl_random_orthogonal": [
+    -0.04827550569479804,
+    0.07591942789121939
+  ],
+  "native_source_ridge_skyline": 0.5853315991548673,
+  "target_in_dist_ridge": 0.6203427130143633,
+  "gap_recovered_frac": 0.9588035582806237,
+  "reconstruction": {
+    "cosine_before": 0.00026990415062755346,
+    "cosine_after": 0.4062584638595581,
+    "recon_err_before": 3.7899324486562667,
+    "recon_err_after": 3.3772222785293393,
+    "cka": 0.848521096540162
+  },
+  "alpha_target_ridge": 10000.0,
+  "alpha_source_ridge": 10000.0
+}

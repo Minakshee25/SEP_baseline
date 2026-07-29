@@ -718,6 +718,23 @@ genuinely aligns paired vectors), rel Frobenius recon error 1.035 → 0.927, **l
 (orthogonal-INVARIANT → before==after by construction; measures that the two TBG spaces are highly
 alignable-by-rotation in the first place). Not a null.
 
+**Both directions — the alignment is SYMMETRIC (added).** Repeated with source/target swapped
+(`--source Llama-2-7b-chat --target Mistral-7B-Instruct-v0.2`): align **Llama-2 TBG → Mistral TBG**,
+feed Mistral's frozen ridge, score vs Llama-2 SE.
+
+| variant | reverse (L2→Mistral) | forward (Mistral→L2) |
+|---|---|---|
+| raw z transfer (floor) | −0.139 | −0.051 |
+| ctrl: mean-shift only | −0.139 (=floor) | −0.051 (=floor) |
+| ctrl: random orthogonal | −0.048 ± 0.08 (chance) | +0.071 ± 0.08 (chance) |
+| **aligned transfer** | **+0.555** | **+0.545** |
+| native ridge (skyline) | +0.585 | +0.620 |
+| **gap recovered** | **95.9%** | 88.8% |
+
+(reverse: CKA 0.849, per-row cosine 0.000 → 0.406.) So the recovery holds ~90–96% *whichever* model is
+source vs target → not a one-way fluke; the two models' uncertainty geometry is genuinely the same up
+to a rotation, both ways. Reverse JSON: `amortized_ue/procrustes_alignment_llama2_to_mistral.json`.
+
 **Interpretation — reframes E20–E23.** The naive "hidden states don't transfer" was a **basis
 mismatch, not incompatibility.** A label-free orthogonal rotation makes Llama-2's frozen ridge read
 Mistral's SE at 0.545 — near Mistral's own ridge (0.620). **The Platonic Representation Hypothesis
