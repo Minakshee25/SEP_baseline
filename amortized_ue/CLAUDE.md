@@ -203,6 +203,24 @@ property of the model *pair*, not of Llama-2 being a special source. Checkpoints
 `runs/E22_Mistral_proxy_p1024_5arm_ckpt/` (25). New: `stage2/run.py --stage1_model_name/--stage1_dataset`
 (train the proxy on any target's records).
 
+**E23 — replication on a FRESH 1000-question held-out batch (zero overlap, proven).** No retraining:
+scored the frozen REFERENCE (Llama-2) and E22 (Mistral) proxies on 1000 brand-new trivia_qa questions
+(the complement of every prior build), both targets, all 5 arms. Confirms E20–E22 at 5× power (tight
+std): transfer z ≈ chance both ways (0.014 / 0.031), text transfers (q_only ~0.475 = ~90% of the 0.524
+ceiling, q_resp_only ~0.52); **in-dist z stays high on fresh questions (0.56 / 0.63) → the model swap,
+not question novelty, kills z.** Datasets `{Llama-2-7b-chat,Mistral-7B-Instruct-v0.2}_trivia_qa_n1000`.
+
+**⭐⭐ E24 — hidden states DO transfer after unsupervised alignment (PRH holds for SE).** The E20–E23
+raw z-failure is a **basis mismatch, not incompatibility**. Ridge-level Procrustes test
+(`procrustes_alignment.py`, CPU, additive; TBG only, NO SE labels in the fit): fit orthogonal W from
+Mistral TBG → Llama-2 TBG on the shared 1440 train, translate Mistral's 200 test states, feed Llama-2's
+frozen ridge, score vs Mistral SE → **0.545** (raw floor −0.05, Mistral skyline 0.620 → **88.8% of the
+gap recovered**). Controls: mean-shift-only = floor (−0.05), random rotation = chance (0.07) → only the
+LEARNED alignment recovers it. CKA 0.865 (spaces highly alignable-by-rotation). Mechanically it's a
+label-free linear SE probe on Mistral (`x·Wβ_llama2`), so it sits below Mistral's supervised skyline.
+**Payoff:** build an SE probe for a NEW model with no N-sample labels — just paired forward passes to
+fit W, then reuse a reference probe. Caveat: needs paired hidden states (shared questions, cheap).
+
 **Storage:** all Stage-1 datasets + proxy checkpoints live on `/vol/bitbucket` (source of truth) AND
 W&B. `push_to_wandb` defaults True (smokes excluded); dataset artifact names auto-distinct per
 (model,dataset,N); back-fill datasets with `push_dataset_wandb.py`. **W&B cache is redirected off the

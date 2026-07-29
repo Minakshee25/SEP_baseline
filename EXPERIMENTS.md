@@ -654,6 +654,81 @@ with `--no_push_to_wandb` to opt out. Fixed the recurring **home-quota** break: 
 Datasets + checkpoints saved: Mistral n2000 (`stage1_records_Mistral-7B-Instruct-v0.2_trivia_qa_n2000`)
 and the E22 proxy (`runs/E22_Mistral_proxy_p1024_5arm_ckpt/`, 25 ckpts) both on /vol/bitbucket + W&B.
 
+## E23 — Replication on a FRESH 1000-question held-out batch (zero overlap) — ✅ confirms E20–E22 at 5× power
+
+E20–E22 all used the same 200 held-out test questions. E23 stress-tests the finding on a **fresh,
+larger, fully-disjoint** batch. Built **1000 trivia_qa questions drawn from the 1074 validation
+questions in NO existing build** — proven zero overlap with n2000 and its train(1440)/val(360)/test(200)
+splits and every prior build (all existing trivia builds are subsets of n2000, so unique "seen" = 2000;
+the batch is the complement). Same Stage-1 procedure (seed-10 few-shot prompt, `--selection_num_samples
+3074 --only_ids`). Built for **both** targets in their faithful envs — Llama-2 in `se_probes` (4.35.2,
+mean_acc 0.609 / CAE 0.608), Mistral in `se_probes_llama3` (4.44, mean_acc 0.649 / CAE 0.451). **No
+retraining** — scored the existing frozen checkpoints (Llama-2 REFERENCE proxy, E22 Mistral proxy) on
+the fresh batch, all 5 arms, via `eval_cross_llm` (split=all).
+
+**Result (Spearman) — 4 combos, N=1000; SE-label ceiling Llama-2↔Mistral = 0.524:**
+
+| combo | z | z_q | z_q_resp | q_only | q_resp_only |
+|---|---|---|---|---|---|
+| **REF proxy → Llama-2** (in-dist) | 0.562 | 0.561 | 0.545 | 0.489 | 0.558 |
+| **E22 proxy → Mistral** (in-dist) | 0.628 | 0.604 | 0.620 | 0.487 | 0.572 |
+| **REF proxy → Mistral** (transfer) | **0.014** | 0.073 | 0.124 | **0.474** | **0.531** |
+| **E22 proxy → Llama-2** (transfer) | **0.031** | 0.015 | 0.042 | **0.477** | **0.523** |
+
+(std tight: ~0.006–0.05, vs ~0.02–0.09 on the n200 evals — 5× the questions.)
+
+**Confirms E20–E22 with higher confidence:** hidden-state transfer ≈ **chance** both directions (z
+0.014 / 0.031), text transfer **holds** both directions (q_only ~0.475 = ~90% of the 0.524 ceiling,
+q_resp_only ~0.52). New angle this batch adds: **in-distribution z stays high on FRESH questions**
+(0.562 / 0.628) → the proxy generalises to unseen *questions* fine; it is specifically the *model swap*
+that destroys the z-arm, not question novelty. Datasets on /vol/bitbucket + W&B
+(`stage1_records_{Llama-2-7b-chat,Mistral-7B-Instruct-v0.2}_trivia_qa_n1000`). Tooling:
+`build_e23_fresh.sh` (parametrised build+waiter). Fresh ids: `scratch_xllm/e23_fresh_ids.txt`.
+
+## E24 — Procrustes alignment RECOVERS hidden-state transfer — ✅ PRH holds for SE (up to a rotation)
+
+E20–E23 showed raw hidden-state (z) transfer is ~chance while each model's OWN ridge reads its SE fine
+(~0.62). Is that a *basis* mismatch (fixable by an orthogonal map → Platonic) or genuine
+incompatibility? Surgical ridge-level test (`amortized_ue/procrustes_alignment.py`, CPU, additive,
+reuses `linear_ceiling_probe` helpers read-only): **TBG only, never SLT; NO SE labels in the fitting.**
+Fit an orthogonal Procrustes map W from **Mistral's TBG → Llama-2's TBG** on the shared **1440 train**
+questions (both mean-centered), translate Mistral's TBG for the **200 held-out test** ids
+(`(x−m̄)·W + l̄`), feed through **Llama-2's frozen ridge**, Spearman-score vs **Mistral's** SE.
+
+**Result + controls (Spearman, N_test=200):**
+
+| variant | Spearman | note |
+|---|---|---|
+| raw z transfer (floor) | **−0.051** | naive transfer fails (as E20–E23) |
+| ctrl: mean-shift only (no rotation) | −0.051 | identical to floor → NOT an offset artifact |
+| ctrl: random orthogonal rotation | +0.071 ± 0.077 | chance → NOT "any rotation works" |
+| **aligned transfer (learned Procrustes)** | **+0.545** | only the geometry-aligned rotation recovers it |
+| native Mistral ridge (skyline) | +0.620 | source ridge on own TBG L31 |
+| Llama-2 in-dist ridge (context) | +0.585 | target ridge on own TBG L30 |
+| **fraction of floor→skyline gap recovered** | **88.8%** | |
+
+**Controls make it defensible.** Mean-shift alone does nothing (−0.051 = floor); a random orthogonal
+map stays at chance (0.07); only the LEARNED, label-free alignment recovers 0.545. No leakage path — W
+never sees an SE label, the ridge is frozen, train/test disjoint. Mechanically the aligned transfer is
+`x_mistral·(W·β_llama2)` = a linear SE probe on Mistral built WITHOUT any Mistral SE label, so it
+correctly sits below Mistral's own supervised skyline (0.620), not above.
+
+**Reconstruction diagnostic on held-out PAIRS:** per-row cosine **0.001 → 0.399** (the rotation
+genuinely aligns paired vectors), rel Frobenius recon error 1.035 → 0.927, **linear CKA 0.865**
+(orthogonal-INVARIANT → before==after by construction; measures that the two TBG spaces are highly
+alignable-by-rotation in the first place). Not a null.
+
+**Interpretation — reframes E20–E23.** The naive "hidden states don't transfer" was a **basis
+mismatch, not incompatibility.** A label-free orthogonal rotation makes Llama-2's frozen ridge read
+Mistral's SE at 0.545 — near Mistral's own ridge (0.620). **The Platonic Representation Hypothesis
+holds for SE: two different-family LLMs encode semantic uncertainty in the same geometry up to a
+rotation.** Cross-LLM story is now: **text transfers directly (E20–E23), and hidden states transfer
+after a cheap UNSUPERVISED orthogonal alignment (E24).** Practical payoff: build an SE probe for a NEW
+model with **no N-sample SE labels** for it — only paired forward passes on shared questions to fit W,
+then reuse a reference model's probe. Caveats: needs paired hidden states (same questions through both
+models — cheap, label-free); shown at one TBG layer / one model pair / N_test=200; the E20–E23 negative
+stands WITHOUT the map. Result JSON: `amortized_ue/procrustes_alignment_result.json`.
+
 ---
 
 ## Where we stand (2026-07-29)
@@ -676,14 +751,25 @@ and the E22 proxy (`runs/E22_Mistral_proxy_p1024_5arm_ckpt/`, 25 ckpts) both on 
 3. **Positive result / the thesis (E12/E13):** `q_only` predicts SE from the **question alone, no
    target-LLM forward pass** (0.494, 54% of ceiling), which a hidden-state probe cannot do; a
    bag-of-words baseline collapses to chance OOD (0.037) while the 3B holds (0.259).
-4. **⭐ Cross-LLM transfer (E20 + E21 + E22) — the thesis, two-family AND directionally symmetric:**
-   the frozen Llama-2 proxy on **Llama-3-8B** (same family) and **Mistral-7B** (different family), AND
-   the reverse **Mistral proxy → Llama-2** (E22) — **hidden-state transfer FAILS every time** (z ≈
-   chance: 0.056 / 0.044 / −0.002; despite matching 4096 dims → PRH does not hold for SE), **text
-   transfer SUCCEEDS every time** (q_only 76–88% of ceiling, q_resp_only ~full). Shared cross-model
-   difficulty ceiling ≈ 0.5 (0.505 Llama-3, 0.540 Mistral, symmetric). The phenomenon is a property of
-   the model *pair*, not the transfer direction → only the model-agnostic text pathway survives a
-   target-model swap, the argument for the text-based proxy.
+4. **⭐ Cross-LLM transfer (E20–E23) — the thesis: two-family, directionally symmetric, and replicated
+   at scale:** the frozen Llama-2 proxy on **Llama-3-8B** (same family) and **Mistral-7B** (different
+   family), the reverse **Mistral proxy → Llama-2** (E22), and a **fresh 1000-question held-out batch**
+   both directions (E23) — **hidden-state transfer FAILS every time** (z ≈ chance: 0.056 / 0.044 /
+   −0.002 / 0.014 / 0.031; despite matching 4096 dims → naive/raw z transfer fails), **text transfer
+   SUCCEEDS every time** (q_only 76–90% of ceiling, q_resp_only ~full). Shared cross-model difficulty
+   ceiling ≈ 0.5 (0.505 / 0.540 / 0.524, symmetric). E23 adds: in-distribution z stays high on *fresh
+   questions* (0.56–0.63) → it's the model swap, not question novelty, that kills z. The phenomenon is a
+   property of the model *pair*, not direction. *(Superseded framing: the raw z-failure is a basis
+   mismatch, fixable — see conclusion 5 / E24.)*
+
+5. **⭐⭐ Hidden states DO transfer after unsupervised alignment (E24) — PRH holds for SE.** The E20–E23
+   raw z-failure is a **basis mismatch, not incompatibility**: a label-free orthogonal Procrustes map
+   (Mistral TBG → Llama-2 TBG, fit on shared train questions, NO SE labels) makes Llama-2's frozen ridge
+   read Mistral's SE at **0.545** (floor −0.05, skyline 0.620 → **88.8% of the gap recovered**).
+   Controls confirm it (mean-shift-only = floor −0.05; random rotation = chance 0.07). Two
+   different-family LLMs encode semantic uncertainty in the same geometry **up to a rotation**. Final
+   story: **text transfers directly; hidden states transfer after a cheap unsupervised alignment** →
+   build an SE probe for a new model with NO N-sample labels, just paired forward passes to fit the map.
 
 **Next:** the Procrustes alignment experiment (can z be *made* to transfer?) and/or multi-target
 (leave-one-out) training; compile `amortized_ue/RESULTS.md`. **The consolidated to-do list lives in
