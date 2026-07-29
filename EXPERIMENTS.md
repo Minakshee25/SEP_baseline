@@ -620,6 +620,40 @@ datasets pushed (`stage1_records_{Meta-Llama-3-8B-Instruct,Mistral-7B-Instruct-v
 New helper `amortized_ue/push_dataset_wandb.py` back-fills existing datasets. All Stage-1 datasets live
 on `/vol/bitbucket` (source of truth) + now W&B (extra copy). Tooling: `build_mistral_*.sh`.
 
+## E22 — Role swap: train the proxy on Mistral → test on Llama-2 — ✅ transfer is DIRECTIONALLY SYMMETRIC
+
+E20/E21 trained on Llama-2 and transferred *out*. E22 reverses it: **train the proxy on Mistral,
+test on Llama-2**, to check the finding isn't an artifact of "Llama-2 is a good source model." Built
+**Mistral n2000** (same seed as Llama-2's n2000 → identical questions + 1440/360/200 split; the 200
+test records reused from E21 so the test set is unchanged), re-picked Mistral's best z-layers with
+`linear_ceiling_probe` (**TBG L31 + SLT L20**, in-dist ridge ceiling ~0.62 — Mistral's z→SE is as
+probeable as Llama-2's), and trained a fresh 5-arm × 5-seed proxy (proj 1024, k=4) on Mistral's 1440.
+
+**Result (Spearman):**
+
+| arm | Mistral in-dist (test-200) | **Mistral→Llama-2 transfer (E22)** | Llama-2→Mistral (E21) |
+|---|---|---|---|
+| **z** (hidden) | 0.638 ± 0.024 | **−0.002 (chance)** | 0.044 |
+| z_q / z_q_resp | 0.597 / 0.630 | 0.004 / 0.037 | 0.116 / 0.102 |
+| **q_only** | 0.414 ± 0.060 | **0.476 (88% of the 0.540 ceiling)** | 0.410 |
+| **q_resp_only** | 0.528 ± 0.026 | **0.509** | 0.511 |
+
+**Directionally symmetric.** Swapping which model is source vs target changes nothing: **hidden
+states don't transfer either way** (z ≈ chance both directions), **text transfers both ways** (q_only
+0.41↔0.48, q_resp_only ~0.51 both). The phenomenon is a property of the *model pair*, not the
+direction — so "text transfers, hidden geometry doesn't" is not because Llama-2 happens to be a good
+source. Mistral's own in-distribution proxy (z 0.638) is a touch stronger than Llama-2's (0.602),
+confirming Mistral is a full-strength counterpart, not a weak one.
+
+**Infra (all in amortized_ue/):** `stage2/run.py` gained `--stage1_model_name`/`--stage1_dataset` (train
+the proxy on any target's records). Fixed a wandb-push CLI bug — `stage1.py --push_to_wandb` was a
+store_true defaulting False that silently overrode the new True config default; now push-by-default
+with `--no_push_to_wandb` to opt out. Fixed the recurring **home-quota** break: wandb's artifact cache
+(`~/.cache/wandb`, 4.4 GB) was filling the 12 GB home quota → redirected `WANDB_CACHE_DIR`/
+`WANDB_DATA_DIR` to `/vol/bitbucket` (added to `~/.bashrc` above the `$PS1` guard, matching HF_HOME).
+Datasets + checkpoints saved: Mistral n2000 (`stage1_records_Mistral-7B-Instruct-v0.2_trivia_qa_n2000`)
+and the E22 proxy (`runs/E22_Mistral_proxy_p1024_5arm_ckpt/`, 25 ckpts) both on /vol/bitbucket + W&B.
+
 ---
 
 ## Where we stand (2026-07-29)
@@ -642,12 +676,15 @@ on `/vol/bitbucket` (source of truth) + now W&B (extra copy). Tooling: `build_mi
 3. **Positive result / the thesis (E12/E13):** `q_only` predicts SE from the **question alone, no
    target-LLM forward pass** (0.494, 54% of ceiling), which a hidden-state probe cannot do; a
    bag-of-words baseline collapses to chance OOD (0.037) while the 3B holds (0.259).
-4. **⭐ Cross-LLM transfer (E20 + E21) — the thesis, now two-family:** the frozen Llama-2 proxy on
-   **Llama-3-8B** (same family) AND **Mistral-7B** (different family) — **hidden-state transfer FAILS**
-   both times (z 0.602→0.056 / 0.044, chance; despite matching 4096 dims → PRH does not hold for SE),
-   **text transfer SUCCEEDS** both times (q_only 86% / 76% of ceiling, q_resp_only ~full). Shared
-   cross-model difficulty ceiling ≈ 0.5 (0.505 / 0.540). Only the model-agnostic text pathway survives
-   a target-model swap → the argument for the text-based proxy.
+4. **⭐ Cross-LLM transfer (E20 + E21 + E22) — the thesis, two-family AND directionally symmetric:**
+   the frozen Llama-2 proxy on **Llama-3-8B** (same family) and **Mistral-7B** (different family), AND
+   the reverse **Mistral proxy → Llama-2** (E22) — **hidden-state transfer FAILS every time** (z ≈
+   chance: 0.056 / 0.044 / −0.002; despite matching 4096 dims → PRH does not hold for SE), **text
+   transfer SUCCEEDS every time** (q_only 76–88% of ceiling, q_resp_only ~full). Shared cross-model
+   difficulty ceiling ≈ 0.5 (0.505 Llama-3, 0.540 Mistral, symmetric). The phenomenon is a property of
+   the model *pair*, not the transfer direction → only the model-agnostic text pathway survives a
+   target-model swap, the argument for the text-based proxy.
 
-**Next:** possibly a 3rd family or the Procrustes alignment experiment (can z be *made* to transfer?);
-compile `amortized_ue/RESULTS.md`. **The consolidated to-do list lives in `amortized_ue/CLAUDE.md`.**
+**Next:** the Procrustes alignment experiment (can z be *made* to transfer?) and/or multi-target
+(leave-one-out) training; compile `amortized_ue/RESULTS.md`. **The consolidated to-do list lives in
+`amortized_ue/CLAUDE.md`.**

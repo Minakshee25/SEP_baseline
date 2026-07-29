@@ -186,15 +186,28 @@ build: `huggingface_models.py` token-boundary offset recovery (Llama-3 decodes "
 byte-identical; no SE/probe logic touched).
 
 **Cross-LLM #2 (E21) — REPLICATES E20 on a different family.** Target **Mistral-7B-Instruct-v0.2**
-(4096-dim, non-Llama; loads in `se_probes_llama3`, no code change), same 200 held-out ids. z 0.044
-(chance) / q_only 0.410 (76% of the 0.540 ceiling) / q_resp_only 0.511 (~full). So "text transfers,
+(4096-dim, non-Llama; loads in `se_probes_llama3`, no code change), same 200 held-out ids. All 5 arms
+(Llama-2 proxy → Mistral transfer, Spearman): z **0.044 (chance)**, z_q **0.116**, z_q_resp **0.102**,
+q_only **0.410 (76% of the 0.540 ceiling)**, q_resp_only **0.511 (~full)**. So "text transfers,
 hidden geometry doesn't" is now **two-family** (Llama-3 same-family + Mistral different-family), with a
 consistent ~0.5 shared-difficulty ceiling. **Ceilings:** Llama-2↔Llama-3 SE Spearman **0.505**,
 Llama-2↔Mistral **0.540** — the model-independent "question difficulty" the text arms target.
 
-**Storage:** all Stage-1 datasets live on `/vol/bitbucket` (source of truth) AND W&B (`push_to_wandb`
-now defaults True, smokes excluded; artifact names auto-distinct per (model,dataset,N), reloadable via
-`load_source=wandb`). Back-fill existing sets with `push_dataset_wandb.py`.
+**Cross-LLM #3 (E22) — ROLE SWAP, transfer is directionally symmetric.** Trained a fresh proxy on
+**Mistral n2000** (best layers TBG:31,SLT:20 via linear_ceiling_probe) and tested it on **Llama-2** —
+the reverse of E21. All 5 arms — **in-dist (Mistral test-200) → Mistral→Llama-2 transfer** (Spearman):
+z 0.638→**−0.002 (chance)**, z_q 0.597→**0.004**, z_q_resp 0.630→**0.037**, q_only 0.414→**0.476 (88%
+of 0.540 ceiling)**, q_resp_only 0.528→**0.509**. Mirrors E21: hidden-only + hybrid arms collapse to
+chance, pure-text arms transfer. "text transfers, hidden doesn't" holds regardless of direction → a
+property of the model *pair*, not of Llama-2 being a special source. Checkpoints:
+`runs/E22_Mistral_proxy_p1024_5arm_ckpt/` (25). New: `stage2/run.py --stage1_model_name/--stage1_dataset`
+(train the proxy on any target's records).
+
+**Storage:** all Stage-1 datasets + proxy checkpoints live on `/vol/bitbucket` (source of truth) AND
+W&B. `push_to_wandb` defaults True (smokes excluded); dataset artifact names auto-distinct per
+(model,dataset,N); back-fill datasets with `push_dataset_wandb.py`. **W&B cache is redirected off the
+12 GB home quota** — `WANDB_CACHE_DIR`/`WANDB_DATA_DIR` → `/vol/bitbucket` (in `~/.bashrc` above the
+`$PS1` guard). Without this, artifact staging fills home and pushes fail with `Disk quota exceeded`.
 
 **Reference model — SAVED, 25 checkpoints** at `runs/REFERENCE_multipos_p1024_5arm_ckpt/checkpoints/`
 (5 arms × 5 seeds, ~30M trainable params each, no frozen backbone; reproduces the run below to 4 dp).
@@ -256,15 +269,18 @@ q_resp_only full).** Full result table + tooling in Current state / EXPERIMENTS.
 **replicates E20** — z 0.044 (chance), q_only 0.410 (76%), q_resp_only 0.511 (~full); ceiling 0.540.
 Two-family generality established. See Current state / EXPERIMENTS.md E21.
 
+**DONE — role swap (E22):** Mistral proxy → Llama-2 mirrors E21 (z chance, q_only 0.476, q_resp_only
+0.509) → transfer is directionally symmetric. See Current state / EXPERIMENTS.md E22.
+
 **NOW — pick the next thrust (both open):**
-- **Cross-LLM #3 (more breadth):** a 3rd family, ideally testing z-transfer at a *different* hidden dim
-  too (e.g. Falcon-7b 4544-dim → text arms only; or a 4096 non-Llama for all arms). Same recipe:
-  `stage1.py --only_ids scratch_xllm/llama2_test_ids.txt --selection_num_samples 2000` then
-  `eval_cross_llm.py --target_model <it>`. Mind model-load env walls (see Environments).
-- **The Procrustes alignment experiment (deferred Option A):** can z be *made* to transfer? Fit a
-  linear/orthogonal map target→Llama-2 hidden space on a *disjoint* anchor set of shared questions,
-  apply it, re-run the frozen z-proxy. There's a concrete ~0.5 ceiling to recover. Needs one more
-  target build on some Llama-2 *train* questions (leakage-free anchors).
+- **Multi-target training (Exp 2, deferred earlier):** train one proxy on Llama-2 **+** Mistral (both
+  4096-dim; needs a new multi-source Stage-2 loader), then **leave-one-out** test on unseen Llama-3.
+  If z now transfers to Llama-3 → multi-target training induces a model-agnostic hidden code (the goal).
+  Both n2000 training sets now exist. Distinguish this from testing on the two *trained* models
+  (in-distribution "serving", not transfer).
+- **The Procrustes alignment experiment:** can z be *made* to transfer? Fit a linear/orthogonal map
+  target→source hidden space on a *disjoint* anchor set of shared questions, apply it, re-run the frozen
+  z-proxy. Concrete ~0.5 ceiling to recover. Cheaper, more surgical diagnostic than mixed training.
 
 **Pending / carried over:**
 3. **Compile & VERIFY the complete "all models + results" record** → commit as `amortized_ue/RESULTS.md`.

@@ -278,7 +278,14 @@ def _config_from_cli() -> Stage1Config:
     p.add_argument("--output_dir", default=Stage1Config.output_dir)
     p.add_argument("--run_name", default=None)
     p.add_argument("--overwrite", action="store_true")
-    p.add_argument("--push_to_wandb", action="store_true")
+    # push to W&B by DEFAULT (Stage1Config.push_to_wandb=True); --no_push_to_wandb opts out.
+    # (Smoke builds never push -- guarded in build().) A store_true default of False used to
+    # silently override the config default, so real builds weren't backed up to W&B.
+    p.add_argument("--push_to_wandb", dest="push_to_wandb", action="store_true",
+                   help="upload the dataset as a W&B artifact (default ON)")
+    p.add_argument("--no_push_to_wandb", dest="push_to_wandb", action="store_false",
+                   help="opt OUT of the W&B upload")
+    p.set_defaults(push_to_wandb=Stage1Config.push_to_wandb)
     p.add_argument("--smoke", action="store_true")
     p.add_argument("--smoke_num_samples", type=int, default=Stage1Config.smoke_num_samples)
     a = p.parse_args()

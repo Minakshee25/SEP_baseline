@@ -400,6 +400,10 @@ def _parse() -> tuple[Stage2Config, str]:
     p.add_argument("--epochs", type=int, default=Stage2Config.epochs)
     p.add_argument("--batch_size", type=int, default=Stage2Config.batch_size)
     p.add_argument("--stage1_num_samples", type=int, default=Stage2Config.stage1_num_samples)
+    p.add_argument("--stage1_model_name", default=Stage2Config.stage1_model_name,
+                   help="target LLM whose Stage-1 records to TRAIN on (default Llama-2-7b-chat; "
+                        "e.g. Mistral-7B-Instruct-v0.2 to train the proxy on Mistral).")
+    p.add_argument("--stage1_dataset", default=Stage2Config.stage1_dataset)
     p.add_argument("--smoke_num_prompts", type=int, default=Stage2Config.smoke_num_prompts)
     p.add_argument("--smoke_steps", type=int, default=Stage2Config.smoke_steps)
     p.add_argument("--seeds", default=None,
@@ -475,6 +479,7 @@ def _parse() -> tuple[Stage2Config, str]:
     cfg = Stage2Config(
         k_soft_tokens=a.k_soft_tokens, proxy_model=a.proxy_model, lr=a.lr, epochs=a.epochs,
         batch_size=a.batch_size, stage1_num_samples=a.stage1_num_samples,
+        stage1_model_name=a.stage1_model_name, stage1_dataset=a.stage1_dataset,
         ood_dataset=a.ood_dataset, ood_num_samples=a.ood_num_samples,
         arm_trial_seeds=seeds, reuse_selection=a.reuse_selection,
         save_checkpoints=a.save_checkpoints, push_wandb=a.push_wandb,
