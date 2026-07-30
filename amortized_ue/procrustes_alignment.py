@@ -81,8 +81,21 @@ def linear_cka(X, Y):
     return float(hsic_xy / (hsic_xx * hsic_yy + 1e-12))
 
 
+def bootstrap_diff(pred_a, pred_b, y, B=2000, seed=0):
+    """Paired bootstrap of rho(pred_a,y) - rho(pred_b,y) over resampled rows.
+    Returns (mean_diff, lo95, hi95, frac_positive)."""
+    rng = np.random.default_rng(seed)
+    n = len(y)
+    diffs = np.empty(B)
+    for b in range(B):
+        idx = rng.integers(0, n, n)
+        diffs[b] = rho(pred_a[idx], y[idx]) - rho(pred_b[idx], y[idx])
+    return (float(diffs.mean()), float(np.percentile(diffs, 2.5)),
+            float(np.percentile(diffs, 97.5)), float(np.mean(diffs > 0)))
+
+
 def run(source="Mistral-7B-Instruct-v0.2", target="Llama-2-7b-chat",
-        dataset="trivia_qa", num_samples=2000, out=None):
+        dataset="trivia_qa", num_samples=2000, fresh_num_samples=None, out=None):
     # ---- load paired TBG states + SE labels (join by id, same order) ----------
     scfg = Stage1Config(model_name=source, dataset=dataset, num_samples=num_samples)
     tcfg = Stage1Config(model_name=target, dataset=dataset, num_samples=num_samples)
@@ -118,63 +131,79 @@ def run(source="Mistral-7B-Instruct-v0.2", target="Llama-2-7b-chat",
     B = T[L_a][tr] - l_mean                                # target centered (train)
     W, scale = orthogonal_procrustes(A, B)                 # A @ W ~= B, W orthogonal
 
-    # ---- ALIGNED transfer: translate source TEST TBG into target space --------
-    aligned_te = (S[L_a][te] - m_mean) @ W + l_mean
-    aligned = rho(R_L.predict(sc_L.transform(aligned_te)), s_y[te])       # vs source SE
+    # ---- eval block: all metrics on one eval set (src/tgt paired, at L_a; src also L_m) ----
+    def eval_block(src_La, src_Lm, tgt_La, sy, label):
+        pred_floor = R_L.predict(sc_L.transform(src_La))                    # raw source -> target ridge
+        pred_control = R_L.predict(sc_L.transform(tgt_La))                  # Mech-A: TARGET's OWN states
+        aligned_in = (src_La - m_mean) @ W + l_mean
+        pred_aligned = R_L.predict(sc_L.transform(aligned_in))             # aligned source -> target ridge
+        pred_skyline = R_M.predict(sc_M.transform(src_Lm))                  # source's own ridge
+        floor_, control_, aligned_, skyline_ = (rho(pred_floor, sy), rho(pred_control, sy),
+                                                rho(pred_aligned, sy), rho(pred_skyline, sy))
+        # random-orthogonal control (must stay ~floor)
+        rng = np.random.default_rng(0); rand = []
+        for _ in range(5):
+            Q, _r = np.linalg.qr(rng.standard_normal((H, H)))
+            rand.append(rho(R_L.predict(sc_L.transform((src_La - m_mean) @ Q + l_mean)), sy))
+        rand_ = (float(np.mean(rand)), float(np.std(rand)))
+        # the mechanism test: paired bootstrap of (aligned - control)
+        boot = bootstrap_diff(pred_aligned, pred_control, sy)
+        recovered = (aligned_ - floor_) / (skyline_ - floor_) if skyline_ > floor_ else float("nan")
+        # reconstruction on the paired held-out states (centered at L_a)
+        s_c, t_c = src_La - m_mean, tgt_La - l_mean
+        recon = {"cosine_before": row_cosine(s_c, t_c), "cosine_after": row_cosine(s_c @ W, t_c),
+                 "recon_err_before": rel_recon_error(s_c, t_c), "recon_err_after": rel_recon_error(s_c @ W, t_c),
+                 "cka": linear_cka(s_c, t_c)}
+        return {"label": label, "n": len(sy), "floor": floor_, "control_mechA": control_,
+                "aligned": aligned_, "skyline": skyline_, "target_in_dist": None,
+                "ctrl_random_orthogonal": rand_, "gap_recovered_frac": float(recovered),
+                "aligned_minus_control": {"mean": boot[0], "lo95": boot[1], "hi95": boot[2],
+                                          "frac_positive": boot[3]}, "reconstruction": recon}
 
-    # ---- CONTROLS (rule out artifacts) ----------------------------------------
-    # (a) mean-shift ONLY, no rotation: isolates rotation vs a trivial offset.
-    meanshift_te = S[L_a][te] - m_mean + l_mean
-    ctrl_meanshift = rho(R_L.predict(sc_L.transform(meanshift_te)), s_y[te])
-    # (b) RANDOM orthogonal in place of W: must stay near the floor (else the ridge reads
-    #     source regardless of the map -> artifact). Average over a few seeds.
-    rng = np.random.default_rng(0); rand_scores = []
-    for _ in range(5):
-        Q, _r = np.linalg.qr(rng.standard_normal((H, H)))
-        rand_te = (S[L_a][te] - m_mean) @ Q + l_mean
-        rand_scores.append(rho(R_L.predict(sc_L.transform(rand_te)), s_y[te]))
-    ctrl_random = (float(np.mean(rand_scores)), float(np.std(rand_scores)))
+    blocks = [eval_block(S[L_a][te], S[L_m][te], T[L_a][te], s_y[te], f"N={len(te)} (n{num_samples} test split)")]
 
-    # ---- reconstruction diagnostic on held-out PAIRS (centered, at L_a) -------
-    src_te_c = S[L_a][te] - m_mean
-    tgt_te_c = T[L_a][te] - l_mean
-    src_aligned_c = src_te_c @ W                           # aligned, still centered
-    diag = {
-        "cosine_before": row_cosine(src_te_c, tgt_te_c),
-        "cosine_after": row_cosine(src_aligned_c, tgt_te_c),
-        "recon_err_before": rel_recon_error(src_te_c, tgt_te_c),
-        "recon_err_after": rel_recon_error(src_aligned_c, tgt_te_c),
-        "cka": linear_cka(src_te_c, tgt_te_c),             # orthogonal-invariant (before==after)
-    }
+    # ---- optional: evaluate the SAME fitted W/ridges on the E23 fresh batch (tighter CIs) ----
+    if fresh_num_samples:
+        fscfg = Stage1Config(model_name=source, dataset=dataset, num_samples=fresh_num_samples)
+        ftcfg = Stage1Config(model_name=target, dataset=dataset, num_samples=fresh_num_samples)
+        fs, fsy, fs_ids = load_matrix(fscfg, ["TBG"])
+        ft, fty, ft_ids = load_matrix(ftcfg, ["TBG"])
+        assert fs_ids == ft_ids, "fresh source/target ids differ"
+        Sf, Tf = fs["TBG"], ft["TBG"]
+        blocks.append(eval_block(Sf[L_a], Sf[L_m], Tf[L_a], fsy, f"N={len(fs_ids)} (fresh n{fresh_num_samples})"))
 
-    # ---- report ---------------------------------------------------------------
-    print("\n" + "=" * 74)
-    print(f"PROCRUSTES ALIGNMENT (TBG only): {source} -> {target} ridge, vs {source} SE (N_test={len(te)})")
-    print("=" * 74)
-    print(f"  raw z transfer   (floor)   : {floor:+.3f}   [target ridge on raw source TBG L{L_a}]")
-    print(f"  ctrl: mean-shift only      : {ctrl_meanshift:+.3f}   [no rotation -- must stay ~floor]")
-    print(f"  ctrl: random orthogonal    : {ctrl_random[0]:+.3f} ± {ctrl_random[1]:.3f}   [must stay ~floor]")
-    print(f"  aligned transfer (NEW)     : {aligned:+.3f}   [+ LEARNED orthogonal Procrustes]")
-    print(f"  native source ridge (sky)  : {skyline:+.3f}   [source ridge on own TBG L{L_m}]")
-    print(f"  (target in-dist ridge L{L_a})  : {id_target:+.3f}   [context]")
-    recovered = (aligned - floor) / (skyline - floor) if skyline > floor else float("nan")
-    print(f"  -> fraction of floor->skyline gap recovered by alignment: {recovered:.1%}")
-    print("-" * 74)
-    print("  reconstruction on held-out pairs (centered TBG L%d):" % L_a)
-    print(f"    per-row cosine   before {diag['cosine_before']:+.3f}  ->  after {diag['cosine_after']:+.3f}")
-    print(f"    rel recon error  before {diag['recon_err_before']:.3f}  ->  after {diag['recon_err_after']:.3f}")
-    print(f"    linear CKA (orthogonal-invariant, before==after): {diag['cka']:.3f}")
-    print("=" * 74 + "\n")
+    # ---- report side by side --------------------------------------------------
+    print("\n" + "=" * 82)
+    print(f"PROCRUSTES + MECHANISM-A CONTROL (TBG only): {source} -> {target}, vs {source} SE")
+    print(f"  target ridge L_a={L_a}   source skyline L_m={L_m}   target in-dist(context)={id_target:+.3f}")
+    print("=" * 82)
+    hdr = "  {:34s}".format("") + "".join(f"{b['label']:>24s}" for b in blocks)
+    print(hdr)
+    def row(name, key, fmt="{:+.3f}"):
+        print("  {:34s}".format(name) + "".join(f"{fmt.format(b[key]):>24s}" for b in blocks))
+    row("raw z transfer (floor)", "floor")
+    row("control: target OWN states (Mech-A)", "control_mechA")
+    row("aligned transfer (learned W)", "aligned")
+    row("native source ridge (skyline)", "skyline")
+    print("  {:34s}".format("gap floor->skyline recovered")
+          + "".join(f"{b['gap_recovered_frac']:>23.1%} " for b in blocks))
+    print("  " + "-" * 80)
+    print("  MECHANISM TEST  aligned - control  (paired bootstrap, 95% CI):")
+    for b in blocks:
+        d = b["aligned_minus_control"]
+        sep = "SEPARATED (Mistral-specific)" if d["lo95"] > 0 else "overlaps 0 (shared-difficulty only)"
+        print(f"    {b['label']:28s}  {d['mean']:+.3f}  [{d['lo95']:+.3f}, {d['hi95']:+.3f}]  P(>0)={d['frac_positive']:.2f}  -> {sep}")
+    print("  " + "-" * 80)
+    print("  reconstruction (per-row cosine before->after | CKA):")
+    for b in blocks:
+        r = b["reconstruction"]
+        print(f"    {b['label']:28s}  cos {r['cosine_before']:+.3f}->{r['cosine_after']:+.3f}   CKA {r['cka']:.3f}")
+    print("=" * 82 + "\n")
 
-    result = {
-        "source": source, "target": target, "dataset": dataset, "num_samples": num_samples,
-        "n_test": len(te), "L_a_target_ridge": int(L_a), "L_m_source_skyline": int(L_m),
-        "raw_z_transfer_floor": floor, "aligned_transfer": aligned,
-        "ctrl_meanshift_only": ctrl_meanshift, "ctrl_random_orthogonal": ctrl_random,
-        "native_source_ridge_skyline": skyline, "target_in_dist_ridge": id_target,
-        "gap_recovered_frac": float(recovered), "reconstruction": diag,
-        "alpha_target_ridge": float(a_L), "alpha_source_ridge": float(a_M),
-    }
+    result = {"source": source, "target": target, "dataset": dataset, "num_samples": num_samples,
+              "fresh_num_samples": fresh_num_samples, "L_a_target_ridge": int(L_a),
+              "L_m_source_skyline": int(L_m), "target_in_dist_ridge": id_target,
+              "alpha_target_ridge": float(a_L), "alpha_source_ridge": float(a_M), "evals": blocks}
     out = out or "amortized_ue/procrustes_alignment_result.json"
     with open(out, "w") as f:
         json.dump(result, f, indent=2)
@@ -188,10 +217,13 @@ def _parse():
     p.add_argument("--target", default="Llama-2-7b-chat")
     p.add_argument("--dataset", default="trivia_qa")
     p.add_argument("--num_samples", type=int, default=2000)
+    p.add_argument("--fresh_num_samples", type=int, default=None,
+                   help="also evaluate the SAME fitted W/ridges on a disjoint fresh batch of this "
+                        "size (e.g. 1000 = the E23 held-out batch) for tighter CIs")
     p.add_argument("--out", default=None)
     return p.parse_args()
 
 
 if __name__ == "__main__":
     a = _parse()
-    run(a.source, a.target, a.dataset, a.num_samples, a.out)
+    run(a.source, a.target, a.dataset, a.num_samples, a.fresh_num_samples, a.out)

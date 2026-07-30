@@ -1,0 +1,68 @@
+{
+  "source": "Mistral-7B-Instruct-v0.2",
+  "target": "Llama-2-7b-chat",
+  "dataset": "trivia_qa",
+  "num_samples": 2000,
+  "fresh_num_samples": 1000,
+  "L_a_target_ridge": 30,
+  "L_m_source_skyline": 31,
+  "target_in_dist_ridge": 0.5853315991548673,
+  "alpha_target_ridge": 10000.0,
+  "alpha_source_ridge": 10000.0,
+  "evals": [
+    {
+      "label": "N=200 (n2000 test split)",
+      "n": 200,
+      "floor": -0.051390847024097554,
+      "control_mechA": 0.4505641921186364,
+      "aligned": 0.5450634591146699,
+      "skyline": 0.6203427130143633,
+      "target_in_dist": null,
+      "ctrl_random_orthogonal": [
+        0.0710157538126022,
+        0.07717027304761487
+      ],
+      "gap_recovered_frac": 0.8879328674670011,
+      "aligned_minus_control": {
+        "mean": 0.09452312847908959,
+        "lo95": 0.02038199434837112,
+        "hi95": 0.17204762268746823,
+        "frac_positive": 0.9955
+      },
+      "reconstruction": {
+        "cosine_before": 0.0007217360544018447,
+        "cosine_after": 0.39923813939094543,
+        "recon_err_before": 1.0352800662127901,
+        "recon_err_after": 0.9265552817032231,
+        "cka": 0.8648364932651111
+      }
+    },
+    {
+      "label": "N=1000 (fresh n1000)",
+      "n": 1000,
+      "floor": 0.037253962381130525,
+      "control_mechA": 0.557265111929483,
+      "aligned": 0.5895320977182497,
+      "skyline": 0.6322504818552885,
+      "target_in_dist": null,
+      "ctrl_random_orthogonal": [
+        0.12554152737435303,
+        0.04024669022920458
+      ],
+      "gap_recovered_frac": 0.9282039764286483,
+      "aligned_minus_control": {
+        "mean": 0.03236046478409433,
+        "lo95": 0.0009606158638734958,
+        "hi95": 0.06338675590837463,
+        "frac_positive": 0.9795
+      },
+      "reconstruction": {
+        "cosine_before": -0.0009921775199472904,
+        "cosine_after": 0.3972267508506775,
+        "recon_err_before": 1.0352689019248873,
+        "recon_err_after": 0.9274024048180762,
+        "cka": 0.7949274377324733
+      }
+    }
+  ]
+}

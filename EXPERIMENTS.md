@@ -746,6 +746,47 @@ then reuse a reference model's probe. Caveats: needs paired hidden states (same 
 models — cheap, label-free); shown at one TBG layer / one model pair / N_test=200; the E20–E23 negative
 stands WITHOUT the map. Result JSON: `amortized_ue/procrustes_alignment_result.json`.
 
+> ⚠️ **QUALIFIED by E25 (Mechanism-A control).** Most of this "88.8% recovery" is the shared
+> question-difficulty confound (target's own states predict source SE at ~0.45–0.56 with no cross-model
+> geometry). The rotation's genuine model-specific increment is small but significant (+0.032 at
+> N=1000). Read E25 before citing the E24 headline — the effect is real but modest, not the dramatic
+> PRH triumph the raw floor→skyline framing implies.
+
+## E25 — Mechanism-A control QUALIFIES E24: mostly shared difficulty + a small real model-specific increment
+
+E24 reported hidden-state SE transfer "recovers 88.8%" after orthogonal alignment. Missing control:
+how much of that is just **shared question-difficulty** (both models find the same questions hard),
+which needs no cross-model geometry at all? **Mechanism-A control:** score Llama-2's frozen ridge on
+**Llama-2's OWN TBG** states (same eval ids), Spearman vs **Mistral's** SE — pure shared-difficulty
+readout, uses zero Mistral states. If aligned clearly beats it → the rotation carries Mistral-specific
+uncertainty (PRH-positive); if they match → shared-difficulty only. Re-ran the whole test (W fit on the
+same 1440 train pairs, no labels) evaluating on **both** the N=200 test split and the **E23 fresh
+n1000** batch (both models' TBG already on disk) to shrink CIs. Additive
+(`amortized_ue/procrustes_alignment.py` extended; `--fresh_num_samples`).
+
+**Result (Mistral→Llama-2, Spearman):**
+
+| | N=200 (test) | N=1000 (fresh) |
+|---|---|---|
+| raw z transfer (floor) | −0.051 | +0.037 |
+| **control: shared-difficulty (Mech-A)** | **+0.451** | **+0.557** |
+| aligned transfer (learned W) | +0.545 | +0.590 |
+| native Mistral ridge (skyline) | +0.620 | +0.632 |
+| **aligned − control** (paired bootstrap 95% CI) | **+0.095 [+0.020, +0.172]** | **+0.032 [+0.001, +0.063]** |
+| separated from 0? | yes (P=1.00) | yes, barely (P=0.98) |
+
+**Interpretation — qualifies E24.** The control is HIGH (0.45–0.56): Llama-2's own uncertainty predicts
+Mistral's SE at ~0.5 with **no Mistral states at all**, so **most of E24's "88.8% recovery" is the
+shared question-difficulty confound**, not model-specific geometry transfer. **But** the aligned
+transfer still beats the control by a small, **statistically significant** margin (+0.032 at N=1000, CI
+excludes 0) → the rotation carries a genuine but **modest** Mistral-specific uncertainty signal on top
+of the large shared-difficulty base. Corrected claim: **hidden-state alignment is weakly PRH-positive**
+— real model-specific transfer (~+0.03), not the dramatic geometry-alignment triumph E24's headline
+implied. The n1000 batch pinned the increment to ±0.03 (vs the noisy ±0.10 at n200). *(Aside: the
+denoised ridge control 0.557 slightly exceeds the raw label-correlation ceiling 0.524 (E23) because the
+ridge prediction is a smoothed estimate of the shared difficulty.)* JSON:
+`amortized_ue/procrustes_e25_mistral_to_llama2.json`.
+
 ---
 
 ## Where we stand (2026-07-29)
@@ -779,14 +820,17 @@ stands WITHOUT the map. Result JSON: `amortized_ue/procrustes_alignment_result.j
    property of the model *pair*, not direction. *(Superseded framing: the raw z-failure is a basis
    mismatch, fixable — see conclusion 5 / E24.)*
 
-5. **⭐⭐ Hidden states DO transfer after unsupervised alignment (E24) — PRH holds for SE.** The E20–E23
-   raw z-failure is a **basis mismatch, not incompatibility**: a label-free orthogonal Procrustes map
-   (Mistral TBG → Llama-2 TBG, fit on shared train questions, NO SE labels) makes Llama-2's frozen ridge
-   read Mistral's SE at **0.545** (floor −0.05, skyline 0.620 → **88.8% of the gap recovered**).
-   Controls confirm it (mean-shift-only = floor −0.05; random rotation = chance 0.07). Two
-   different-family LLMs encode semantic uncertainty in the same geometry **up to a rotation**. Final
-   story: **text transfers directly; hidden states transfer after a cheap unsupervised alignment** →
-   build an SE probe for a new model with NO N-sample labels, just paired forward passes to fit the map.
+5. **Hidden-state alignment is WEAKLY PRH-positive (E24 + E25 control) — mostly shared difficulty, a
+   small real increment.** A label-free orthogonal Procrustes map (source TBG → target TBG, no SE
+   labels) makes the target's frozen ridge read the source's SE at ~0.55–0.59 (E24: "88.8% of the
+   floor→skyline gap"), symmetric both directions (95.9% reverse). **But the Mechanism-A control (E25)
+   qualifies this:** the target's OWN states already predict the source's SE at **0.45–0.56** (shared
+   question-difficulty, no cross-model geometry), so **most of the apparent recovery is that confound,
+   not model-specific transfer.** The rotation's genuine model-specific increment (aligned − control) is
+   small but **significant**: +0.032 at N=1000 (95% CI [+0.001, +0.063]). So: two LLMs' uncertainty is
+   largely a shared, model-agnostic "difficulty" signal (which the TEXT arms already capture); alignment
+   adds a modest genuine model-specific component. The strong E24 "PRH holds / hidden states transfer"
+   headline is **tempered** — real but small.
 
 **Next:** the Procrustes alignment experiment (can z be *made* to transfer?) and/or multi-target
 (leave-one-out) training; compile `amortized_ue/RESULTS.md`. **The consolidated to-do list lives in
