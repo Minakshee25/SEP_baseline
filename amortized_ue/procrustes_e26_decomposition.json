@@ -1,0 +1,39 @@
+{
+  "source": "Mistral-7B-Instruct-v0.2",
+  "target": "Llama-2-7b-chat",
+  "dataset": "trivia_qa",
+  "fit_num_samples": 2000,
+  "fresh_num_samples": 1000,
+  "n_eval": 1000,
+  "L_a_target_ridge": 30,
+  "control_spearman": 0.557265111929483,
+  "aligned_spearman": 0.5895320977182497,
+  "semi_partial": {
+    "value": 0.04226929016030411,
+    "boot_mean": 0.04209552411360893,
+    "lo95": -1.600043725670971e-05,
+    "hi95": 0.08608866105511741,
+    "frac_positive": 0.9745,
+    "symmetric_partial_spearman": 0.266958531737966
+  },
+  "ensemble": {
+    "avg_spearman": 0.5818337357223383,
+    "ridge_spearman": 0.5983881917010825,
+    "avg_minus_control": {
+      "mean": 0.02460073693622985,
+      "lo95": 0.0164370323413951,
+      "hi95": 0.032807971292312624,
+      "frac_positive": 1.0
+    },
+    "ridge_minus_control": {
+      "mean": 0.041190084857904694,
+      "lo95": 0.01945327956113781,
+      "hi95": 0.06295157979295235,
+      "frac_positive": 1.0
+    },
+    "ridge_meta_weights": {
+      "control": 0.3208763599395752,
+      "aligned": 2.086899757385254
+    }
+  }
+}

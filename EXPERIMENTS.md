@@ -787,6 +787,43 @@ denoised ridge control 0.557 slightly exceeds the raw label-correlation ceiling 
 ridge prediction is a smoothed estimate of the shared difficulty.)* JSON:
 `amortized_ue/procrustes_e25_mistral_to_llama2.json`.
 
+## E26 — Decompose the aligned transfer: real but small & mostly redundant new info (confirms E25)
+
+E25 left the increment (aligned − control ≈ +0.03) established but not characterised. E26 asks *is the
+rotation's signal genuinely new, or redundant with shared difficulty?* Two tests on the E23 fresh n1000
+batch, reusing the same E25 fit (W + Llama-2 ridge on the n2000 1440-train pairs, no SE labels in W).
+Additive, CPU (`amortized_ue/procrustes_e26_decomposition.py`); touches nothing existing.
+
+**(1) Semi-partial correlation** — regress the control prediction out of Mistral SE (OLS residuals),
+then Spearman(aligned, residuals):
+
+| | value | 95% CI (bootstrap) | verdict |
+|---|---|---|---|
+| semi-partial (as specified) | **+0.042** | [−0.000, +0.086], P(>0)=0.97 | **borderline** (touches 0) |
+| symmetric rank-based partial Spearman | **+0.267** | — | clearly positive |
+
+**(2) Ensemble** (control + aligned; score vs Mistral SE, fresh n1000):
+
+| predictor | Spearman | (− control), 95% CI |
+|---|---|---|
+| control alone | 0.557 | — |
+| aligned alone | 0.590 | +0.033 |
+| ensemble (avg) | 0.582 | +0.025 [+0.016, +0.033], P=1.00 |
+| **ensemble (2-input ridge)** | **0.598** | +0.041 [+0.019, +0.063], P=1.00 |
+
+ridge meta-weights: control +0.32, aligned +2.09.
+
+**Interpretation — confirms E25 ("weakly PRH-positive").** Both tests agree the rotation carries *some*
+genuinely new signal, and that it is **small and largely redundant** with shared difficulty: (i) the
+ensemble beats control significantly (+0.041) but beats *aligned-alone* by only **+0.008** (0.598 vs
+0.590) → almost all of the ensemble's edge is just "aligned > control" (the E25 point); the genuine
+complementarity bonus is tiny. (ii) The semi-partial/partial gap is diagnostic, not contradictory: the
+FULL aligned prediction barely correlates with residualised SE (0.042, borderline) because aligned is
+*dominated* by the shared component it shares with control; but the UNIQUE parts of aligned and SE
+clearly correlate (partial 0.267). So a real unique signal exists, it is just a small fraction of the
+total. Net: the rotation's model-specific contribution is **real but modest and mostly redundant** — no
+overclaim survives, the effect does not vanish. JSON: `amortized_ue/procrustes_e26_decomposition.json`.
+
 ---
 
 ## Where we stand (2026-07-29)
