@@ -889,6 +889,25 @@ here and lands in the same place.)* *(Aggregation note: proxy arms here are 5-se
 E27b/gate — same arm, two aggregations. The ensemble averages predictions, so the prediction-averaged
 number is the correct input; cf. `q_only` 0.537 pred-avg vs 0.474 per-seed-mean.)*
 
+**vs the OFFICIAL SEP baseline (matched).** The E27 "supervised ridge" above is a stacked-ridge proxy;
+the actual **SEP** is single-layer LogisticRegression on binarized SE (`best_split`, same convention as
+`semantic_entropy_probes/run_llama2_probe.py`). Ran the real SEP method on the E27 data (n2000 train →
+fresh n1000 eval), same binarization:
+
+| SEP (in-model, supervised, single-layer logistic) | best AUROC |
+|---|---|
+| saved official SEP — Llama-2, **N=400** (run 095l3ou2) | 0.726 |
+| SEP method — Llama-2, **N=1000** (matched) | 0.795 (TBG L31) |
+| **SEP method — Mistral, N=1000** (matched, the in-model baseline for our target) | **0.857 (SLT L15)** |
+
+**Our label-free ensemble (0.867) is on par with — slightly above — the actual Mistral SEP (0.857)**, on
+a fully matched comparison (same data/binarization/eval), and the SEP uses Mistral's labels while ours
+uses none. Hidden-only, aligned-z (0.850) ≈ SEP (0.857), SEP marginally ahead (in-model supervised). Two
+lessons: (i) the earlier saved-SEP number (0.726) was **N=400-underpowered** — same Llama-2 SEP reaches
+0.795 at N=1000; (ii) **Mistral SE is more predictable than Llama-2's** (SEP 0.857 vs 0.795), a genuine
+model difference. So the E27 AUROCs (~0.85–0.87) are NOT inflated vs SEP — they match the real SEP method
+on matched data. JSON: `procrustes_e27_sep_comparison.json`.
+
 **E27 bottom line.** The best **label-free** cross-model uncertainty estimator is a **standardized
 average of the aligned-z ridge + `q_resp_only` → Spearman 0.609 / AUROC 0.867** — matching the
 supervised baseline on AUROC (0.863) and recovering ~96% of the Spearman skyline (0.632), with **no
@@ -948,8 +967,10 @@ d_resp_only,_auroc,_labelfree_ensemble}.json`.
    baseline (E27).** The aligned hidden state carries SE info beyond the question text (E27a semi-partial
    +0.091, robust across directions/eval-sets/seeds/anchor-resamples). Best **label-free** cross-model
    recipe: **standardized average of the aligned-z ridge + `q_resp_only` → Spearman 0.609 / AUROC 0.867**
-   — **matches the supervised Mistral ridge baseline on AUROC (0.863)** and recovers ~96% of the Spearman
-   skyline (0.632), with **no target SE labels**. *(A label-fitted ridge combiner matches it, 0.608/0.866,
+   — **on par with the actual Mistral SEP baseline** (single-layer logistic, matched data: 0.857 AUROC;
+   the supervised ridge proxy 0.863), recovering ~96% of the Spearman skyline (0.632), with **no target
+   SE labels**. *(The saved official SEP 0.726 was N=400-underpowered — the same Llama-2 SEP hits 0.795 at
+   N=1000; Mistral SE is more SEP-predictable than Llama-2's.)* *(A label-fitted ridge combiner matches it, 0.608/0.866,
    but uses target labels to set the weights — so the average, not the ridge combiner, is the label-free
    result; an earlier note mislabeled the ridge combiner as label-free.)* Mechanistic lessons: a linear
    ridge beats the 3B proxy on aligned z (z→SE is linear); **late fusion beats early fusion** (stacking >

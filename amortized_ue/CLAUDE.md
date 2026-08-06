@@ -225,8 +225,10 @@ fit W, then reuse a reference probe. Caveat: needs paired hidden states (shared 
 baseline.** Mistral→Llama-2, fresh n1000, vs Mistral SE (`procrustes_e27*.py`). The aligned hidden state
 adds SE info beyond the question text (E27a semi-partial +0.091, robust across dirs/eval-sets/seeds/
 anchor-resamples). Best **label-free** recipe: **standardized average of aligned-z ridge + `q_resp_only`
-→ Spearman 0.609 / AUROC 0.867** (no target labels), which **matches the supervised Mistral-ridge
-baseline on AUROC (0.863)** and recovers ~96% of the Spearman skyline (0.632). *(A label-FITTED 2-input
+→ Spearman 0.609 / AUROC 0.867** (no target labels), which is **on par with the actual Mistral SEP
+baseline** (single-layer logistic on matched data = 0.857 AUROC; supervised-ridge proxy 0.863) and
+recovers ~96% of the Spearman skyline (0.632). *(Saved official SEP 0.726 was N=400-underpowered → 0.795
+at N=1000; `procrustes_e27_sep_comparison.json`.)* *(A label-FITTED 2-input
 ridge combiner matches it, 0.608/0.866, but fits its weights on Mistral labels — so the AVERAGE, not the
 ridge combiner, is the label-free result; `procrustes_e27_labelfree_ensemble.py`.)* Mechanistic: a linear ridge
 beats the 3B proxy on aligned z (0.580 vs best arm 0.545); **late fusion (stacking) beats early fusion**

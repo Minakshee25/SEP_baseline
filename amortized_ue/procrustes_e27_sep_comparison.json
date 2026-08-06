@@ -1,0 +1,9 @@
+{
+  "note": "Matched SEP-method comparison for E27. SEP = single-layer LogisticRegression on binarized SE (best_split), same convention as semantic_entropy_probes/run_llama2_probe.py, run on the E27 data (n2000 train -> fresh n1000 eval).",
+  "saved_official_sep_llama2_n400_best_auroc": 0.726,
+  "matched_sep_method": {
+    "Llama-2-7b-chat_n1000": {"TBG_best": {"layer": 31, "auroc": 0.795}, "SLT_best": {"layer": 32, "auroc": 0.766}, "best_auroc": 0.795},
+    "Mistral-7B-Instruct-v0.2_n1000": {"TBG_best": {"layer": 31, "auroc": 0.839}, "SLT_best": {"layer": 15, "auroc": 0.857}, "best_auroc": 0.857}
+  },
+  "our_mistral_label_free": {"aligned_z_ridge_auroc": 0.850, "label_free_ensemble_auroc": 0.867}
+}
