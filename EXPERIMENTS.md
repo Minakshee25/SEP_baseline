@@ -850,39 +850,54 @@ best arm z 0.545) — z→SE is linear, the 3B adds nothing; (3) **adding text t
 z_q_resp < pure z) — z and question are redundant, so fusing dilutes.
 
 **E27 gate + E27c/d — the response, and early vs late fusion.** Gate (`_zresp_gate`): the *response*
-text is *mildly* complementary to aligned-z — ensemble(aligned-z + q_resp_only) = **0.608**, beating
-both aligned-z (0.580) and response (0.531) significantly (CIs exclude 0), though the semi-partials are
-borderline. **E27c** trained the actual **`z_resp` arm** (hidden+response, no question): aligned
-**0.523 ± 0.054 — BELOW pure z (0.545)**. **E27d** trained **`resp_only`** (response text, no question):
-**0.455 — BELOW q_resp_only (0.531) and even q_only (0.474)**. Two clean lessons: (i) **late fusion
-wins, early fusion loses** — stacking two well-built predictors (→0.608) beats forcing z+response into
-one arm (z_resp 0.523) or one text arm; (ii) **the question helps in the text-only regime** (drop it and
-resp_only falls to 0.455) — "q hurts" was only ever a z-arm redundancy effect. Unified rule: *use
-difficulty once — from z if you have it, from the question if you don't.*
+text is *mildly* complementary to aligned-z — combining aligned-z (0.580) + q_resp_only (0.531) beats
+both significantly. **⚠️ combiner note:** the gate/AUROC scripts used a 2-input *ridge* combiner fit on
+Mistral SE labels → **0.608**, so that specific number is NOT label-free. A genuinely **LABEL-FREE**
+combiner (standardized average of the two predictions, no target labels) **matches it: 0.609 Spearman /
+0.867 AUROC** (`procrustes_e27_labelfree_ensemble.py`) — so the labels buy ~nothing and the combined
+result stands label-free. **E27c** trained the actual **`z_resp` arm** (hidden+response, no question):
+aligned **0.523 ± 0.054 — BELOW pure z (0.545)**. **E27d** trained **`resp_only`** (response text, no
+question): **0.455 — BELOW q_resp_only (0.531) and even q_only (0.474)**. Two clean lessons: (i) **late
+fusion wins, early fusion loses** — stacking two well-built predictors (→0.609 label-free) beats forcing
+z+response into one arm (z_resp 0.523) or one text arm; (ii) **the question helps in the text-only
+regime** (drop it and resp_only falls to 0.455) — "q hurts" was only ever a z-arm redundancy effect.
+Unified rule: *use difficulty once — from z if you have it, from the question if you don't.*
 
-**AUROC vs the supervised baseline** (`procrustes_e27_auroc.py`, thr=best_split 0.814, 23% positive):
+**AUROC vs the supervised baseline** (`procrustes_e27_auroc.py` + `_labelfree_ensemble.py`,
+thr=best_split 0.814, 23% positive). **Labels column is exact — the ridge combiner uses target labels;
+the averages do not:**
 
-| predictor | AUROC | Spearman | Mistral labels? |
+| predictor | AUROC | Spearman | Mistral SE labels? |
 |---|---|---|---|
 | q_only (text) | 0.828 | 0.537 | no |
 | q_resp_only (text) | 0.852 | 0.587 | no |
 | aligned-z ridge | 0.850 | 0.580 | no |
-| **ENSEMBLE z+q_resp (ours)** | **0.866** | 0.608 | no |
+| avg (raw) z + q_resp | 0.862 | 0.602 | **no (LABEL-FREE)** |
+| **avg (standardized) z + q_resp** | **0.867** | **0.609** | **no (LABEL-FREE)** |
+| ridge combiner z + q_resp | 0.866 | 0.608 | **YES (fits weights on labels)** |
 | **Mistral supervised ridge (BASELINE, same features)** | 0.863 | 0.587 | **yes** |
 
-**On AUROC the label-free ensemble (0.866) MATCHES the supervised baseline (0.863)** — a dead heat on
-the SEP metric, with zero Mistral SE labels. On Spearman the ensemble (0.608) beats the same-feature
-baseline (0.587) and sits just under the best-layer skyline (0.632). Like-for-like hidden-only, the
-supervised ridge (0.863) edges label-free aligned-z (0.850), as expected — the ensemble's edge comes
-from adding the text modality.
+**On AUROC the LABEL-FREE ensemble — a standardized average, no target labels — reaches 0.867, matching
+the supervised baseline (0.863)** and matching the label-fitted ridge combiner (0.866), so the labels
+buy ~nothing for combining. On Spearman the label-free average (0.609) beats the same-feature baseline
+(0.587) and sits just under the best-layer skyline (0.632). Like-for-like hidden-only, the supervised
+ridge (0.863) edges label-free aligned-z (0.850), as expected — the ensemble's edge comes from adding
+the text modality. *(Correction: an earlier version reported the ridge-combiner 0.608/0.866 as
+"label-free"; that combiner uses Mistral labels. The genuinely label-free average (0.609/0.867) is used
+here and lands in the same place.)* *(Aggregation note: proxy arms here are 5-seed
+**prediction-averaged** (denoised), so `q_resp_only` reads 0.587 here vs the **per-seed-mean** 0.531 in
+E27b/gate — same arm, two aggregations. The ensemble averages predictions, so the prediction-averaged
+number is the correct input; cf. `q_only` 0.537 pred-avg vs 0.474 per-seed-mean.)*
 
-**E27 bottom line.** The best label-free cross-model uncertainty estimator is **ridge-on-aligned-z +
-`q_resp_only`, ensembled → Spearman 0.608 / AUROC 0.866**, matching the supervised baseline on AUROC and
-recovering ~96% of the skyline on Spearman — **without any target SE labels** (needs only paired anchor
-forward passes to fit W; the text arm needs nothing). Alignment genuinely *helps* (E27a), a ridge
-exploits aligned z best (E27b), the response adds a little only via late fusion (gate/c), and the
-question earns its keep only when there's no z (d). Result JSONs: `procrustes_e27{a_vs_text,
-a_robustness,b_proxy_vs_ridge,_zresp_gate,c_zresp_arm,d_resp_only,_auroc}.json`.
+**E27 bottom line.** The best **label-free** cross-model uncertainty estimator is a **standardized
+average of the aligned-z ridge + `q_resp_only` → Spearman 0.609 / AUROC 0.867** — matching the
+supervised baseline on AUROC (0.863) and recovering ~96% of the Spearman skyline (0.632), with **no
+target SE labels** (needs paired anchor forward passes to fit W; the text arm needs nothing). A
+label-*fitted* ridge combiner matches it (0.608/0.866) but requires target labels, so it is not
+preferred. Alignment genuinely *helps* (E27a), a ridge exploits aligned z best (E27b), the response adds
+a little only via late fusion (gate/c), and the question earns its keep only when there's no z (d).
+Result JSONs: `procrustes_e27{a_vs_text,a_robustness,b_proxy_vs_ridge,_zresp_gate,c_zresp_arm,
+d_resp_only,_auroc,_labelfree_ensemble}.json`.
 
 ---
 
@@ -931,13 +946,16 @@ a_robustness,b_proxy_vs_ridge,_zresp_gate,c_zresp_arm,d_resp_only,_auroc}.json`.
 
 6. **⭐ Alignment DOES help uncertainty estimation — a label-free estimator on par with the supervised
    baseline (E27).** The aligned hidden state carries SE info beyond the question text (E27a semi-partial
-   +0.091, robust across directions/eval-sets/seeds/anchor-resamples). Best label-free cross-model
-   recipe: **ridge-on-aligned-z + `q_resp_only`, ensembled → Spearman 0.608 / AUROC 0.866** — **matches
-   the supervised Mistral ridge baseline on AUROC (0.863)** and recovers ~96% of the Spearman skyline
-   (0.632), with **no target SE labels**. Mechanistic lessons: a linear ridge beats the 3B proxy on
-   aligned z (z→SE is linear); **late fusion beats early fusion** (stacking > a fused `z_resp` arm 0.523
-   > forcing text into z); and the question helps only when there's no z (`resp_only` 0.455 < 0.531).
-   Needs paired anchor forward passes to fit W (label-free, not sample-free); the text arm needs nothing.
+   +0.091, robust across directions/eval-sets/seeds/anchor-resamples). Best **label-free** cross-model
+   recipe: **standardized average of the aligned-z ridge + `q_resp_only` → Spearman 0.609 / AUROC 0.867**
+   — **matches the supervised Mistral ridge baseline on AUROC (0.863)** and recovers ~96% of the Spearman
+   skyline (0.632), with **no target SE labels**. *(A label-fitted ridge combiner matches it, 0.608/0.866,
+   but uses target labels to set the weights — so the average, not the ridge combiner, is the label-free
+   result; an earlier note mislabeled the ridge combiner as label-free.)* Mechanistic lessons: a linear
+   ridge beats the 3B proxy on aligned z (z→SE is linear); **late fusion beats early fusion** (stacking >
+   a fused `z_resp` arm 0.523 > forcing text into z); and the question helps only when there's no z
+   (`resp_only` 0.455 < 0.531). Needs paired anchor forward passes to fit W (label-free, not sample-free);
+   the text arm needs nothing.
 
 **Next:** the Procrustes alignment experiment (can z be *made* to transfer?) and/or multi-target
 (leave-one-out) training; compile `amortized_ue/RESULTS.md`. **The consolidated to-do list lives in

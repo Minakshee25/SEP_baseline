@@ -1,0 +1,36 @@
+{
+  "threshold": 0.8140452462659786,
+  "n_valid": 1000,
+  "metrics": {
+    "aligned-z ridge": {
+      "spearman": 0.5803613798775688,
+      "auroc": 0.849965167451107,
+      "labels": "label-free"
+    },
+    "q_resp_only (text)": {
+      "spearman": 0.5866226235188732,
+      "auroc": 0.8524515884208679,
+      "labels": "label-free"
+    },
+    "avg (raw)  z + q_resp": {
+      "spearman": 0.6015772821049236,
+      "auroc": 0.8616949574929627,
+      "labels": "LABEL-FREE"
+    },
+    "avg (standardized)  z + q_resp": {
+      "spearman": 0.6091955513436877,
+      "auroc": 0.8666791270906609,
+      "labels": "LABEL-FREE"
+    },
+    "ridge combiner  z + q_resp": {
+      "spearman": 0.6083449930652319,
+      "auroc": 0.8658691995310349,
+      "labels": "uses Mistral labels"
+    },
+    "Mistral supervised ridge": {
+      "spearman": 0.5866535896016171,
+      "auroc": 0.8631958722013605,
+      "labels": "uses Mistral labels (BASELINE)"
+    }
+  }
+}

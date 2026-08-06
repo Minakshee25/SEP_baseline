@@ -224,9 +224,11 @@ fit W, then reuse a reference probe. Caveat: needs paired hidden states (shared 
 **⭐ E27 — alignment HELPS uncertainty estimation; label-free estimator on par with the supervised
 baseline.** Mistral→Llama-2, fresh n1000, vs Mistral SE (`procrustes_e27*.py`). The aligned hidden state
 adds SE info beyond the question text (E27a semi-partial +0.091, robust across dirs/eval-sets/seeds/
-anchor-resamples). Best label-free recipe: **ridge-on-aligned-z + `q_resp_only`, ensembled → Spearman
-0.608 / AUROC 0.866**, which **matches the supervised Mistral-ridge baseline on AUROC (0.863)** and
-recovers ~96% of the Spearman skyline (0.632), with no target SE labels. Mechanistic: a linear ridge
+anchor-resamples). Best **label-free** recipe: **standardized average of aligned-z ridge + `q_resp_only`
+→ Spearman 0.609 / AUROC 0.867** (no target labels), which **matches the supervised Mistral-ridge
+baseline on AUROC (0.863)** and recovers ~96% of the Spearman skyline (0.632). *(A label-FITTED 2-input
+ridge combiner matches it, 0.608/0.866, but fits its weights on Mistral labels — so the AVERAGE, not the
+ridge combiner, is the label-free result; `procrustes_e27_labelfree_ensemble.py`.)* Mechanistic: a linear ridge
 beats the 3B proxy on aligned z (0.580 vs best arm 0.545); **late fusion (stacking) beats early fusion**
 (a trained `z_resp` arm = 0.523 < pure z; adding text to z-arms hurts); the question helps only when
 there's no z (`resp_only` 0.455 < `q_resp_only` 0.531). New arms `z_resp`/`resp_only` added to

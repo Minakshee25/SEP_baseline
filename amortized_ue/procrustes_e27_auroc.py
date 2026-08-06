@@ -98,7 +98,7 @@ def run(source="Mistral-7B-Instruct-v0.2", target="Llama-2-7b-chat", dataset="tr
         "q_only (text)": qo_f,
         "q_resp_only (text)": qr_f,
         "aligned-z ridge (label-free)": z_fresh,
-        "ENSEMBLE z+q_resp (label-free)": ens_fresh,
+        "ENSEMBLE z+q_resp (ridge combiner, USES Mistral labels)": ens_fresh,   # NOT label-free -- see procrustes_e27_labelfree_ensemble.py for the label-free average
         "Mistral supervised ridge (BASELINE)": base_fresh,
     }
     print("\n" + "=" * 72)
