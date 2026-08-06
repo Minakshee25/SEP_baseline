@@ -1,0 +1,112 @@
+{
+  "dataset": "trivia_qa",
+  "n_boot": 20,
+  "L_a_forward": 30,
+  "L_a_reverse": 31,
+  "cells": [
+    {
+      "source": "Mistral-7B-Instruct-v0.2",
+      "target": "Llama-2-7b-chat",
+      "eval": "fresh",
+      "n": 1000,
+      "aligned_spearman": 0.5895320977182497,
+      "text_spearman": 0.5374306855091915,
+      "semi_partial_avg": 0.09120457654644758,
+      "semi_partial_ci": [
+        0.04626578095808981,
+        0.13460592277128114
+      ],
+      "semi_partial_P": 1.0,
+      "per_seed_mean": 0.18540033798401728,
+      "per_seed_std": 0.029525484568935955,
+      "per_seed_min": 0.14439473818310708,
+      "per_seed_all_pos": true,
+      "anchor_resample_mean": 0.09292608307078662,
+      "anchor_resample_std": 0.008744435595744587,
+      "anchor_resample_min": 0.07639658227338263,
+      "ensemble_minus_text": 0.05685076883324809,
+      "ensemble_minus_text_ci": [
+        0.03464020523687743,
+        0.07779239444656261
+      ]
+    },
+    {
+      "source": "Mistral-7B-Instruct-v0.2",
+      "target": "Llama-2-7b-chat",
+      "eval": "test",
+      "n": 200,
+      "aligned_spearman": 0.5450634591146699,
+      "text_spearman": 0.4642837171852763,
+      "semi_partial_avg": 0.1124331451534877,
+      "semi_partial_ci": [
+        0.0001262803520881603,
+        0.2202079871000112
+      ],
+      "semi_partial_P": 0.975,
+      "per_seed_mean": 0.19580169189356628,
+      "per_seed_std": 0.03048679345748498,
+      "per_seed_min": 0.15111014108613297,
+      "per_seed_all_pos": true,
+      "anchor_resample_mean": 0.11617994163349707,
+      "anchor_resample_std": 0.01630839013003626,
+      "anchor_resample_min": 0.07507018305721372,
+      "ensemble_minus_text": 0.08798206740810575,
+      "ensemble_minus_text_ci": [
+        0.02576671961984265,
+        0.155302584086998
+      ]
+    },
+    {
+      "source": "Llama-2-7b-chat",
+      "target": "Mistral-7B-Instruct-v0.2",
+      "eval": "fresh",
+      "n": 1000,
+      "aligned_spearman": 0.565569388961242,
+      "text_spearman": 0.5486134111172609,
+      "semi_partial_avg": 0.1313894021636815,
+      "semi_partial_ci": [
+        0.08804260359543786,
+        0.17319653339262905
+      ],
+      "semi_partial_P": 1.0,
+      "per_seed_mean": 0.22173095429003378,
+      "per_seed_std": 0.03397964292692836,
+      "per_seed_min": 0.1702271255068664,
+      "per_seed_all_pos": true,
+      "anchor_resample_mean": 0.12004603253611394,
+      "anchor_resample_std": 0.014991633493001946,
+      "anchor_resample_min": 0.08519565785350712,
+      "ensemble_minus_text": -0.022882854037498148,
+      "ensemble_minus_text_ci": [
+        -0.02869276534864643,
+        -0.01717571712423444
+      ]
+    },
+    {
+      "source": "Llama-2-7b-chat",
+      "target": "Mistral-7B-Instruct-v0.2",
+      "eval": "test",
+      "n": 200,
+      "aligned_spearman": 0.5554939713945304,
+      "text_spearman": 0.5655708269457926,
+      "semi_partial_avg": 0.13445221214446273,
+      "semi_partial_ci": [
+        0.019148022217050507,
+        0.24650894454161035
+      ],
+      "semi_partial_P": 0.9905,
+      "per_seed_mean": 0.23451828884593778,
+      "per_seed_std": 0.049413416838929906,
+      "per_seed_min": 0.1585143317440424,
+      "per_seed_all_pos": true,
+      "anchor_resample_mean": 0.13487432301381758,
+      "anchor_resample_std": 0.02003682595323178,
+      "anchor_resample_min": 0.10385892436730246,
+      "ensemble_minus_text": -0.032300235446518964,
+      "ensemble_minus_text_ci": [
+        -0.05179550988019484,
+        -0.014155978667746361
+      ]
+    }
+  ]
+}

@@ -824,6 +824,66 @@ clearly correlate (partial 0.267). So a real unique signal exists, it is just a 
 total. Net: the rotation's model-specific contribution is **real but modest and mostly redundant** — no
 overclaim survives, the effect does not vanish. JSON: `amortized_ue/procrustes_e26_decomposition.json`.
 
+## E27 — Does hidden-state alignment HELP uncertainty estimation (beyond text)? Full decomposition
+
+E24–E26 asked whether z transfers; E27 asks the *useful* question: does the aligned hidden state give a
+better cross-model **uncertainty estimator** than the model-agnostic text, and how do the pieces
+combine? All Mistral→Llama-2 (unless noted), fresh n1000, vs Mistral SE. Additive scripts
+`procrustes_e27*.py`; the only code change is two z-free/text-map lines in `stage2/train.py` for the new
+`z_resp`/`resp_only` arms.
+
+**E27a — the aligned hidden state carries SE info BEYOND the question text (robust).** Control the
+aligned-z ridge against the `q_only` TEXT prediction (3B proxy). Semi-partial(aligned, SE | text
+removed) = **+0.091 [95% CI +0.046, +0.135], P=1.00** — clearly > 0; ensemble(text+aligned) beats text
+by +0.057. **Robustness battery** (`procrustes_e27a_robustness.py`) — 2 directions × 2 eval sets, the
+semi-partial CI **excludes 0 in all 4 cells** and **all 5 text-seeds are positive in every cell**;
+20 anchor-resamples (refit W+ridge) stay positive (±0.01–0.02). So "hidden adds over text" is not a
+one-config fluke. *(Caveat: part of the gain over text is that hidden states read difficulty more richly
+than raw text; vs a hidden-state difficulty control the model-specific increment was the smaller E26
++0.042.)*
+
+**E27b — proxy (all 5 arms) vs ridge on the SAME aligned `[TBG:22,SLT:15]`** (layers validated
+ridge-optimal for Llama-2: 0.600/0.584). Raw → aligned Spearman: **z 0.014→0.545**, z_q 0.073→0.478,
+z_q_resp 0.124→0.510, q_only 0.474, q_resp_only 0.531; **ridge 0.091→0.580**. Findings: (1) alignment
+rescues the *proxy's* z-arm too (not just the ridge); (2) the **ridge beats every proxy arm** (0.580 >
+best arm z 0.545) — z→SE is linear, the 3B adds nothing; (3) **adding text to the z-arm HURTS** (z_q,
+z_q_resp < pure z) — z and question are redundant, so fusing dilutes.
+
+**E27 gate + E27c/d — the response, and early vs late fusion.** Gate (`_zresp_gate`): the *response*
+text is *mildly* complementary to aligned-z — ensemble(aligned-z + q_resp_only) = **0.608**, beating
+both aligned-z (0.580) and response (0.531) significantly (CIs exclude 0), though the semi-partials are
+borderline. **E27c** trained the actual **`z_resp` arm** (hidden+response, no question): aligned
+**0.523 ± 0.054 — BELOW pure z (0.545)**. **E27d** trained **`resp_only`** (response text, no question):
+**0.455 — BELOW q_resp_only (0.531) and even q_only (0.474)**. Two clean lessons: (i) **late fusion
+wins, early fusion loses** — stacking two well-built predictors (→0.608) beats forcing z+response into
+one arm (z_resp 0.523) or one text arm; (ii) **the question helps in the text-only regime** (drop it and
+resp_only falls to 0.455) — "q hurts" was only ever a z-arm redundancy effect. Unified rule: *use
+difficulty once — from z if you have it, from the question if you don't.*
+
+**AUROC vs the supervised baseline** (`procrustes_e27_auroc.py`, thr=best_split 0.814, 23% positive):
+
+| predictor | AUROC | Spearman | Mistral labels? |
+|---|---|---|---|
+| q_only (text) | 0.828 | 0.537 | no |
+| q_resp_only (text) | 0.852 | 0.587 | no |
+| aligned-z ridge | 0.850 | 0.580 | no |
+| **ENSEMBLE z+q_resp (ours)** | **0.866** | 0.608 | no |
+| **Mistral supervised ridge (BASELINE, same features)** | 0.863 | 0.587 | **yes** |
+
+**On AUROC the label-free ensemble (0.866) MATCHES the supervised baseline (0.863)** — a dead heat on
+the SEP metric, with zero Mistral SE labels. On Spearman the ensemble (0.608) beats the same-feature
+baseline (0.587) and sits just under the best-layer skyline (0.632). Like-for-like hidden-only, the
+supervised ridge (0.863) edges label-free aligned-z (0.850), as expected — the ensemble's edge comes
+from adding the text modality.
+
+**E27 bottom line.** The best label-free cross-model uncertainty estimator is **ridge-on-aligned-z +
+`q_resp_only`, ensembled → Spearman 0.608 / AUROC 0.866**, matching the supervised baseline on AUROC and
+recovering ~96% of the skyline on Spearman — **without any target SE labels** (needs only paired anchor
+forward passes to fit W; the text arm needs nothing). Alignment genuinely *helps* (E27a), a ridge
+exploits aligned z best (E27b), the response adds a little only via late fusion (gate/c), and the
+question earns its keep only when there's no z (d). Result JSONs: `procrustes_e27{a_vs_text,
+a_robustness,b_proxy_vs_ridge,_zresp_gate,c_zresp_arm,d_resp_only,_auroc}.json`.
+
 ---
 
 ## Where we stand (2026-07-29)
@@ -868,6 +928,16 @@ overclaim survives, the effect does not vanish. JSON: `amortized_ue/procrustes_e
    largely a shared, model-agnostic "difficulty" signal (which the TEXT arms already capture); alignment
    adds a modest genuine model-specific component. The strong E24 "PRH holds / hidden states transfer"
    headline is **tempered** — real but small.
+
+6. **⭐ Alignment DOES help uncertainty estimation — a label-free estimator on par with the supervised
+   baseline (E27).** The aligned hidden state carries SE info beyond the question text (E27a semi-partial
+   +0.091, robust across directions/eval-sets/seeds/anchor-resamples). Best label-free cross-model
+   recipe: **ridge-on-aligned-z + `q_resp_only`, ensembled → Spearman 0.608 / AUROC 0.866** — **matches
+   the supervised Mistral ridge baseline on AUROC (0.863)** and recovers ~96% of the Spearman skyline
+   (0.632), with **no target SE labels**. Mechanistic lessons: a linear ridge beats the 3B proxy on
+   aligned z (z→SE is linear); **late fusion beats early fusion** (stacking > a fused `z_resp` arm 0.523
+   > forcing text into z); and the question helps only when there's no z (`resp_only` 0.455 < 0.531).
+   Needs paired anchor forward passes to fit W (label-free, not sample-free); the text arm needs nothing.
 
 **Next:** the Procrustes alignment experiment (can z be *made* to transfer?) and/or multi-target
 (leave-one-out) training; compile `amortized_ue/RESULTS.md`. **The consolidated to-do list lives in

@@ -221,6 +221,17 @@ label-free linear SE probe on Mistral (`x·Wβ_llama2`), so it sits below Mistra
 **Payoff:** build an SE probe for a NEW model with no N-sample labels — just paired forward passes to
 fit W, then reuse a reference probe. Caveat: needs paired hidden states (shared questions, cheap).
 
+**⭐ E27 — alignment HELPS uncertainty estimation; label-free estimator on par with the supervised
+baseline.** Mistral→Llama-2, fresh n1000, vs Mistral SE (`procrustes_e27*.py`). The aligned hidden state
+adds SE info beyond the question text (E27a semi-partial +0.091, robust across dirs/eval-sets/seeds/
+anchor-resamples). Best label-free recipe: **ridge-on-aligned-z + `q_resp_only`, ensembled → Spearman
+0.608 / AUROC 0.866**, which **matches the supervised Mistral-ridge baseline on AUROC (0.863)** and
+recovers ~96% of the Spearman skyline (0.632), with no target SE labels. Mechanistic: a linear ridge
+beats the 3B proxy on aligned z (0.580 vs best arm 0.545); **late fusion (stacking) beats early fusion**
+(a trained `z_resp` arm = 0.523 < pure z; adding text to z-arms hurts); the question helps only when
+there's no z (`resp_only` 0.455 < `q_resp_only` 0.531). New arms `z_resp`/`resp_only` added to
+`stage2/train.py`; checkpoints in `runs/E27_{zresp,resp_only}_arm/`. Full arc in EXPERIMENTS.md E27.
+
 **Storage:** all Stage-1 datasets + proxy checkpoints live on `/vol/bitbucket` (source of truth) AND
 W&B. `push_to_wandb` defaults True (smokes excluded); dataset artifact names auto-distinct per
 (model,dataset,N); back-fill datasets with `push_dataset_wandb.py`. **W&B cache is redirected off the

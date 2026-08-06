@@ -1,0 +1,13 @@
+{
+  "resp_only_spearman": 0.45497719384588853,
+  "q_resp_only": 0.531,
+  "q_only": 0.474,
+  "ensemble_ridgez_resp_only": 0.5923030741129006,
+  "ensemble_ridgez_q_resp_only": 0.608,
+  "ensemble_minus_ridgez": {
+    "mean": 0.012162223371387405,
+    "lo95": -0.0034299624217891318,
+    "hi95": 0.027857165220370312,
+    "P": 0.9385
+  }
+}

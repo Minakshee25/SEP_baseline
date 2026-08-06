@@ -45,7 +45,7 @@ from amortized_ue.stage2.model import ProxyModel
 # pass at all? `q_only` is the strong version (uncertainty known BEFORE generation -> routing,
 # abstention, cascades). `q_resp_only` still needs the target's answer text, but not its hidden
 # states. These arms never touch the projector.
-_Z_FREE_ARMS = ("q_only", "q_resp_only")
+_Z_FREE_ARMS = ("q_only", "q_resp_only", "resp_only")
 
 
 def _arm_uses_z(arm: str) -> bool:
@@ -61,6 +61,8 @@ def _arm_text(arm: str, question: str, response: str):
         return f"Question: {question}\nAnswer:"
     if arm in ("z_q_resp", "q_resp_only"):
         return f"Question: {question}\nAnswer: {response}"
+    if arm in ("z_resp", "resp_only"):                     # E27: response, NO question (z_resp also has z)
+        return f"Answer: {response}"
     raise ValueError(f"unknown arm {arm!r}")
 
 
