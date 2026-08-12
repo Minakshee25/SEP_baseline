@@ -1,0 +1,42 @@
+{
+  "source": "Llama-2-7b-chat",
+  "target": "Meta-Llama-3-8B-Instruct",
+  "dataset": "trivia_qa",
+  "num_samples": 2000,
+  "fresh_num_samples": null,
+  "position": "TBG",
+  "L_a_target_ridge": 31,
+  "L_m_source_skyline": 30,
+  "target_in_dist_ridge": 0.6234416155322448,
+  "alpha_target_ridge": 10000.0,
+  "alpha_source_ridge": 10000.0,
+  "evals": [
+    {
+      "label": "N=200 (n2000 test split)",
+      "n": 200,
+      "floor": 0.18451677574171527,
+      "control_mechA": 0.5868978972440345,
+      "aligned": 0.5635499983509089,
+      "skyline": 0.5853315991548673,
+      "target_in_dist": null,
+      "ctrl_random_orthogonal": [
+        -0.06563171017534647,
+        0.12064232695563999
+      ],
+      "gap_recovered_frac": 0.945656698476178,
+      "aligned_minus_control": {
+        "mean": -0.022761239776327536,
+        "lo95": -0.1065513858179696,
+        "hi95": 0.05565509581279997,
+        "frac_positive": 0.29
+      },
+      "reconstruction": {
+        "cosine_before": 0.001136959413997829,
+        "cosine_after": 0.40856292843818665,
+        "recon_err_before": 3.027902567392051,
+        "recon_err_after": 2.618448073039317,
+        "cka": 0.8723885845313264
+      }
+    }
+  ]
+}

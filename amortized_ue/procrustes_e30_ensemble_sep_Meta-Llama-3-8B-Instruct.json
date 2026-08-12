@@ -1,0 +1,68 @@
+{
+  "source": "Meta-Llama-3-8B-Instruct",
+  "ref": "Llama-2-7b-chat",
+  "dataset": "trivia_qa",
+  "regime": "fit+eval n2000 (eval=test split, N=200)",
+  "fit_num_samples": 2000,
+  "eval_num_samples": null,
+  "ref_layers": {
+    "TBG": 22,
+    "SLT": 15
+  },
+  "n_eval": 200,
+  "n_valid": 200,
+  "best_split": 0.6977530682422675,
+  "sep_best_layer": [
+    "TBG",
+    31
+  ],
+  "sep_eval_auroc": 0.8394377618597108,
+  "metrics": {
+    "aligned-z ridge (label-free)": {
+      "spearman": 0.6304693940298377,
+      "auroc": 0.8774158670090553
+    },
+    "q_resp_only (label-free)": {
+      "spearman": 0.643058723856461,
+      "auroc": 0.8739018786322476
+    },
+    "avg standardized (label-free)": {
+      "spearman": 0.6715817739139751,
+      "auroc": 0.8920124341127179
+    },
+    "RANK FUSION (label-free)": {
+      "spearman": 0.6715958230235733,
+      "auroc": 0.8916745506149479
+    },
+    "SEP supervised (uses S labels)": {
+      "spearman": 0.5175425501587398,
+      "auroc": 0.8394377618597108
+    }
+  },
+  "ensemble_minus_sep": {
+    "avg standardized (label-free) - SEP": {
+      "spearman": {
+        "mean": 0.1557901821328109,
+        "lo95": 0.06987164082975979,
+        "hi95": 0.25538139028732687
+      },
+      "auroc": {
+        "mean": 0.05387336143713751,
+        "lo95": -0.004318206034618396,
+        "hi95": 0.11571419003807322
+      }
+    },
+    "RANK FUSION (label-free) - SEP": {
+      "spearman": {
+        "mean": 0.15569577447280478,
+        "lo95": 0.06863665651662555,
+        "hi95": 0.2578671576177508
+      },
+      "auroc": {
+        "mean": 0.05360351047318869,
+        "lo95": -0.0033790914859461534,
+        "hi95": 0.11455039525691707
+      }
+    }
+  }
+}

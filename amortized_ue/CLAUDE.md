@@ -161,9 +161,8 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 
 **Target LLMs (4):** Llama-2-7b-chat (reference), Mistral-7B-Instruct-v0.2, Meta-Llama-3-8B-Instruct,
 and **DeepSeek-LLM-7B-Chat (E28, NEW)**. Per-target z-layers (via `linear_ceiling_probe.py`, not the
-3B sweep): Llama-2 **TBG:22/SLT:15**, Mistral **TBG:31/SLT:20**, **DeepSeek TBG:28/SLT:16** (single
-best layer SLT:16, ID-test Spearman 0.680; 30-layer model → Llama-2's layers do not carry over;
-`scratch_xllm/deepseek_layer_pick.json`).
+3B sweep): Llama-2 **TBG:22/SLT:15**, Mistral **TBG:31/SLT:20**, **DeepSeek TBG:28/SLT:16** (best SLT:16,
+0.680; 30-layer model), **Llama-3 best SLT:31** (0.708, on n2000; `scratch_xllm/{deepseek,llama3}_layer_pick.json`).
 
 **Stage-1 datasets (target LLM Llama-2-7b-chat):** trivia_qa n400 (`stage1_records:v0`), **n2000**
 (`stage1_records_n2000`; split 1440/360/200 seed 42; the ID dataset), squad n1000 (OOD; mean_acc
@@ -176,19 +175,24 @@ control. **DeepSeek-LLM-7B-Chat Stage-1 (E28):** trivia_qa **n1000** on the E23 
 W&B `stage1_records_deepseek-llm-7b-chat_trivia_qa_n1000`, run `c6ijifxe`) — same 1000 ids as the E23
 Llama-2/Mistral fresh batches, zero overlap.
 
-**E29 — alignment chain run on DeepSeek + four-model master table (n1000-preliminary; full-power
-n2000 IN PROGRESS).** Extended the E24–E27 line to DeepSeek: geometric recovery generalises to a 3rd
-family (DeepSeek↔Llama-2 ~80–87%), and the **label-free ensemble** (aligned-z + `q_resp_only`, reusing
-the frozen REFERENCE proxy) hits **~0.92 AUROC for BOTH DeepSeek and Mistral**, ≥ their supervised SEP.
-**Caveat:** run within-n1000 (100-row test split) → the E25 model-specific increment CIs all include 0,
-but a Mistral N=100 calibration shows its KNOWN +0.032 (N=1000) also goes non-significant at N=100 →
-**power-limited, not weaker transfer**. **Llama-3 alignment was NOT computable** (only n200 on E20 ids).
-→ Now building **DeepSeek n2000 + Llama-3 n2000** (seed-10 selection, shared ids) to redo at N=1000
-power and unlock the same-family Llama-3 comparison (E30, pending). Tooling (all additive): parametrised
-`procrustes_alignment.py` (`--position/--source_layer/--target_layer`); `procrustes_e29_ensemble_sep.py`,
-`procrustes_e29_master_table.py`; **GPU fencing** `gpu_reserve.py` + `build_n2000_waiter.sh` (waits for a
-free GPU, holds the slack so co-tenants can't OOM the build mid-run). JSONs: `procrustes_e29_*.json`.
-Full arc: EXPERIMENTS.md E29.
+**E29→E30 — full-power four-model alignment table (DeepSeek + Llama-3 n2000 built).** Extended the
+E24–E27 line to DeepSeek and Llama-3 at full power (built both **n2000** on the shared seed-10 selection;
+on /vol/bitbucket + W&B, verified). Two settled results:
+1. **Label-free ensemble ≥ supervised SEP on ALL 3 targets** (no target labels): rank-fusion(aligned-z +
+   `q_resp_only`) AUROC — Mistral 0.866 (SEP 0.832), DeepSeek 0.869 (0.805), Llama-3 0.892 (0.839); Δ
+   excludes 0 for Mistral & DeepSeek, ρ-only for Llama-3. **The thesis holds at full power on 3 targets.**
+2. **Recovery is high for all (~92–95%) but is shared question-difficulty; the discriminator is CKA
+   (alignability): Llama-3 0.87 > Mistral 0.80 ≫ DeepSeek 0.25.** Family is only a *weak* predictor —
+   **DeepSeek is a low-CKA outlier despite matching 4096 dims**, and its model-specific increment is
+   genuinely ~0 at N=1000 (+0.008), vs Mistral's significant +0.032. The increment tracks CKA, not family.
+   (Llama-3 increment unresolved — N=200 only, no fresh n1000.)
+
+Tooling (all additive): parametrised `procrustes_alignment.py` (`--position/--source_layer/--target_layer`);
+`procrustes_e29/e30_ensemble_sep.py` (E30 = fit-one-set/eval-another for N=1000 power);
+`procrustes_e29/e30_master_table.py`; **GPU fencing** `gpu_reserve.py` + `build_n2000_waiter.sh` (waits for
+a free GPU, fences the slack so co-tenants can't OOM a build mid-run — added after Llama-3 OOM'd once).
+JSONs: `procrustes_e29_*.json` (n1000-preliminary), `procrustes_e30_*.json` (full power). Full arc:
+EXPERIMENTS.md E29–E30.
 
 **Cross-LLM transfer (E20) — the thesis result.** Frozen Llama-2 proxy → Llama-3-8B, 5-seed Spearman
 (control = same harness on Llama-2's own 200, reproduces ID to 4 sig figs):

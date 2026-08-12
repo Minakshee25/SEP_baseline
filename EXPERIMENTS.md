@@ -1056,6 +1056,58 @@ mistral_to_llama2_n1000,ensemble_sep_*,master_table}.json`.
 
 ---
 
+## E30 — FULL-POWER four-model alignment table (built DeepSeek + Llama-3 n2000) — ✅ label-free ensemble > supervised SEP on all 3 targets; alignability tracks CKA, not family; DeepSeek is a low-CKA outlier
+
+**Goal:** remove E29's two caveats (DeepSeek's N=100 power; Llama-3 not computable) by building the two
+missing **n2000** datasets on the shared seed-10 selection, then redo the alignment + ensemble chain at
+full power. Built `deepseek-llm-7b-chat_trivia_qa_n2000` (mean_acc 0.523 / CAE 0.794) and
+`Meta-Llama-3-8B-Instruct_trivia_qa_n2000` (mean_acc 0.655 / CAE 0.486); both on /vol/bitbucket + W&B,
+verified by fetch. (Infra: Llama-3's build OOM'd once when a co-tenant grabbed GPU-1 slack mid-run →
+added **GPU memory fencing** `gpu_reserve.py` + `build_n2000_waiter.sh`, which resumed it cleanly; 2
+records corrupted by the OOM's partial writes were detected by a torch-load scan and regenerated.)
+New tooling: `procrustes_e30_ensemble_sep.py` (fit-on-one-set / eval-on-another) + `procrustes_e30_master_table.py`.
+
+**Regime:** DeepSeek & Mistral fit on n2000 → eval the disjoint **fresh n1000 (N=1000)**; Llama-3 fits+evals
+its n2000 (**N=200** test split — it has no fresh n1000). Reference = Llama-2 (ensemble at TBG:22/SLT:15;
+DeepSeek alignment at its SLT:16, Mistral/Llama-3 at TBG).
+
+**(1) Alignment recovery + CKA + E25 increment (master table):**
+
+| pair | N | recovery | **CKA** | increment [95% CI] | sig |
+|---|---|---|---|---|---|
+| Mistral→Llama-2 | 1000 | 92.8% | 0.795 | **+0.032 [+0.001,+0.063]** | **YES** |
+| DeepSeek→Llama-2 | 1000 | 94.7% | **0.248** | +0.009 [−0.028,+0.044] | no |
+| Llama-2→DeepSeek | 1000 | 94.1% | **0.273** | +0.006 [−0.032,+0.044] | no |
+| Llama-3→Llama-2 | 200 | 91.8% | **0.871** | +0.069 [−0.004,+0.143] | no |
+| Llama-2→Llama-3 | 200 | 94.6% | **0.872** | −0.023 [−0.107,+0.056] | no |
+
+**Recovery is uniformly high (~92–95%) for ALL pairs** — it's dominated by shared question-difficulty,
+so it does NOT discriminate. **The discriminator is CKA (rotational alignability): Llama-3 (same family)
+0.87 > Mistral (different) 0.80 ≫ DeepSeek (different) 0.25.** Family is at best a *weak* predictor
+(Llama-3 highest, but Mistral close behind); **DeepSeek is a striking low-CKA outlier despite matching
+4096 dims.** The genuine **model-specific increment tracks CKA, not family**: at N=1000 Mistral is +0.032
+(significant) but **DeepSeek is ~0 with a tight CI** (+0.008, [−0.03,+0.04]) — so E29's DeepSeek "null"
+was NOT merely power; at full power DeepSeek genuinely has almost **no model-specific geometric SE
+component** (pure shared-difficulty). Llama-3 (N=200) is noisy (+0.069 / −0.023) — its increment can't be
+resolved without a fresh n1000, the one residual data limit.
+
+**(2) Label-free ensemble vs supervised SEP — label-free WINS on all three targets (full power):**
+
+| target | ensemble AUROC / ρ | supervised SEP AUROC | Δ(ens−SEP) AUROC [95% CI] |
+|---|---|---|---|
+| Mistral (N=1000) | 0.866 / 0.608 | 0.832 | **+0.035 [+0.006,+0.063] — beats** |
+| DeepSeek (N=1000) | 0.869 / 0.711 | 0.805 | **+0.065 [+0.041,+0.088] — beats** |
+| Llama-3 (N=200) | 0.892 / 0.672 | 0.839 | +0.054 [−0.003,+0.115] (ρ beats, AUROC on par) |
+
+**The label-free ensemble (aligned-z + `q_resp_only`, no target SE labels) matches or beats the target's
+OWN supervised SEP for every model** — the thesis result, now at full power on 3 targets + the reference.
+Mechanistically robust even for DeepSeek, whose hidden geometry barely transfers (CKA 0.25): the text arm
+carries it and aligned-z still adds via shared difficulty. *(SEP-AUROC fix: the within-split SEP AUROC was
+first scored over all rows incl. train — 0.977; corrected to eval-only, 0.839; deltas were always vs the
+correct test-only SEP.)* JSONs: `procrustes_e30_*.json`; table `procrustes_e30_master_table.json`.
+
+---
+
 ## Where we stand (2026-08-12)
 
 **Cross-LLM transfer characterised end-to-end (E20–E27).** Text transfers directly; **raw** hidden

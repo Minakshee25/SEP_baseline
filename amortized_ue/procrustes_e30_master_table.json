@@ -1,0 +1,179 @@
+{
+  "note": "E30 full-power four-model master table. Reference = Llama-2-7b-chat.",
+  "family_vs_reference": {
+    "Mistral-7B-Instruct-v0.2": "different lineage",
+    "deepseek-llm-7b-chat": "different lineage",
+    "Meta-Llama-3-8B-Instruct": "SAME family (Meta Llama)"
+  },
+  "alignment_E24_E25": {
+    "Mistral->Llama-2 (N=1000)": {
+      "source": "Mistral-7B-Instruct-v0.2",
+      "target": "Llama-2-7b-chat",
+      "position": "TBG",
+      "N": 1000,
+      "floor": 0.037253962381130525,
+      "control": 0.557265111929483,
+      "aligned": 0.5895320977182497,
+      "skyline": 0.6322504818552885,
+      "recovery": 0.9282039764286483,
+      "cka": 0.7949274377324733,
+      "increment": 0.03236046478409433,
+      "ci": [
+        0.0009606158638734958,
+        0.06338675590837463
+      ],
+      "significant": true
+    },
+    "DeepSeek->Llama-2 (N=1000)": {
+      "source": "deepseek-llm-7b-chat",
+      "target": "Llama-2-7b-chat",
+      "position": "SLT",
+      "N": 1000,
+      "floor": -0.04014955619721431,
+      "control": 0.6140682511967963,
+      "aligned": 0.6232497144696365,
+      "skyline": 0.6605871299453543,
+      "recovery": 0.9467169106255109,
+      "cka": 0.24790506755398453,
+      "increment": 0.008727397650627073,
+      "ci": [
+        -0.027642865855145332,
+        0.04416803949181119
+      ],
+      "significant": false
+    },
+    "Llama-2->DeepSeek (N=1000)": {
+      "source": "Llama-2-7b-chat",
+      "target": "deepseek-llm-7b-chat",
+      "position": "SLT",
+      "N": 1000,
+      "floor": 0.01854543375180962,
+      "control": 0.5053280290896544,
+      "aligned": 0.5115090517542616,
+      "skyline": 0.5423114209564656,
+      "recovery": 0.9411905890136233,
+      "cka": 0.27322776516588076,
+      "increment": 0.0064701738731608,
+      "ci": [
+        -0.03174642971390215,
+        0.04363464273990021
+      ],
+      "significant": false
+    },
+    "Llama-3->Llama-2 (N=200)": {
+      "source": "Meta-Llama-3-8B-Instruct",
+      "target": "Llama-2-7b-chat",
+      "position": "TBG",
+      "N": 200,
+      "floor": 0.07391227120212812,
+      "control": 0.5080746513761,
+      "aligned": 0.5785148900123104,
+      "skyline": 0.6234416155322448,
+      "recovery": 0.9182450837548982,
+      "cka": 0.8713884893784049,
+      "increment": 0.06875913543164433,
+      "ci": [
+        -0.0035231785861078333,
+        0.1426341599366169
+      ],
+      "significant": false
+    },
+    "Llama-2->Llama-3 (N=200)": {
+      "source": "Llama-2-7b-chat",
+      "target": "Meta-Llama-3-8B-Instruct",
+      "position": "TBG",
+      "N": 200,
+      "floor": 0.18451677574171527,
+      "control": 0.5868978972440345,
+      "aligned": 0.5635499983509089,
+      "skyline": 0.5853315991548673,
+      "recovery": 0.945656698476178,
+      "cka": 0.8723885845313264,
+      "increment": -0.022761239776327536,
+      "ci": [
+        -0.1065513858179696,
+        0.05565509581279997
+      ],
+      "significant": false
+    }
+  },
+  "ensemble_vs_SEP_E30": {
+    "Mistral-7B-Instruct-v0.2 (N=1000)": {
+      "regime": "fit n2000 -> eval fresh n1000 (N=1000)",
+      "N": 1000,
+      "sep_layer": [
+        "TBG",
+        30
+      ],
+      "sep_auroc": 0.8318692335140094,
+      "ensemble_auroc": 0.8660504420618602,
+      "ensemble_spearman": 0.6084944251686961,
+      "delta_auroc": {
+        "mean": 0.03450784902593551,
+        "lo95": 0.00568045921501496,
+        "hi95": 0.0633196465449948
+      },
+      "delta_spearman": {
+        "mean": 0.06774741149656148,
+        "lo95": 0.0237516304118581,
+        "hi95": 0.10896195350122939
+      },
+      "beats_auroc": true,
+      "beats_spearman": true
+    },
+    "deepseek-llm-7b-chat (N=1000)": {
+      "regime": "fit n2000 -> eval fresh n1000 (N=1000)",
+      "N": 1000,
+      "sep_layer": [
+        "TBG",
+        28
+      ],
+      "sep_auroc": 0.8046294626018793,
+      "ensemble_auroc": 0.8692767182144672,
+      "ensemble_spearman": 0.7109704837484423,
+      "delta_auroc": {
+        "mean": 0.0645622711619334,
+        "lo95": 0.041256354496824715,
+        "hi95": 0.08783621399647419
+      },
+      "delta_spearman": {
+        "mean": 0.1278084235643031,
+        "lo95": 0.09165597239843555,
+        "hi95": 0.1666247838202817
+      },
+      "beats_auroc": true,
+      "beats_spearman": true
+    },
+    "Meta-Llama-3-8B-Instruct (N=200)": {
+      "regime": "fit+eval n2000 (eval=test split, N=200)",
+      "N": 200,
+      "sep_layer": [
+        "TBG",
+        31
+      ],
+      "sep_auroc": 0.8394377618597108,
+      "ensemble_auroc": 0.8916745506149479,
+      "ensemble_spearman": 0.6715958230235733,
+      "delta_auroc": {
+        "mean": 0.05360351047318869,
+        "lo95": -0.0033790914859461534,
+        "hi95": 0.11455039525691707
+      },
+      "delta_spearman": {
+        "mean": 0.15569577447280478,
+        "lo95": 0.06863665651662555,
+        "hi95": 0.2578671576177508
+      },
+      "beats_auroc": false,
+      "beats_spearman": true
+    }
+  },
+  "scope_flags": [
+    "E25 increment CI includes 0 for [DeepSeek->Llama-2 (N=1000)]: +0.009 [-0.028,+0.044] (N=1000).",
+    "E25 increment CI includes 0 for [Llama-2->DeepSeek (N=1000)]: +0.006 [-0.032,+0.044] (N=1000).",
+    "E25 increment CI includes 0 for [Llama-3->Llama-2 (N=200)]: +0.069 [-0.004,+0.143] (N=200).",
+    "E25 increment CI includes 0 for [Llama-2->Llama-3 (N=200)]: -0.023 [-0.107,+0.056] (N=200).",
+    "Llama-3 is limited to N=200 (only n2000 exists, no fresh n1000) -> its increment CI is inherently wider.",
+    "KEY: family is at best a WEAK predictor of alignability. CKA ranks Llama-3 (same family) 0.87 > Mistral (different) 0.80 >> DeepSeek (different) 0.25 -- Llama-3 is highest, but Mistral is close behind and DeepSeek is a striking low-CKA OUTLIER despite matching 4096 dims. The genuine model-specific increment tracks CKA (Mistral +0.032 sig; DeepSeek ~0), NOT the ~0.92-0.95 recovery, which is high for ALL pairs because it is dominated by shared question-difficulty."
+  ]
+}
