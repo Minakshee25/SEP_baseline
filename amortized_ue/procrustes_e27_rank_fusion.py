@@ -58,19 +58,38 @@ def ecdf(train_vals):
     return lambda x: np.searchsorted(s, np.asarray(x, dtype=float), side="right") / len(s)
 
 
-def score_block(name, z_eval, qr_eval, y_eval, z_tr, qr_tr, s_y_tr, out):
-    """All combinations on one eval set, using ID-train normalizers (z_tr/qr_tr) fit label-free."""
+def boot_delta(pa, pb, y_raw, ybin, valid, B=1000, seed=0):
+    """Paired bootstrap of metric(pa)-metric(pb) over eval rows (E25/E26 convention): Spearman +
+    AUROC, each returned as (mean, lo95, hi95)."""
+    rng = np.random.default_rng(seed); n = len(y_raw)
+    ds, da = [], []
+    for _ in range(B):
+        idx = rng.integers(0, n, n)
+        ds.append(rho(pa[idx], y_raw[idx]) - rho(pb[idx], y_raw[idx]))
+        vi = idx[valid[idx]]                                                      # resampled valid rows
+        if len(np.unique(ybin[vi])) == 2:
+            da.append(roc_auc_score(ybin[vi], pa[vi]) - roc_auc_score(ybin[vi], pb[vi]))
+    ci = lambda d: (float(np.mean(d)), float(np.percentile(d, 2.5)), float(np.percentile(d, 97.5)))
+    return {"spearman": ci(ds), "auroc": ci(da)}
+
+
+def score_block(name, z_eval, qr_eval, y_eval, z_tr, qr_tr, s_y_tr, out, floor_eval=None):
+    """All combinations on one eval set, using ID-train normalizers (z_tr/qr_tr) fit label-free.
+    floor_eval (optional): raw (unaligned) source states through the target ridge -- the NO-W floor."""
     thr = best_split(torch.tensor(y_eval)); yb = binarize_entropy(torch.tensor(y_eval), thr).numpy(); v = yb >= 0
     def M(p): return rho(p, y_eval), roc_auc_score(yb[v], p[v])
     zs = lambda x, ref: (x - ref.mean()) / (ref.std() + 1e-8)                     # standardise by TRAIN preds
     cdf_z, cdf_r = ecdf(z_tr), ecdf(qr_tr)                                        # CDF fit on TRAIN preds (label-free)
-    combos = {
+    combos = {}
+    if floor_eval is not None:                                                    # floor: raw z, NO Procrustes W
+        combos["floor (raw z, NO W)"] = floor_eval
+    combos.update({
         "aligned-z ridge": z_eval,
         "q_resp_only (text)": qr_eval,
         "avg (raw)": 0.5 * (z_eval + qr_eval),
         "avg (standardized)": 0.5 * (zs(z_eval, z_tr) + zs(qr_eval, qr_tr)),
         "RANK FUSION (empirical-CDF avg)": 0.5 * (cdf_z(z_eval) + cdf_r(qr_eval)),
-    }
+    })
     if s_y_tr is not None:                                                        # label-fitted combiner (uses labels)
         meta = Ridge(alpha=1.0).fit(np.column_stack([z_tr, qr_tr]), s_y_tr)
         combos["ridge combiner (USES labels)"] = meta.predict(np.column_stack([z_eval, qr_eval]))
@@ -83,6 +102,18 @@ def score_block(name, z_eval, qr_eval, y_eval, z_tr, qr_tr, s_y_tr, out):
         sp, au = M(p); res[k] = {"spearman": sp, "auroc": au}
         tag = "" if "USES labels" in k else "  (label-free)"
         print(f"  {k:36s}{sp:>+10.3f}{au:>9.3f}{tag}")
+    # paired bootstrap: RANK FUSION - avg(standardized), Spearman + AUROC, 95% CI
+    bd = boot_delta(combos["RANK FUSION (empirical-CDF avg)"], combos["avg (standardized)"], y_eval, yb, v)
+    res["_bootstrap_rankfusion_minus_stdavg"] = {
+        "spearman": {"mean": bd["spearman"][0], "lo95": bd["spearman"][1], "hi95": bd["spearman"][2]},
+        "auroc": {"mean": bd["auroc"][0], "lo95": bd["auroc"][1], "hi95": bd["auroc"][2]}}
+    print("  " + "-" * 74)
+    print(f"  Δ(rank fusion − std-avg)  Spearman {bd['spearman'][0]:+.3f} [{bd['spearman'][1]:+.3f}, {bd['spearman'][2]:+.3f}]"
+          f"   AUROC {bd['auroc'][0]:+.3f} [{bd['auroc'][1]:+.3f}, {bd['auroc'][2]:+.3f}]")
+    beats = bd["spearman"][1] > 0 or bd["auroc"][1] > 0
+    print(f"  -> rank fusion {'BEATS' if beats else 'TIES'} std-avg "
+          f"(Spearman CI {'excludes' if bd['spearman'][1] > 0 else 'includes'} 0; "
+          f"AUROC CI {'excludes' if bd['auroc'][1] > 0 else 'includes'} 0)")
     print("=" * 78)
     out[name] = res
     return res
@@ -127,8 +158,11 @@ def run(source="Mistral-7B-Instruct-v0.2", target="Llama-2-7b-chat", dataset="tr
         z_o = zpred(osh["TBG"][tbg], osh["SLT"][slt])
         qr_ood = arm_preds("q_resp_only", source, ood_dataset, ood_num_samples)
         qr_o = np.array([qr_ood[i] for i in o_ids])
+        # floor control: raw (unaligned) Mistral squad states through the SAME Llama-2 ridge, NO W --
+        # isolates whether the trivia-fit Procrustes W is doing the work on the shifted (squad) domain.
+        floor_o = R.predict(sc.transform(np.concatenate([osh["TBG"][tbg], osh["SLT"][slt]], 1)))
         # s_y_tr=None -> label-free fusions only OOD (a label-fitted combiner would need OOD labels).
-        score_block(f"OOD {ood_dataset} n{ood_num_samples}", z_o, qr_o, oy, z_tr, qr_tr, None, out)
+        score_block(f"OOD {ood_dataset} n{ood_num_samples}", z_o, qr_o, oy, z_tr, qr_tr, None, out, floor_eval=floor_o)
     else:
         out["OOD_squad"] = {"status": f"SKIPPED — no {source} {ood_dataset} dataset on disk ({ood_dir}). "
                             "aligned-z is Mistral->Llama-2 so it needs Mistral squad hidden states, which "

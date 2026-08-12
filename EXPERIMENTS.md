@@ -928,21 +928,26 @@ it needs Mistral squad hidden states) to test shape-robustness under distributio
 
 | fusion (all label-free) | ID trivia_qa fresh n1000 | **OOD squad n1000** |
 |---|---|---|
+| floor (raw z, **NO W**) | — | −0.026 / 0.491 |
 | aligned-z ridge | 0.580 / 0.850 | 0.481 / 0.743 |
 | q_resp_only (text) | 0.587 / 0.852 | 0.505 / 0.753 |
 | avg (raw) | 0.602 / 0.862 | 0.526 / 0.764 |
 | avg (standardized) | 0.609 / 0.867 | 0.538 / 0.770 |
-| **RANK FUSION (empirical-CDF avg)** | 0.608 / 0.866 | **0.541 / 0.771** |
+| **RANK FUSION (empirical-CDF avg)** | 0.608 / 0.866 | 0.541 / 0.771 |
 
 (Spearman / AUROC; ID `best_split` 0.814, OOD 1.233 — squad SE is higher, mean_acc 0.228 vs trivia 0.649,
 a real shift.)
 
-**Findings.** (1) **Rank fusion is the best OOD combiner** — 0.541/0.771, edging the standardized average
-(0.538/0.770) and clearly above the raw average (0.526/0.764) on both metrics: the ID-train CDF
-normaliser survives the trivia→squad shift better than mean/std standardisation (its predicted
-advantage). (2) **On ID it ties** the other fusions (0.608/0.866) — no in-distribution cost. (3) The
-**ensemble gain is robust to shift** — every label-free fusion still beats both components OOD (~0.54 vs
-0.48/0.51). So rank fusion is the label-free combiner of choice: **ID-equivalent, OOD-best.** Data: built
+**Findings.** (1) **Rank fusion TIES the standardized average on OOD** — paired bootstrap (1000
+resamples, E25/E26 convention) of Δ(rank fusion − std-avg): **Spearman +0.002 [−0.000, +0.005], AUROC
++0.001 [−0.001, +0.003]**, both CIs include 0. So the earlier "best OOD combiner" read was noise; rank
+fusion is a *valid, tied* label-free combiner, not a better one. (Its CDF normaliser is at least as
+shape-robust as mean/std — no ID cost either, 0.608/0.866 tie.) (2) **Floor control confirms the
+trivia-fit W transfers cross-domain**: raw (unaligned) Mistral squad states through the same Llama-2
+ridge (NO W) are at **chance (−0.026 / 0.491)**, while applying the *trivia-fit* Procrustes W lifts it to
+**0.481 / 0.743** — so the alignment learned on trivia still aligns Mistral→Llama-2 geometry on the
+shifted squad domain; **cross-domain transfer of W is confirmed.** (3) The **ensemble gain is robust to
+shift** — every label-free fusion still beats both components OOD (~0.54 vs 0.48/0.51). Data: built
 `Mistral-7B-Instruct-v0.2_squad_n1000` (on /vol/bitbucket + W&B). JSON:
 `procrustes_e27_rank_fusion.json`.
 
