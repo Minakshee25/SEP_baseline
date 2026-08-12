@@ -953,9 +953,13 @@ shift** — every label-free fusion still beats both components OOD (~0.54 vs 0.
 
 ---
 
-## Where we stand (2026-07-29)
+## Where we stand (2026-08-12)
 
-**Cross-LLM transfer is DONE (E20): the thesis holds — text transfers, hidden states do not.**
+**Cross-LLM transfer characterised end-to-end (E20–E27).** Text transfers directly; **raw** hidden
+states do not, but they transfer after a **label-free Procrustes alignment** (mostly shared difficulty +
+a small genuine model-specific increment). The best **label-free** cross-model uncertainty estimator is
+**on par with the supervised SEP baseline** on AUROC, using **no target SE labels**, and the alignment
+map even **transfers across domains** (trivia→squad).
 
 **In-distribution result (reference model, saved, all 5 arms — Spearman / AUROC):**
 
@@ -1011,6 +1015,20 @@ shift** — every label-free fusion still beats both components OOD (~0.54 vs 0.
    (`resp_only` 0.455 < 0.531). Needs paired anchor forward passes to fit W (label-free, not sample-free);
    the text arm needs nothing.
 
-**Next:** the Procrustes alignment experiment (can z be *made* to transfer?) and/or multi-target
-(leave-one-out) training; compile `amortized_ue/RESULTS.md`. **The consolidated to-do list lives in
-`amortized_ue/CLAUDE.md`.**
+7. **⭐ Label-free fusions + OOD robustness + cross-domain W (E27 rank-fusion addendum).** Three
+   label-free combiners of aligned-z + `q_resp_only` — raw average, standardized average, and
+   **rank fusion** (empirical-CDF rank average, CDF fit on train predictions only) — all land ~0.61 /
+   0.867 on ID. **Rank fusion TIES the standardized average** (paired bootstrap Δ: Spearman +0.002
+   [−0.000, +0.005], AUROC +0.001 [−0.001, +0.003], both CIs include 0 — an earlier "best OOD" read was
+   noise; it's a valid *tied* combiner, no ID cost). **Under a real trivia→squad shift** (best_split
+   0.814→1.233, mean_acc 0.649→0.228) everything drops ~0.10 Spearman but the **ensemble gain survives**
+   — every fusion still beats both components OOD (~0.54 vs 0.48/0.51). **Floor control confirms the
+   trivia-fit Procrustes W transfers CROSS-DOMAIN:** raw (unaligned) Mistral-squad states through the
+   Llama-2 ridge are at chance (−0.026 / 0.491 AUROC); the *trivia-fit* W lifts that to 0.481 / 0.743 on
+   squad — the alignment learned on one dataset still aligns the geometry on a shifted one. (Built
+   `Mistral-…_squad_n1000` for this OOD test.)
+
+**Next (Procrustes line E24–E27 is DONE):** a 3rd-family alignment (build Llama-3 n2000 → replicate
+E24/E25 controls + E27 SEP comparison on Llama-3); an **anchor-count efficiency sweep** for W (how few
+paired anchors suffice — quantifies the only label-free cost); multi-target / leave-one-out proxy
+training; and compile `amortized_ue/RESULTS.md`. **Consolidated to-do list: `amortized_ue/CLAUDE.md`.**
