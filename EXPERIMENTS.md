@@ -918,6 +918,34 @@ a little only via late fusion (gate/c), and the question earns its keep only whe
 Result JSONs: `procrustes_e27{a_vs_text,a_robustness,b_proxy_vs_ridge,_zresp_gate,c_zresp_arm,
 d_resp_only,_auroc,_labelfree_ensemble}.json`.
 
+## E27 (addendum) — rank-fusion variant + squad OOD shape-robustness
+
+Adds a **rank-fusion** label-free combiner to the E27 ensemble (`procrustes_e27_rank_fusion.py`, additive):
+map each predictor (aligned-z ridge, `q_resp_only`) to normalized ranks via its **empirical CDF fit on
+TRAIN predictions only** (no labels), average the two. Reported next to the raw and standardized
+averages; also run on **squad OOD** (built Mistral squad n1000 for this — aligned-z is Mistral→Llama-2 so
+it needs Mistral squad hidden states) to test shape-robustness under distribution shift.
+
+| fusion (all label-free) | ID trivia_qa fresh n1000 | **OOD squad n1000** |
+|---|---|---|
+| aligned-z ridge | 0.580 / 0.850 | 0.481 / 0.743 |
+| q_resp_only (text) | 0.587 / 0.852 | 0.505 / 0.753 |
+| avg (raw) | 0.602 / 0.862 | 0.526 / 0.764 |
+| avg (standardized) | 0.609 / 0.867 | 0.538 / 0.770 |
+| **RANK FUSION (empirical-CDF avg)** | 0.608 / 0.866 | **0.541 / 0.771** |
+
+(Spearman / AUROC; ID `best_split` 0.814, OOD 1.233 — squad SE is higher, mean_acc 0.228 vs trivia 0.649,
+a real shift.)
+
+**Findings.** (1) **Rank fusion is the best OOD combiner** — 0.541/0.771, edging the standardized average
+(0.538/0.770) and clearly above the raw average (0.526/0.764) on both metrics: the ID-train CDF
+normaliser survives the trivia→squad shift better than mean/std standardisation (its predicted
+advantage). (2) **On ID it ties** the other fusions (0.608/0.866) — no in-distribution cost. (3) The
+**ensemble gain is robust to shift** — every label-free fusion still beats both components OOD (~0.54 vs
+0.48/0.51). So rank fusion is the label-free combiner of choice: **ID-equivalent, OOD-best.** Data: built
+`Mistral-7B-Instruct-v0.2_squad_n1000` (on /vol/bitbucket + W&B). JSON:
+`procrustes_e27_rank_fusion.json`.
+
 ---
 
 ## Where we stand (2026-07-29)

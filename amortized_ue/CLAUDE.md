@@ -235,6 +235,9 @@ beats the 3B proxy on aligned z (0.580 vs best arm 0.545); **late fusion (stacki
 (a trained `z_resp` arm = 0.523 < pure z; adding text to z-arms hurts); the question helps only when
 there's no z (`resp_only` 0.455 < `q_resp_only` 0.531). New arms `z_resp`/`resp_only` added to
 `stage2/train.py`; checkpoints in `runs/E27_{zresp,resp_only}_arm/`. Full arc in EXPERIMENTS.md E27.
+**Rank-fusion addendum** (`procrustes_e27_rank_fusion.py`): empirical-CDF rank average (label-free) ties
+the other fusions on ID (0.608/0.866) and is the **best OOD combiner on squad** (0.541/0.771 > std-avg
+0.538) — CDF normaliser is shape-robust under shift. Built `Mistral-..._squad_n1000` for this OOD test.
 
 **Storage:** all Stage-1 datasets + proxy checkpoints live on `/vol/bitbucket` (source of truth) AND
 W&B. `push_to_wandb` defaults True (smokes excluded); dataset artifact names auto-distinct per

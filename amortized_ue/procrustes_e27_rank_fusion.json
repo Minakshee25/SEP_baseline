@@ -1,0 +1,50 @@
+{
+  "ID trivia_qa fresh n1000": {
+    "aligned-z ridge": {
+      "spearman": 0.5803613798775688,
+      "auroc": 0.849965167451107
+    },
+    "q_resp_only (text)": {
+      "spearman": 0.5866226235188732,
+      "auroc": 0.8524515884208679
+    },
+    "avg (raw)": {
+      "spearman": 0.6015772821049236,
+      "auroc": 0.8616949574929627
+    },
+    "avg (standardized)": {
+      "spearman": 0.6091955513436877,
+      "auroc": 0.8666791270906609
+    },
+    "RANK FUSION (empirical-CDF avg)": {
+      "spearman": 0.6084944251686961,
+      "auroc": 0.8660504420618602
+    },
+    "ridge combiner (USES labels)": {
+      "spearman": 0.6083449930652319,
+      "auroc": 0.8658691995310349
+    }
+  },
+  "OOD squad n1000": {
+    "aligned-z ridge": {
+      "spearman": 0.48124101611173575,
+      "auroc": 0.7426577233921965
+    },
+    "q_resp_only (text)": {
+      "spearman": 0.5045229940999996,
+      "auroc": 0.7527166758152259
+    },
+    "avg (raw)": {
+      "spearman": 0.5264387200428932,
+      "auroc": 0.7643509655077004
+    },
+    "avg (standardized)": {
+      "spearman": 0.5383335943251483,
+      "auroc": 0.7703488501823017
+    },
+    "RANK FUSION (empirical-CDF avg)": {
+      "spearman": 0.5407390397838543,
+      "auroc": 0.7712748628831796
+    }
+  }
+}
