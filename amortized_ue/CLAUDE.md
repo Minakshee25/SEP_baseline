@@ -351,9 +351,10 @@ cross-domain. See EXPERIMENTS.md E24–E27 + "Where we stand" conclusions 5–7.
   Llama-3 → multi-target training induces a model-agnostic hidden code. Both n2000 sets exist.
 
 **Pending / carried over:**
-3. **Compile & VERIFY the complete "all models + results" record** → commit as `amortized_ue/RESULTS.md`.
-   A draft table exists (5 reference arms; superseded/diagnostic configs; ridge, TF-IDF, SEP baselines;
-   ceilings) — cross-check every `runs/` dir + E0–E20 so **no trained model is missing** before committing.
+3. **(Partly done)** `amortized_ue/RESULTS.md` now holds the **four-model cross-LLM picture (E20–E30)**:
+   reference single-LLM arms, cross-LLM transfer, alignment recovery/CKA/increment, and the full-power
+   label-free-ensemble-vs-SEP table. **Still open:** fold in the exhaustive single-LLM ablation/diagnostic
+   configs (TF-IDF baseline, ceilings, superseded runs) by cross-checking every `runs/` dir + E0–E19.
 4. **Proxy learning curve** (`stage2/proxy_learning_curve.py --sizes 250,500,1000,1440 --seeds 3`) —
    confirm the *proxy* (not just ridge) plateaus with data. Was launched then killed by the FS outage.
 5. **SEP-comparison write-up** — the honest framing (proxy ~ comparable to a SEP-style probe on the
