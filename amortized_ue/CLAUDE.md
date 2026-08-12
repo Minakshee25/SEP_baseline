@@ -157,7 +157,13 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (2026-07-28)
+## Current state (2026-08-12)
+
+**Target LLMs (4):** Llama-2-7b-chat (reference), Mistral-7B-Instruct-v0.2, Meta-Llama-3-8B-Instruct,
+and **DeepSeek-LLM-7B-Chat (E28, NEW)**. Per-target z-layers (via `linear_ceiling_probe.py`, not the
+3B sweep): Llama-2 **TBG:22/SLT:15**, Mistral **TBG:31/SLT:20**, **DeepSeek TBG:28/SLT:16** (single
+best layer SLT:16, ID-test Spearman 0.680; 30-layer model → Llama-2's layers do not carry over;
+`scratch_xllm/deepseek_layer_pick.json`).
 
 **Stage-1 datasets (target LLM Llama-2-7b-chat):** trivia_qa n400 (`stage1_records:v0`), **n2000**
 (`stage1_records_n2000`; split 1440/360/200 seed 42; the ID dataset), squad n1000 (OOD; mean_acc
@@ -165,7 +171,10 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 **n200** on the exact Llama-2 held-out test ids (`Meta-Llama-3-8B-Instruct_trivia_qa_n200_full`;
 mean_acc 0.685 / mean_CAE 0.448) — built with `stage1.py --only_ids` (reproduces the seed-10 n2000
 selection, keeps the 200 test ids). A Llama-2 `n200_full` copy of the same ids exists as the eval
-control.
+control. **DeepSeek-LLM-7B-Chat Stage-1 (E28):** trivia_qa **n1000** on the E23 fresh held-out ids
+(`deepseek-llm-7b-chat_trivia_qa_n1000_full`; mean_acc 0.527 / mean_CAE 0.804; on /vol/bitbucket +
+W&B `stage1_records_deepseek-llm-7b-chat_trivia_qa_n1000`, run `c6ijifxe`) — same 1000 ids as the E23
+Llama-2/Mistral fresh batches, zero overlap. No downstream analysis yet (target onboarded only).
 
 **Cross-LLM transfer (E20) — the thesis result.** Frozen Llama-2 proxy → Llama-3-8B, 5-seed Spearman
 (control = same harness on Llama-2's own 200, reproduces ID to 4 sig figs):

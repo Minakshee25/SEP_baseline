@@ -198,6 +198,23 @@ class HuggingfaceModel(BaseModel):
                 **kwargs,
             )
 
+        elif 'deepseek' in model_name.lower():
+            # blocks-execution (mn1025, 2026-08): 4th cross-LLM target
+            # deepseek-ai/deepseek-llm-7b-chat -- a plain LlamaForCausalLM (30 layers,
+            # 4096-dim) but its repo id lives under the deepseek-ai org and its name
+            # contains no 'llama', so it needs its own load branch. Same minimal
+            # AutoTokenizer/AutoModelForCausalLM pattern as Mistral above; no SE/clustering/
+            # probe logic touched. Loads in se_probes_llama3 (transformers 4.44.2).
+            model_id = f'deepseek-ai/{model_name}'
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_id, device_map='auto', token_type_ids=None,
+                clean_up_tokenization_spaces=False)
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                device_map='auto',
+                max_memory={0: '80GIB'},
+            )
+
         elif 'falcon' in model_name:
             model_id = f'tiiuae/{model_name}'
             self.tokenizer = AutoTokenizer.from_pretrained(

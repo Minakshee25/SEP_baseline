@@ -953,6 +953,54 @@ shift** — every label-free fusion still beats both components OOD (~0.54 vs 0.
 
 ---
 
+## E28 — Add a 4th target LLM: DeepSeek-LLM-7B-Chat (Stage-1 dataset built) — ✅ pipeline clean, layers re-picked
+
+**Goal (infrastructure, no downstream analysis yet):** onboard a 4th cross-LLM target so the
+alignment / transfer line (E24–E27) can later be extended beyond the Llama-2 ↔ Mistral pair.
+DeepSeek-LLM-7B-Chat (`deepseek-ai/deepseek-llm-7b-chat`) is a plain `LlamaForCausalLM` but a
+distinct pre-training lineage — **30 layers, 4096-dim** (matches the 4096 of Llama-2/Mistral, so
+z-arms are dimension-compatible for future alignment).
+
+**Code (additive, blocks-execution only; no SE/clustering/probe logic touched):** (1) a new load
+branch in `huggingface_models.py` (`elif 'deepseek' in model_name.lower()` → `deepseek-ai/{name}`,
+same minimal AutoTokenizer/AutoModelForCausalLM pattern as the Mistral branch); (2) one entry added
+to the `init_model` dispatch whitelist in `utils/utils.py` (`or 'deepseek' in mn.lower()`) so the
+new name reaches the load branch. Loads in **`se_probes_llama3`** (transformers 4.44.2). No decode
+quirk (unlike Llama-3's " ?" issue): the `startswith` fast-path holds; `pad_token_id` auto-sets to
+eos `100001`.
+
+**Smoke (3 records, `smoke_deepseek.sh`):** answers extract cleanly and stop correctly — e.g.
+"Donald Trump" (acc 1.0), "moldova"/"vauxhall" — no run-on, no leaked special tokens; hidden states
+`(31, 1, 4096)` = embedding + 30 layers; SE labels non-degenerate (CAE 0.33 / 0.67, n_clusters 2).
+mean_acc 0.333, mean_CAE 0.676.
+
+**Stage-1 build (E23 fresh ids, `stage1.py --only_ids scratch_xllm/e23_fresh_ids.txt`, resumable):**
+**`deepseek-llm-7b-chat_trivia_qa_n1000_full`** — 1000/1000 records, **mean_acc 0.527**,
+**mean_CAE 0.8035**, elapsed ~70 min (GPU 1). On /vol/bitbucket + W&B (artifact
+`stage1_records_deepseek-llm-7b-chat_trivia_qa_n1000`, run `c6ijifxe`, 974 MB). Same 1000 held-out
+trivia_qa ids as the E23 Llama-2/Mistral fresh batches → directly comparable, zero overlap with any
+earlier build. (Context: mean_acc 0.527 sits between Llama-2's ~0.65 and Mistral's fresh-batch level;
+mean_CAE 0.80 is a moderately higher-entropy target than Llama-2's ~0.59.)
+
+**z-layer re-pick (`linear_ceiling_probe.py`, ridge → continuous SE, ID test Spearman; no OOD — no
+DeepSeek squad build yet; `deepseek_layer_pick.json`):** Llama-2's TBG:22/SLT:15 do **not** carry
+over (30-layer model, signal sits deeper). Per-position ID-test-Spearman argmax (the Mistral/Llama-2
+convention):
+
+| position | chosen layer | ID-test Spearman | notes |
+|---|---|---|---|
+| **TBG** | **28** | 0.670 | broad plateau L24–28 |
+| **SLT** | **16** | 0.680 | sharp peak L15–17; global best |
+
+→ downstream z-input for DeepSeek is **`--z_inputs TBG:28,SLT:16`**. (Ridge ID ceiling ≈ 0.68, in
+line with Llama-2/Mistral ~0.62–0.64.)
+
+**No downstream analysis run yet** (no proxy training, no alignment/transfer eval) — this entry only
+establishes the target + dataset + chosen layers. Next candidates: replicate the E24/E25 Procrustes
+controls + the E27 SEP comparison with DeepSeek as a 3rd alignment target.
+
+---
+
 ## Where we stand (2026-08-12)
 
 **Cross-LLM transfer characterised end-to-end (E20–E27).** Text transfers directly; **raw** hidden
