@@ -1,0 +1,42 @@
+{
+  "source": "Llama-2-7b-chat",
+  "target": "deepseek-llm-7b-chat",
+  "dataset": "trivia_qa",
+  "num_samples": 1000,
+  "fresh_num_samples": null,
+  "position": "SLT",
+  "L_a_target_ridge": 16,
+  "L_m_source_skyline": 30,
+  "target_in_dist_ridge": 0.6796811061988146,
+  "alpha_target_ridge": 10000.0,
+  "alpha_source_ridge": 10000.0,
+  "evals": [
+    {
+      "label": "N=100 (n1000 test split)",
+      "n": 100,
+      "floor": 0.07559604051591746,
+      "control_mechA": 0.5074176667302565,
+      "aligned": 0.5324429950203994,
+      "skyline": 0.6455081049341773,
+      "target_in_dist": null,
+      "ctrl_random_orthogonal": [
+        0.0864294888418206,
+        0.15585859669841307
+      ],
+      "gap_recovered_frac": 0.8016095517662193,
+      "aligned_minus_control": {
+        "mean": 0.0233203099528808,
+        "lo95": -0.1245801949961761,
+        "hi95": 0.1697596469988384,
+        "frac_positive": 0.622
+      },
+      "reconstruction": {
+        "cosine_before": -0.0016515630995854735,
+        "cosine_after": 0.24873030185699463,
+        "recon_err_before": 1.0713263016324004,
+        "recon_err_after": 0.9837115998320568,
+        "cka": 0.486241420226868
+      }
+    }
+  ]
+}

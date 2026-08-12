@@ -95,23 +95,27 @@ def bootstrap_diff(pred_a, pred_b, y, B=2000, seed=0):
 
 
 def run(source="Mistral-7B-Instruct-v0.2", target="Llama-2-7b-chat",
-        dataset="trivia_qa", num_samples=2000, fresh_num_samples=None, out=None):
-    # ---- load paired TBG states + SE labels (join by id, same order) ----------
+        dataset="trivia_qa", num_samples=2000, fresh_num_samples=None, out=None,
+        position="TBG", source_layer=None, target_layer=None):
+    # `position` (default "TBG" -> exact E24 behaviour) selects which stored position to align on;
+    # `source_layer`/`target_layer` optionally FORCE the skyline / ridge layer (else auto by val
+    # Spearman). Additive: with the defaults this reproduces the original TBG-auto E24/E25 run.
+    # ---- load paired states at `position` + SE labels (join by id, same order) ----------
     scfg = Stage1Config(model_name=source, dataset=dataset, num_samples=num_samples)
     tcfg = Stage1Config(model_name=target, dataset=dataset, num_samples=num_samples)
-    s_hidden, s_y, s_ids = load_matrix(scfg, ["TBG"])
-    t_hidden, t_y, t_ids = load_matrix(tcfg, ["TBG"])
+    s_hidden, s_y, s_ids = load_matrix(scfg, [position])
+    t_hidden, t_y, t_ids = load_matrix(tcfg, [position])
     assert s_ids == t_ids, "source/target ids differ -- datasets are not the same questions"
-    S, T = s_hidden["TBG"], t_hidden["TBG"]                # [L+1, N, H] each
+    S, T = s_hidden[position], t_hidden[position]         # [L+1, N, H] each
     tr, va, te = splits(len(s_ids))
     n_layers, N, H = S.shape
     print(f"paired N={N} (train {len(tr)}/val {len(va)}/test {len(te)}), layers={n_layers}, H={H}")
-    print(f"source={source}  target={target}  (TBG only)\n")
+    print(f"source={source}  target={target}  (position={position})\n")
 
-    # ---- pick TBG layers: target's ridge layer L_a (for floor/aligned); source's best L_m (skyline)
-    L_a, _ = best_tbg_layer(T, t_y, tr, va)               # target (Llama-2) ridge layer
-    L_m, _ = best_tbg_layer(S, s_y, tr, va)               # source (Mistral) skyline layer
-    print(f"target ridge TBG layer L_a = {L_a}   source skyline TBG layer L_m = {L_m}")
+    # ---- pick layers: target's ridge layer L_a (for floor/aligned); source's best L_m (skyline)
+    L_a = target_layer if target_layer is not None else best_tbg_layer(T, t_y, tr, va)[0]  # target ridge
+    L_m = source_layer if source_layer is not None else best_tbg_layer(S, s_y, tr, va)[0]  # source skyline
+    print(f"target ridge {position} layer L_a = {L_a}   source skyline {position} layer L_m = {L_m}")
 
     # ---- target frozen ridge probe at L_a (fit target TBG -> target SE) --------
     R_L, sc_L, a_L, _ = fit_probe(T[L_a], t_y, tr, va)
@@ -166,15 +170,15 @@ def run(source="Mistral-7B-Instruct-v0.2", target="Llama-2-7b-chat",
     if fresh_num_samples:
         fscfg = Stage1Config(model_name=source, dataset=dataset, num_samples=fresh_num_samples)
         ftcfg = Stage1Config(model_name=target, dataset=dataset, num_samples=fresh_num_samples)
-        fs, fsy, fs_ids = load_matrix(fscfg, ["TBG"])
-        ft, fty, ft_ids = load_matrix(ftcfg, ["TBG"])
+        fs, fsy, fs_ids = load_matrix(fscfg, [position])
+        ft, fty, ft_ids = load_matrix(ftcfg, [position])
         assert fs_ids == ft_ids, "fresh source/target ids differ"
-        Sf, Tf = fs["TBG"], ft["TBG"]
+        Sf, Tf = fs[position], ft[position]
         blocks.append(eval_block(Sf[L_a], Sf[L_m], Tf[L_a], fsy, f"N={len(fs_ids)} (fresh n{fresh_num_samples})"))
 
     # ---- report side by side --------------------------------------------------
     print("\n" + "=" * 82)
-    print(f"PROCRUSTES + MECHANISM-A CONTROL (TBG only): {source} -> {target}, vs {source} SE")
+    print(f"PROCRUSTES + MECHANISM-A CONTROL (position={position}): {source} -> {target}, vs {source} SE")
     print(f"  target ridge L_a={L_a}   source skyline L_m={L_m}   target in-dist(context)={id_target:+.3f}")
     print("=" * 82)
     hdr = "  {:34s}".format("") + "".join(f"{b['label']:>24s}" for b in blocks)
@@ -201,7 +205,7 @@ def run(source="Mistral-7B-Instruct-v0.2", target="Llama-2-7b-chat",
     print("=" * 82 + "\n")
 
     result = {"source": source, "target": target, "dataset": dataset, "num_samples": num_samples,
-              "fresh_num_samples": fresh_num_samples, "L_a_target_ridge": int(L_a),
+              "fresh_num_samples": fresh_num_samples, "position": position, "L_a_target_ridge": int(L_a),
               "L_m_source_skyline": int(L_m), "target_in_dist_ridge": id_target,
               "alpha_target_ridge": float(a_L), "alpha_source_ridge": float(a_M), "evals": blocks}
     out = out or "amortized_ue/procrustes_alignment_result.json"
@@ -221,9 +225,16 @@ def _parse():
                    help="also evaluate the SAME fitted W/ridges on a disjoint fresh batch of this "
                         "size (e.g. 1000 = the E23 held-out batch) for tighter CIs")
     p.add_argument("--out", default=None)
+    p.add_argument("--position", default="TBG", choices=["TBG", "SLT"],
+                   help="stored position to align on (default TBG = original E24 behaviour)")
+    p.add_argument("--source_layer", type=int, default=None,
+                   help="force the source skyline layer L_m (else auto by val Spearman)")
+    p.add_argument("--target_layer", type=int, default=None,
+                   help="force the target ridge/alignment layer L_a (else auto by val Spearman)")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     a = _parse()
-    run(a.source, a.target, a.dataset, a.num_samples, a.fresh_num_samples, a.out)
+    run(a.source, a.target, a.dataset, a.num_samples, a.fresh_num_samples, a.out,
+        a.position, a.source_layer, a.target_layer)

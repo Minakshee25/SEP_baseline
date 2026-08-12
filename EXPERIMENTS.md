@@ -1001,6 +1001,61 @@ controls + the E27 SEP comparison with DeepSeek as a 3rd alignment target.
 
 ---
 
+## E29 — Run the E24–E27 alignment chain on DeepSeek; four-model master table — ✅ recovery generalises to a 3rd family; label-free ensemble ≈/> supervised SEP; increment underpowered at n1000
+
+**Goal:** extend the Llama-2↔Mistral alignment line (E24–E27) to the new DeepSeek target and assemble a
+four-model picture, to ask whether the geometric recovery + the model-specific increment track FAMILY
+relatedness. Prediction-reuse + CPU (plus frozen-proxy GPU inference for `q_resp_only`); no new Stage-1
+builds. All of Llama-2/Mistral/DeepSeek share the **identical E23 fresh 1000 ids** (verified L∩M∩D=1000).
+
+**Tooling (additive; no training logic touched):** parametrised `procrustes_alignment.py` with
+`--position/--source_layer/--target_layer` (defaults reproduce the exact TBG-auto E24/E25). New
+`procrustes_e29_ensemble_sep.py` (label-free ensemble vs supervised SEP, within-n1000, reusing
+`arm_preds`/`ecdf`/`boot_delta`/`fit_probe`/`best_split`/`binarize_entropy`) and
+`procrustes_e29_master_table.py` (read-only assembler). DeepSeek uses its **re-picked SLT:16**; ensemble
+uses the Llama-2 **reference** layers TBG:22/SLT:15 (the reference ridge + REFERENCE proxy).
+
+**Data-regime honesty:** DeepSeek has ONLY n1000 → the alignment is fit on its 720-row train and
+evaluated on the **100-row test split** (vs the official Mistral run's n2000-fit / 1000-row-eval). So
+DeepSeek's CIs are inherently ~3× wider. **Llama-3 cannot enter the alignment table at all** — only
+n200 exists, on the *E20* ids (not the E23 split); 144 train pairs can't fit a stable 4096-dim W. Its
+E20 result stands (text transfers, raw z is chance) but the Procrustes line was never run for it. This
+is a scope boundary, reported not buried.
+
+**(1) E24 recovery — the hidden-state geometry aligns for DeepSeek too (both directions):**
+predict-DeepSeek-SE (Llama-2 ridge ← aligned DeepSeek z, SLT): floor −0.136 → aligned **+0.572** →
+skyline 0.680 = **86.8% recovery**; predict-Llama-2-SE (DeepSeek ridge ← aligned Llama-2 z): floor
++0.076 → aligned **+0.532** → skyline 0.646 = **80.2%**. In line with Mistral (official 92.8%). So raw
+z fails but an unsupervised orthogonal W recovers most of the gap — now on a **3rd model family**.
+
+**(2) E25 increment — underpowered at N=100, NOT a family signal.** All within-n1000 (N=100)
+`aligned − control` CIs include 0: DeepSeek→L2 −0.049 [−0.201,+0.087]; L2→DeepSeek +0.023
+[−0.125,+0.170]; **Mistral calibration** +0.066 [−0.017,+0.155]. **The Mistral calibration is the
+key control:** its KNOWN-significant increment (+0.032 [+0.001,+0.063] at the official N=1000) *also*
+loses significance at N=100 → the DeepSeek non-significance is a **power limitation of n1000-only data,
+not weaker transfer**. No family-relatedness claim on the increment is possible without DeepSeek n2000
+(a GPU build, out of scope). Shared question-difficulty (the control) is large for all pairs (0.45–0.62).
+
+**(3) E29 label-free ensemble vs supervised SEP (within-n1000, N=100) — label-free never loses:**
+rank-fusion(aligned-z + q_resp_only), no target SE labels:
+
+| target (ref=Llama-2) | ensemble AUROC / ρ | supervised SEP AUROC | Δ(ens−SEP) AUROC [95% CI] |
+|---|---|---|---|
+| **DeepSeek** | **0.916 / 0.758** | 0.809 (SLT L17) | **+0.108 [+0.038, +0.186] — excludes 0 (BEATS)** |
+| **Mistral** | **0.925 / 0.654** | 0.878 (TBG L30) | +0.047 [−0.024, +0.122] — includes 0 (on par) |
+
+Both different-family ensembles land **~0.92 AUROC**, strikingly consistent; the ensemble ≥ SEP every
+time. DeepSeek's ensemble *beats* its SEP because DeepSeek's own SEP is weaker (0.809 < Mistral 0.878),
+not because the ensemble is better there. Consistent with E27's "label-free ≈ supervised SEP".
+
+**Four-model picture (`procrustes_e29_master_table.json`):** the alignment recovery + the label-free
+ensemble generalise to a 3rd family (DeepSeek); the ensemble matches or beats the supervised SEP with no
+target labels; the model-specific increment could not be resolved at n1000 (power), and the same-family
+Llama-3 comparison is blocked by data. JSONs: `procrustes_e29_{deepseek_to_llama2,llama2_to_deepseek,
+mistral_to_llama2_n1000,ensemble_sep_*,master_table}.json`.
+
+---
+
 ## Where we stand (2026-08-12)
 
 **Cross-LLM transfer characterised end-to-end (E20–E27).** Text transfers directly; **raw** hidden

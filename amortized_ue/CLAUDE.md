@@ -174,7 +174,21 @@ selection, keeps the 200 test ids). A Llama-2 `n200_full` copy of the same ids e
 control. **DeepSeek-LLM-7B-Chat Stage-1 (E28):** trivia_qa **n1000** on the E23 fresh held-out ids
 (`deepseek-llm-7b-chat_trivia_qa_n1000_full`; mean_acc 0.527 / mean_CAE 0.804; on /vol/bitbucket +
 W&B `stage1_records_deepseek-llm-7b-chat_trivia_qa_n1000`, run `c6ijifxe`) — same 1000 ids as the E23
-Llama-2/Mistral fresh batches, zero overlap. No downstream analysis yet (target onboarded only).
+Llama-2/Mistral fresh batches, zero overlap.
+
+**E29 — alignment chain run on DeepSeek + four-model master table (n1000-preliminary; full-power
+n2000 IN PROGRESS).** Extended the E24–E27 line to DeepSeek: geometric recovery generalises to a 3rd
+family (DeepSeek↔Llama-2 ~80–87%), and the **label-free ensemble** (aligned-z + `q_resp_only`, reusing
+the frozen REFERENCE proxy) hits **~0.92 AUROC for BOTH DeepSeek and Mistral**, ≥ their supervised SEP.
+**Caveat:** run within-n1000 (100-row test split) → the E25 model-specific increment CIs all include 0,
+but a Mistral N=100 calibration shows its KNOWN +0.032 (N=1000) also goes non-significant at N=100 →
+**power-limited, not weaker transfer**. **Llama-3 alignment was NOT computable** (only n200 on E20 ids).
+→ Now building **DeepSeek n2000 + Llama-3 n2000** (seed-10 selection, shared ids) to redo at N=1000
+power and unlock the same-family Llama-3 comparison (E30, pending). Tooling (all additive): parametrised
+`procrustes_alignment.py` (`--position/--source_layer/--target_layer`); `procrustes_e29_ensemble_sep.py`,
+`procrustes_e29_master_table.py`; **GPU fencing** `gpu_reserve.py` + `build_n2000_waiter.sh` (waits for a
+free GPU, holds the slack so co-tenants can't OOM the build mid-run). JSONs: `procrustes_e29_*.json`.
+Full arc: EXPERIMENTS.md E29.
 
 **Cross-LLM transfer (E20) — the thesis result.** Frozen Llama-2 proxy → Llama-3-8B, 5-seed Spearman
 (control = same harness on Llama-2's own 200, reproduces ID to 4 sig figs):

@@ -1,0 +1,148 @@
+{
+  "note": "E29 four-model master table. Reference = Llama-2-7b-chat. All share the E23 fresh trivia_qa ids EXCEPT Llama-3 (see llama3 flag). 'recovery' = (aligned-floor)/(skyline-floor); 'increment' = aligned - control (mechanism-A), the genuine model-specific component beyond shared question-difficulty. Ensemble = label-free rank-fusion of aligned-z ridge + q_resp_only.",
+  "family_vs_llama2_reference": {
+    "Mistral-7B-Instruct-v0.2": "different lineage",
+    "deepseek-llm-7b-chat": "different lineage",
+    "Meta-Llama-3-8B-Instruct": "SAME family (Meta Llama)"
+  },
+  "alignment_E24_E25": {
+    "Mistral->Llama-2 (OFFICIAL, N=1000)": {
+      "N": 1000,
+      "position": "TBG",
+      "L_a_target_ridge": 30,
+      "L_m_source_skyline": 31,
+      "floor": 0.037253962381130525,
+      "control_sharedDifficulty": 0.557265111929483,
+      "aligned": 0.5895320977182497,
+      "skyline": 0.6322504818552885,
+      "recovery_frac": 0.9282039764286483,
+      "increment_mean": 0.03236046478409433,
+      "increment_ci": [
+        0.0009606158638734958,
+        0.06338675590837463
+      ],
+      "increment_significant": true
+    },
+    "Mistral->Llama-2 (same-regime calibration, N=100)": {
+      "N": 100,
+      "position": "TBG",
+      "L_a_target_ridge": 30,
+      "L_m_source_skyline": 29,
+      "floor": -0.05555944749876881,
+      "control_sharedDifficulty": 0.4789549816017162,
+      "aligned": 0.5446995465701278,
+      "skyline": 0.540333539607467,
+      "recovery_frac": 1.0073268305838987,
+      "increment_mean": 0.06593611576928862,
+      "increment_ci": [
+        -0.016930828995405784,
+        0.15533395969236222
+      ],
+      "increment_significant": false
+    },
+    "DeepSeek->Llama-2 (predict DeepSeek SE, N=100)": {
+      "N": 100,
+      "position": "SLT",
+      "L_a_target_ridge": 30,
+      "L_m_source_skyline": 16,
+      "floor": -0.13566294336822982,
+      "control_sharedDifficulty": 0.6202778011286879,
+      "aligned": 0.5718685781713915,
+      "skyline": 0.6796811061988146,
+      "recovery_frac": 0.8677705097809046,
+      "increment_mean": -0.049078646329644704,
+      "increment_ci": [
+        -0.20054395724900673,
+        0.08735769161720307
+      ],
+      "increment_significant": false
+    },
+    "Llama-2->DeepSeek (predict Llama-2 SE, N=100)": {
+      "N": 100,
+      "position": "SLT",
+      "L_a_target_ridge": 16,
+      "L_m_source_skyline": 30,
+      "floor": 0.07559604051591746,
+      "control_sharedDifficulty": 0.5074176667302565,
+      "aligned": 0.5324429950203994,
+      "skyline": 0.6455081049341773,
+      "recovery_frac": 0.8016095517662193,
+      "increment_mean": 0.0233203099528808,
+      "increment_ci": [
+        -0.1245801949961761,
+        0.1697596469988384
+      ],
+      "increment_significant": false
+    },
+    "Llama-3<->Llama-2": {
+      "status": "NOT COMPUTABLE from existing data",
+      "reason": "Only Meta-Llama-3-8B-Instruct n200 exists, on the E20 ids (NOT the E23 fresh split); 144 train pairs cannot fit a stable 4096-dim orthogonal W. E20 established text transfers / raw z does not (z 0.056 chance, q_only 0.436=88%, q_resp_only 0.562=full); the Procrustes alignment line was never run for Llama-3."
+    }
+  },
+  "ensemble_vs_SEP_E29 (within-n1000, N=100)": {
+    "deepseek-llm-7b-chat": {
+      "N_test": 100,
+      "sep_layer": [
+        "SLT",
+        17
+      ],
+      "sep_auroc": 0.8091361374943464,
+      "ensemble_rankfusion_auroc": 0.9158751696065128,
+      "ensemble_rankfusion_spearman": 0.7575927594953462,
+      "ensemble_stdavg_auroc": 0.9167797376752601,
+      "aligned_z_auroc": 0.9149706015377657,
+      "q_resp_only_auroc": 0.8661239258254184,
+      "delta_rankfusion_minus_sep": {
+        "spearman": {
+          "mean": 0.18267416149231022,
+          "lo95": 0.07314370686153665,
+          "hi95": 0.311951994646218
+        },
+        "auroc": {
+          "mean": 0.10806832358947278,
+          "lo95": 0.0378554635020153,
+          "hi95": 0.1857682535764727
+        }
+      },
+      "delta_significant_auroc": true,
+      "delta_significant_spearman": true
+    },
+    "Mistral-7B-Instruct-v0.2": {
+      "N_test": 100,
+      "sep_layer": [
+        "TBG",
+        30
+      ],
+      "sep_auroc": 0.8776371308016877,
+      "ensemble_rankfusion_auroc": 0.9249547920433996,
+      "ensemble_rankfusion_spearman": 0.6537523867015825,
+      "ensemble_stdavg_auroc": 0.9228450874020495,
+      "aligned_z_auroc": 0.8939119951778178,
+      "q_resp_only_auroc": 0.9095840867992766,
+      "delta_rankfusion_minus_sep": {
+        "spearman": {
+          "mean": 0.08540795942612313,
+          "lo95": -0.02197877746433351,
+          "hi95": 0.20151008496133171
+        },
+        "auroc": {
+          "mean": 0.04705001829671571,
+          "lo95": -0.023758409468438477,
+          "hi95": 0.1218095238095238
+        }
+      },
+      "delta_significant_auroc": false,
+      "delta_significant_spearman": false
+    },
+    "Meta-Llama-3-8B-Instruct": {
+      "status": "NOT COMPUTABLE (see alignment flag)"
+    }
+  },
+  "scope_flags": [
+    "E25 increment CI INCLUDES 0 for [Mistral->Llama-2 (same-regime calibration, N=100)]: +0.066 [-0.017, +0.155] (N=100).",
+    "E25 increment CI INCLUDES 0 for [DeepSeek->Llama-2 (predict DeepSeek SE, N=100)]: -0.049 [-0.201, +0.087] (N=100).",
+    "E25 increment CI INCLUDES 0 for [Llama-2->DeepSeek (predict Llama-2 SE, N=100)]: +0.023 [-0.125, +0.170] (N=100).",
+    "Llama-3 alignment chain NOT computable (n200/E20 ids); reported as a scope boundary, not a null.",
+    "The DeepSeek & Mistral-calibration increments are at N=100 (only n1000 exists for DeepSeek). Mistral's KNOWN-significant increment (+0.032 at N=1000) also goes non-significant at N=100 (+0.066 [-0.017,+0.155]) -> the DeepSeek non-significance is POWER-limited, not weaker transfer."
+  ]
+}
