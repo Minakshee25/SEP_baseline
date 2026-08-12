@@ -310,15 +310,18 @@ Two-family generality established. See Current state / EXPERIMENTS.md E21.
 **DONE — role swap (E22):** Mistral proxy → Llama-2 mirrors E21 (z chance, q_only 0.476, q_resp_only
 0.509) → transfer is directionally symmetric. See Current state / EXPERIMENTS.md E22.
 
-**NOW — pick the next thrust (both open):**
-- **Multi-target training (Exp 2, deferred earlier):** train one proxy on Llama-2 **+** Mistral (both
-  4096-dim; needs a new multi-source Stage-2 loader), then **leave-one-out** test on unseen Llama-3.
-  If z now transfers to Llama-3 → multi-target training induces a model-agnostic hidden code (the goal).
-  Both n2000 training sets now exist. Distinguish this from testing on the two *trained* models
-  (in-distribution "serving", not transfer).
-- **The Procrustes alignment experiment:** can z be *made* to transfer? Fit a linear/orthogonal map
-  target→source hidden space on a *disjoint* anchor set of shared questions, apply it, re-run the frozen
-  z-proxy. Concrete ~0.5 ceiling to recover. Cheaper, more surgical diagnostic than mixed training.
+**DONE — the Procrustes alignment line (E24–E27):** label-free orthogonal map makes z readable
+cross-model (weakly PRH-positive), best label-free ensemble ≈ matched Mistral SEP on AUROC, W transfers
+cross-domain. See EXPERIMENTS.md E24–E27 + "Where we stand" conclusions 5–7.
+
+**NOW — pick the next thrust (all open):**
+- **3rd-family alignment (breadth):** build Llama-3 n2000 → replicate the E24/E25 controls + the E27 SEP
+  comparison on Llama-3, to check the alignment findings generalise beyond the Llama-2↔Mistral pair.
+- **Anchor-count efficiency sweep for W:** how *few* paired anchors suffice to fit a good Procrustes W?
+  Quantifies the only label-free cost (paired forward passes). Cheap, CPU, reuses existing data.
+- **Multi-target training (Exp 2):** train one proxy on Llama-2 **+** Mistral (both 4096-dim; needs a new
+  multi-source Stage-2 loader), then **leave-one-out** test on unseen Llama-3. If z now transfers to
+  Llama-3 → multi-target training induces a model-agnostic hidden code. Both n2000 sets exist.
 
 **Pending / carried over:**
 3. **Compile & VERIFY the complete "all models + results" record** → commit as `amortized_ue/RESULTS.md`.
@@ -328,7 +331,12 @@ Two-family generality established. See Current state / EXPERIMENTS.md E21.
    confirm the *proxy* (not just ridge) plateaus with data. Was launched then killed by the FS outage.
 5. **SEP-comparison write-up** — the honest framing (proxy ~ comparable to a SEP-style probe on the
    same data; ridge slightly beats it; the real edge is `q_only`). User will decide when to write it.
-6. **(Housekeeping)** rotate the HF token that was pasted in chat (security).
+6. **⭐ Reconcile our SEP numbers vs the SEP PAPER (arXiv:2406.15927).** E27 ran the SEP *method* on our
+   matched data (Mistral SEP 0.857 / Llama-2 SEP 0.795 AUROC; our label-free ensemble 0.867 on par),
+   `procrustes_e27_sep_comparison.json`. **Still open:** compare these against the paper's *published*
+   AUROC table for the corresponding setup, and document any residual gap (binarisation, dataset, metric
+   conventions). Also root CLAUDE.md outstanding task #4.
+7. **(Housekeeping)** rotate the HF token that was pasted in chat (security).
 
 **Cancelled / resolved:** multi-layer *band* ablation (layers within a position redundant, +0.005);
 the regularisation experiment (done — E16, no live dial); the "decide the thesis framing" item
