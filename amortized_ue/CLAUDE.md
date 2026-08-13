@@ -194,6 +194,33 @@ a free GPU, fences the slack so co-tenants can't OOM a build mid-run — added a
 JSONs: `procrustes_e29_*.json` (n1000-preliminary), `procrustes_e30_*.json` (full power). Full arc:
 EXPERIMENTS.md E29–E30.
 
+**E31 — correctness-based eval (do the SE predictors detect WRONG ANSWERS?).** Everything E0–E30 is scored
+vs the SE label; E31 re-scores the same predictors (E30 regime, all 4 targets) vs `incorrect = 1` using the
+stored `canonical.accuracy` (**already binary {0,1}** — the 0.5 threshold is a no-op). Additive script
+`correctness_eval.py` (CPU for the hidden-state arms; needs the proxy env+GPU for `q_resp`/rank-fusion);
+JSONs `correctness_eval_{<model>,master}.json`. **Three results:** (1) **SE-fidelity ≠ correctness** — every
+method drops ≈0.10–0.15 AUROC from the SE target to the correctness target (rank-fusion Mistral 0.866→0.731),
+so the ~0.85 SE-AUROCs overstate wrong-answer detection (~0.70–0.77). (2) **True 10-sample SE is the best
+correctness detector on all 4 targets** (0.747–0.795) — amortizing to one pass has a real correctness cost
+(sig. over single-layer SEP on Mistral/DeepSeek/Llama-2). (3) **Label-free rank-fusion ≥ supervised SEP on
+correctness too** (sig. on Llama-2 +0.058 / DeepSeek +0.057; ties on Mistral/Llama-3) → E30's thesis isn't an
+SE-scoring artifact. **Ordering (SE-AUROC vs correctness-AUROC): MATCHES on 3/4 (Mistral/DeepSeek/Llama-2),
+DIFFERS on Llama-3** — there aligned-z is 3rd by SE but next-to-last by correctness (good SE ≠ good
+correctness). **SEP repro:** single-layer SEP-vs-SE reproduces E30 exactly (0.832/0.805/0.839); the ad-hoc
+`procrustes_e27_sep_comparison.json` 0.795/0.857 does NOT reproduce leak-free (best-on-eval 0.785/0.834,
+~0.02 below — flagged, not smoothed). Full arc: EXPERIMENTS.md E31.
+
+**E32 — correctness-eval qualitative follow-ups (exploratory).** (A) **Label noise ≈10%** (bracket 3.8%
+rule-verified floor → 17.3% raw LLM-judge, but the judge — `NousResearch/Meta-Llama-3-8B-Instruct` — is
+**over-lenient, ~50% precise on its exclusive flips**; its "NO"/wrong verdicts are reliable). So exact-match
+accuracy under-credits the model (~0.61→~0.71 for Llama-2) ⇒ **the E31 correctness-AUROCs are a mild
+under-estimate**. (B) **Confusion matrix + genuine-FN** (aligned-z detector, Youden's-J; genuine FN = FN still
+wrong after a lenient re-check): the "missed error" bucket is mostly label noise — **only 36% (Llama-2) / 18%
+(Mistral) of FNs are genuine**. (C) **Model-specific signal:** on divergent-correctness questions (same Q, one
+model right one wrong; difficulty held constant so text/`q_only` is pinned at 50%), each model's own
+hidden-state reader picks the failing model **54.8%** (vs 50% null, 61.9% SE ceiling) — a **real but small,
+underpowered (n=42)** model-specific increment, the question-level view of E25/E26. Full arc: EXPERIMENTS.md E32.
+
 **Cross-LLM transfer (E20) — the thesis result.** Frozen Llama-2 proxy → Llama-3-8B, 5-seed Spearman
 (control = same harness on Llama-2's own 200, reproduces ID to 4 sig figs):
 
@@ -340,6 +367,11 @@ Two-family generality established. See Current state / EXPERIMENTS.md E21.
 **DONE — the Procrustes alignment line (E24–E27):** label-free orthogonal map makes z readable
 cross-model (weakly PRH-positive), best label-free ensemble ≈ matched Mistral SEP on AUROC, W transfers
 cross-domain. See EXPERIMENTS.md E24–E27 + "Where we stand" conclusions 5–7.
+
+**DONE — correctness-based eval (E31):** re-scored all predictors vs `incorrect` (not SE) on all 4 targets.
+SE-fidelity ≠ correctness (−0.10 to −0.15 AUROC); true 10-sample SE is the best correctness detector;
+label-free rank-fusion ≥ supervised SEP on correctness too; method ordering matches on 3/4 (differs on
+Llama-3). `correctness_eval.py` + `correctness_eval_*.json`. See EXPERIMENTS.md E31.
 
 **NOW — pick the next thrust (all open):**
 - **3rd-family alignment (breadth):** build Llama-3 n2000 → replicate the E24/E25 controls + the E27 SEP

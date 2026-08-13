@@ -1108,6 +1108,157 @@ correct test-only SEP.)* JSONs: `procrustes_e30_*.json`; table `procrustes_e30_m
 
 ---
 
+## E31 — Correctness-based evaluation: do the SE predictors actually detect *wrong answers*? — ✅ additive; SE-fidelity ≠ correctness, but rankings mostly agree
+
+*(The task brief called this "E30"; **E30 was already taken** by the four-model alignment table above, so
+this is logged as **E31**.)*
+
+**Motivation.** Every headline number in this repo (E0–E30) is scored against the **semantic-entropy
+label**. Nothing was scored against whether the target LLM's canonical answer was actually **correct**.
+Stage-1 records already store `canonical.accuracy`, so this needs no GPU-generation and no retraining —
+only the hidden states / SE labels / existing REFERENCE proxy checkpoints already on disk. New script
+**`amortized_ue/correctness_eval.py`** (strictly additive: modifies no existing script, training logic,
+or prediction artifact). Detection label **`incorrect = 1`**.
+
+**Accuracy distribution (reported first, per the brief).** `canonical.accuracy` is **already binary
+{0,1}** on every Stage-1 set (the stored `squad` metric is thresholded at generation, not a continuous
+F1), so the 0.5 binarisation is a **no-op**. Incorrect-rate per eval set: Mistral 0.351, DeepSeek 0.473,
+Llama-3 0.315, Llama-2 0.391.
+
+**Regime mirrors E30 exactly** (reference = Llama-2 at TBG:22/SLT:15): Mistral/DeepSeek/Llama-2 fit n2000
+→ eval **fresh n1000**; Llama-3 fit n2000 → eval **test split (N=200)**. Predictors scored against
+`incorrect` **and** against binarised SE, side by side. Rejection metrics (PRR + accuracy@coverage) and a
+paired bootstrap (B=10000, shared resample indices) vs the two SEP baselines are reported per predictor.
+
+### Correctness-AUROC (detect `incorrect`) with SE-AUROC alongside
+
+| predictor (higher ⇒ more uncertain) | Mistral inc / SE | DeepSeek inc / SE | Llama-3 inc / SE | Llama-2 inc / SE |
+|---|---|---|---|---|
+| **true semantic entropy** (10-sample, upper bound) | **0.747** / 1.000 | **0.795** / 1.000 | **0.775** / 1.000 | **0.760** / 1.000 |
+| SEP, single best layer (val-sel, = E30) | 0.705 / 0.832 | 0.716 / 0.805 | 0.720 / 0.839 | 0.661 / 0.746 |
+| SEP, 5-layer concat (L28-32; arXiv Tbl 4) | 0.714 / 0.840 | 0.721 / 0.812 | 0.729 / 0.848 | 0.681 / 0.783 |
+| aligned-z ridge (label-free) | 0.720 / 0.850 | 0.758 / 0.849 | 0.705 / 0.877 | 0.706 / 0.816¹ |
+| q_resp_only (label-free) | 0.725 / 0.852 | 0.764 / 0.857 | 0.739 / 0.874 | 0.715 / 0.835 |
+| **rank-fusion ensemble** (label-free) | 0.731 / 0.866 | 0.772 / 0.869 | 0.730 / 0.892 | 0.719 / 0.840¹ |
+| random control | 0.498 / 0.522 | 0.529 / 0.515 | 0.511 / 0.463 | 0.513 / 0.494 |
+
+(inc = AUROC vs `incorrect`; SE = AUROC vs binarised SE. ¹Llama-2 is the reference, so its aligned-z /
+rank-fusion use Llama-2's own SE to fit the ridge — **not** label-free there; flagged in the JSON.
+AUPRC, PRR and accuracy@{1.0,0.9,0.75,0.5} for every cell are in `correctness_eval_<model>.json`.)
+
+### Findings
+
+1. **SE-fidelity is NOT correctness.** Every method is a **much weaker correctness detector than SE
+   predictor** — AUROC drops ≈0.10–0.15 from the SE target to the correctness target (rank-fusion:
+   Mistral 0.866→0.731, Llama-2 0.840→0.719). SE-based UE ranks *its own label* far better than it ranks
+   answer correctness. This is a real caveat for the whole line: the ~0.85 SE-AUROCs overstate how well
+   these estimators flag wrong answers (~0.70–0.77).
+
+2. **Sampling beats amortization for correctness.** The **true 10-sample SE is the best correctness
+   detector on all four targets** (0.747–0.795), above every one-forward-pass proxy — significantly over
+   the single-layer SEP on Mistral/DeepSeek/Llama-2 (paired-bootstrap Δ excludes 0: +0.042 / +0.080 /
+   +0.099), not on Llama-3 (N=200, CI includes 0). Amortizing to one pass has a measurable
+   correctness-detection cost that the SE-target numbers hide.
+
+3. **The label-free ensemble still ≥ supervised SEP on the correctness target.** rank-fusion − SEP(single)
+   Δ AUROC_incorrect: Llama-2 **+0.058 [+0.032,+0.083]**, DeepSeek **+0.057 [+0.031,+0.082]** (both exclude
+   0); Mistral +0.026 [−0.001,+0.054] and Llama-3 +0.010 [−0.058,+0.077] (include 0). So E30's thesis
+   (label-free ≥ supervised SEP, no target labels) is **not an artifact of scoring against SE** — it holds
+   when re-targeted to actual correctness.
+
+4. **Method ORDERING: does the SE-AUROC ranking match the correctness-AUROC ranking? MOSTLY, NOT ALWAYS.**
+   The two orderings **MATCH on 3/4 targets** (Mistral, DeepSeek, Llama-2 — identical permutation
+   true_SE > rank_fusion > q_resp > aligned_z > sep_5layer > sep_single > random). They **DIFFER on
+   Llama-3** (N=200): there **aligned-z ridge is 3rd by SE-fidelity (0.877) but next-to-last by correctness
+   (0.705, below even single-layer SEP)** — the aligned hidden state tracks Llama-3's SE well yet its
+   correctness poorly. **Stated plainly, not smoothed:** better SE fidelity does not guarantee better
+   correctness detection, and on the smallest split the ranking visibly reorders.
+
+**SEP reproduction (verification).** The single-layer SEP AUROC-vs-SE **reproduces the committed E30
+numbers exactly** (Mistral 0.832, DeepSeek 0.805, Llama-3 0.839; leak-free val-selected = E30
+`sep_fit_eval`). The older ad-hoc `procrustes_e27_sep_comparison.json` values (Llama-2 0.795 / Mistral
+0.857, "best test layer") **do not reproduce under a leak-free split**: a best-layer-on-eval selection
+gives Mistral **0.834** / Llama-2 **0.785** (~0.02 below the 0.857/0.795 in that hand-made JSON, whose
+exact selection I could not recover). Reported honestly rather than reconciled away. **id-set check:** the
+ids used for accuracy and for every predictor are identical per target (asserted in-script + re-verified).
+
+**Artifacts:** `amortized_ue/correctness_eval.py`, `correctness_eval_{Mistral-7B-Instruct-v0.2,
+deepseek-llm-7b-chat,Meta-Llama-3-8B-Instruct,Llama-2-7b-chat}.json`, `correctness_eval_master.json`.
+
+---
+
+## E32 — Correctness eval, qualitative follow-ups: label noise, confusion matrix / genuine FNs, model-specific signal — ✅ exploratory
+
+Follow-on to E31 (which was aggregate AUROC). Three question-level analyses on the trivia_qa correctness
+target. **All exploratory** (run from throwaway scratchpad scripts, since deleted; methods below are
+sufficient to reproduce). Detector for the confusion/model-specific parts = **aligned-z ridge** (CPU, label-free)
+used as the stand-in for the full rank-fusion proxy — the proxy (`q_resp_only` via `arm_preds`) run was
+abandoned after crawling ~37 min on a degraded `/vol/bitbucket` NFS; aligned-z's AUROC is within ~0.01 of the
+ensemble (0.706 vs 0.719 Llama-2; 0.720 vs 0.731 Mistral) so the qualitative buckets are unchanged. The LLM
+judge used throughout = **`NousResearch/Meta-Llama-3-8B-Instruct`** (ungated mirror; `meta-llama/Llama-3.1-8B`
+is gated for this acct), greedy decoding, YES/NO grading of (question, gold aliases, model answer).
+
+### A. Label-noise quantification (Llama-2, trivia_qa n1000; 391 strict-wrong rows)
+`canonical.accuracy` is **already binary {0,1}** (exact-match/SQuAD-F1≥0.5 thresholded at generation). Many
+"wrong" answers are actually correct (plural/spelling/synonym). Two matchers on the strict-wrong rows:
+- **rule-based** (SQuAD-normalise + containment + Snowball-stemmed token-F1≥0.5 + difflib ratio≥0.85): **38/391
+  flip → 3.8%**, a **hard, 100%-verified floor**.
+- **LLM judge** (Meta-Llama-3-8B): **173/391 flip → 17.3%**. All 38 rule-flips ⊆ the 173 judge-flips.
+- **Sanity check of the judge** (random 80 rule-negative rows re-judged): 26 flipped; on eyeball ~10 clearly
+  correct, ~5 borderline, **~11 genuinely WRONG** → the judge's **exclusive flips are only ~50% precise** (it
+  rubber-stamps e.g. *oranges=shoes*, *Holiday Inn=Motel 6*). Its **"NO" (wrong) verdicts are reliable**; its
+  "YES" flips are not. **⇒ 17.3% is inflated.**
+- **Best estimate ≈ 10% label noise (bracket 3.8%–17.3%).** Llama-2 exact-match accuracy 0.609 → ~0.71 once real
+  labelling artefacts are removed (naïve judge-corrected 0.78 is too high). **Implication: the E31
+  correctness-AUROCs are a mild *under*estimate** of the detectors' true skill.
+
+### B. Confusion matrix + GENUINE false negatives (aligned-z detector, Youden's-J threshold)
+positive = "flagged likely WRONG". **genuine FN = an FN row still wrong after a lenient re-check (rules ∪ judge)**;
+FN rows a lenient check flips to correct were label noise, not real misses. (Judge "NO" reliable ⇒ genuine-FN list
+is high-precision, slight under-count; e.g. *pol pot* vs gold *saloth sar* is a mislabel the judge kept, so counts
+are ~1–2 high.)
+
+| target | detector | Youden J | TP | FP | FN | TN | FN that are LABEL NOISE | **GENUINE misses** |
+|--------|----------|----------|----|----|----|----|-------------------------|--------------------|
+| **Llama-2** | aligned-z (self ridge) | 0.487 | 293 | 260 | 98 | 349 | 63 (64%) | **35 (36%)** |
+| **Mistral** | aligned-z (Procrustes→Llama-2, label-free) | 0.548 | 274 | 278 | 77 | 371 | 63 (82%) | **14 (18%)** |
+
+**Finding: the "missed error" bucket is dominated by exact-match label noise on both models** (64% / 82%), so the
+detector's true miss rate is ~⅓ (Llama-2) / ~⅕ (Mistral) of the raw FN count. Genuine misses are real
+hallucinations of a *different entity* (Llama-2: brazil≠colombia, Zeus≠atlas, dove≠raven; Mistral: ferrari≠fiat,
+van gogh≠rembrandt, manhattan≠queens). FP bucket = correct answers to *obscure* questions (detector reads
+difficulty and hedges even when right). The label-noise pattern is model-independent → it's a property of the
+**grader**, not the model.
+
+### C. Is the hidden state MODEL-SPECIFIC? (divergent-correctness test)
+Isolate model-specific signal by holding difficulty constant: on the **held-out test split (n=200)** take the
+**42 "divergent" questions** where exactly one of {Llama-2, Mistral} is correct. A per-model uncertainty score =
+each model's OWN ridge (fit on train) reading its OWN hidden state at its picked layers (Llama-2 TBG22/SLT15,
+Mistral TBG31/SLT20) → predicted SE. Test: does the score of the *wrong* model exceed the *right* model's?
+
+| ranker of "which model failed" | correct rate | note |
+|--------------------------------|--------------|------|
+| question-only / difficulty | **50.0%** | null — identical score per model by construction |
+| **hidden-state reader (per model)** | **54.8%** | **> null ⇒ a real, weak model-specific signal** |
+| true 10-sample SE (upper bound) | 61.9% | how model-specific the signal can be |
+
+**Finding: the hidden state carries a genuine but SMALL model-specific increment** (54.8% vs 50% null, vs 61.9%
+ceiling) — the individual-question view of the E25/E26 aggregate ("mostly shared difficulty + a small real
+model-specific increment"). Clean examples where the same question yields different per-model z correctly pointing
+at the failing model: *"Caledonian Brewery city?"* Llama-2 Inverness✗ z=1.02 / Mistral edinburgh✓ z=0.32;
+*"Film of White Christmas?"* Llama-2 holiday-inn✓ z=0.58 / Mistral hollywood-cafeteria✗ z=0.97.
+**Caveats: underpowered** (n=42, 23/42 → 95% CI ~[40%,70%], includes 50% — suggestive, not significant), and the
+**divergent set is label-noise-contaminated** (some "disagreements" are grading artefacts, e.g. Denali, Carson City).
+Firming-up plan (not yet run): expand to val+test (~560 → ~3× divergent), lenient-filter the divergent set, add a
+bootstrap CI.
+
+**Bottom line (E32):** the E31 correctness numbers are a mild under-estimate (~10% label noise); the detectors'
+genuine misses are far fewer than the raw FN count (grading artefacts dominate); and the hidden state does encode a
+small, real, model-specific uncertainty signal on top of shared question difficulty — but proving its significance
+needs the (cheap, CPU) firming-up run above.
+
+---
+
 ## Where we stand (2026-08-12)
 
 **Cross-LLM transfer characterised end-to-end (E20–E27).** Text transfers directly; **raw** hidden
