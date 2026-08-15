@@ -1292,30 +1292,37 @@ into a proportional gain over the text arm** because that arm already carries th
 signal. *(Bonus: the fresh-n1000 Llama-3 `q_resp` AUROC is 0.827, vs the E30 within-set N=200 split's
 optimistic 0.874 — the disjoint fresh eval is the honest number.)*
 
-**(2) Correctness: does z_aligned catch WRONG-but-fluent answers text misses?** From the committed
-E31 `correctness_eval_<model>.json` (all fresh N=1000; Llama-3 is the E31 N=200 within-set split —
-its fresh-n1000 correctness recompute was attempted but `arm_preds` ran pathologically slow, ~30
-min/target on the busy box, and was aborted; the tool is committed as `correctness_e33_ens_vs_qresp.py`):
+**(2) Correctness: does z_aligned catch WRONG-but-fluent answers text misses?** All three targets at
+**fresh N=1000** (Llama-3 now on the new n1000, no longer the E31 N=200 within-set split), 10k-resample
+paired bootstrap of the *incorrect*-label AUROC deltas (`correctness_e33_ens_vs_qresp.py`; reproduces
+E31's Mistral/DeepSeek point estimates exactly):
 
-| target | z_aligned AUROC_inc | q_resp AUROC_inc | ensemble | **z_aligned − q_resp** | ensemble − q_resp |
+| target | z_aligned AUROC_inc | q_resp AUROC_inc | ensemble | **Δ(z_aligned − q_resp) [95% CI]** | Δ(ensemble − q_resp) [95% CI] |
 |---|---|---|---|---|---|
-| Mistral (N=1000) | 0.720 | 0.725 | 0.731 | **−0.005** | +0.006 |
-| DeepSeek (N=1000) | 0.758 | 0.764 | 0.772 | **−0.006** | +0.008 |
-| Llama-3 (N=200) | 0.705 | 0.739 | 0.730 | **−0.034** | −0.009 |
+| Mistral | 0.720 | 0.725 | 0.731 | −0.005 [−0.028, +0.017] (incl 0) | +0.006 [−0.006, +0.018] (incl 0) |
+| DeepSeek | 0.758 | 0.764 | 0.772 | −0.005 [−0.025, +0.015] (incl 0) | +0.008 [−0.003, +0.020] (incl 0) |
+| Llama-3 | 0.701 | 0.697 | 0.709 | **+0.003** [−0.020, +0.026] (incl 0) | +0.012 [−0.000, +0.025] (incl 0) |
 
-**On detecting wrong answers, the hidden-state arm is *worse* than the text proxy for every target**
-— the opposite of "z catches fluent errors text misses." Fusing z in adds a negligible +0.006/+0.008
-(Mistral/DeepSeek) and actually **hurts** on Llama-3.
+**Every CI includes 0** → on wrong-answer detection, `z_aligned` is **statistically indistinguishable
+from the text proxy** (point deltas −0.005 / −0.005 / +0.003), and the ensemble's positive trend over
+text (+0.006 / +0.008 / +0.012) never reaches significance either. **Correction of the earlier N=200
+Llama-3 read:** the within-set split showed `z_aligned − q_resp = −0.034` ("z much worse"), but that
+was a **small-sample artifact** — at full N=1000 it is +0.003. So the honest statement is *not* "z is
+worse on correctness" but "**z adds no significant correctness signal over text.**" *(Bug fixed en
+route: the driver called `arm_preds` inside a per-id list comprehension — ~1000× recompute, the ~30
+min/target slowness; a single call + index cut it to ~2 min/target. `arm_preds` reloads are near-free —
+the OS-cached 3B backbone; the cost is the proxy forward passes.)*
 
-**Conclusion.** Given `q_resp_only`, `z_aligned` is **not worth its per-target cost**: a small
-(+0.012–0.018) SE-only top-up that does **not** scale with representational compatibility, and it is
-**negative** on the metric that matters (wrong-answer detection). The transferable uncertainty signal
-lives in the **model-agnostic text**, not the aligned hidden-state geometry — the Platonic-alignment
-result (E24–E30) is scientifically real but **operationally marginal**. **`q_resp_only` is the right
-primitive for a deployable amortized-UE proxy.** Artifacts: `procrustes_e30_ens_vs_qresp_<slug>.json`
-(SE deltas), `build_e23_fresh_fenced.sh`, `procrustes_e33_ens_vs_qresp.py`,
-`correctness_e33_ens_vs_qresp.py`. Open: a clean fresh-n1000 Llama-3 correctness recompute when the box
-is idle (dataset already built).
+**Conclusion.** Given `q_resp_only`, `z_aligned` is **not worth its per-target cost**: on SE it is a
+small (+0.012–0.018) top-up that does **not** scale with representational compatibility (CKA
+0.25→0.87), and on correctness it adds **nothing statistically significant** (all Δ CIs include 0).
+`q_resp_only` needs zero target fitting/sampling; `z_aligned` needs a per-target anchor set + Procrustes
+W. The transferable uncertainty signal lives in the **model-agnostic text**, not the aligned
+hidden-state geometry — the Platonic-alignment result (E24–E30) is scientifically real but
+**operationally marginal**. **`q_resp_only` is the right primitive for a deployable amortized-UE
+proxy.** Artifacts: `procrustes_e30_ens_vs_qresp_<slug>.json` (SE deltas),
+`correctness_ens_vs_qresp.json` (correctness deltas, all 3 at N=1000), `build_e23_fresh_fenced.sh`,
+`procrustes_e33_ens_vs_qresp.py`, `correctness_e33_ens_vs_qresp.py`.
 
 ---
 

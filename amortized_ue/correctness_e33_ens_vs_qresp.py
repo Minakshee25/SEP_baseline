@@ -35,7 +35,8 @@ for target, (fit_n, eval_n) in TARGETS.items():
     z_tr, z_eval = build_aligned_z(sh, rh, r_y, tr, va, esh, eval_rows)
     qr_fit = arm_preds("q_resp_only", target, "trivia_qa", fit_n)
     qr_tr  = np.array([qr_fit[i] for i in s_ids])[tr]
-    qr_eval = np.array([arm_preds("q_resp_only", target, "trivia_qa", eval_n)[i] for i in eval_ids])
+    qr_ev_map = arm_preds("q_resp_only", target, "trivia_qa", eval_n)   # ONE call, then index (was: recomputed per-id -> ~1000x slower)
+    qr_eval = np.array([qr_ev_map[i] for i in eval_ids])
     cz, cr = ecdf(z_tr), ecdf(qr_tr)
     preds = {
         "q_resp_only":    qr_eval,

@@ -146,17 +146,19 @@ anchor set + Procrustes `W`. Comparing the ensemble against **`q_resp_only`-ALON
 fresh n1000; built the missing **Llama-3 fresh n1000**, mean_acc 0.651/CAE 0.466, so all three targets
 are N=1000):
 
-| target | CKA | q_resp AUROC | Δ AUROC (ens − q_resp) | Δ Spearman | z_aligned − q_resp on **correctness** |
-|---|---|---|---|---|---|
-| DeepSeek | 0.25 | 0.857 | +0.012 [+0.003, +0.023] | +0.029 | **−0.006** |
-| Mistral | 0.80 | 0.852 | +0.014 [+0.002, +0.026] | +0.022 | **−0.005** |
-| Llama-3 | 0.87 | 0.827 | +0.018 [+0.006, +0.029] | +0.035 | **−0.034** (N=200) |
+| target | CKA | q_resp AUROC (SE) | Δ AUROC (ens − q_resp), SE | z_aligned − q_resp on **correctness** (N=1000) |
+|---|---|---|---|---|
+| DeepSeek | 0.25 | 0.857 | +0.012 [+0.003, +0.023] | −0.005 [−0.025, +0.015] (incl 0) |
+| Mistral | 0.80 | 0.852 | +0.014 [+0.002, +0.026] | −0.005 [−0.028, +0.017] (incl 0) |
+| Llama-3 | 0.87 | 0.827 | +0.018 [+0.006, +0.029] | +0.003 [−0.020, +0.026] (incl 0) |
 
 **Verdict: `z_aligned` is not worth its per-target cost.** On SE it adds only +0.012–0.018 AUROC, and
 this does **not** scale with CKA (best-case same-family Llama-3 ≈ worst-case DeepSeek). On
-**correctness** (detecting wrong answers) the hidden-state arm is **worse than text alone** on all
-three targets. The transferable signal is in the **model-agnostic text**, not the aligned geometry;
-the Platonic alignment is real but operationally marginal. Artifacts:
+**correctness** (detecting wrong answers, all three now at fresh N=1000, 10k-resample paired CIs) it
+adds **nothing statistically significant** — every Δ(z_aligned − q_resp) CI includes 0. *(The earlier
+N=200 Llama-3 "−0.034" was a small-sample artifact — +0.003 at N=1000.)* The transferable signal is in
+the **model-agnostic text**, not the aligned geometry; the Platonic alignment is real but operationally
+marginal. Artifacts:
 `procrustes_e30_ens_vs_qresp_<slug>.json`, `procrustes_e33_ens_vs_qresp.py`,
 `correctness_e33_ens_vs_qresp.py`, `build_e23_fresh_fenced.sh`. See `../EXPERIMENTS.md` E33.
 
