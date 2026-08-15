@@ -157,7 +157,7 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (2026-08-12)
+## Current state (updated 2026-08-15)
 
 **Target LLMs (4):** Llama-2-7b-chat (reference), Mistral-7B-Instruct-v0.2, Meta-Llama-3-8B-Instruct,
 and **DeepSeek-LLM-7B-Chat (E28, NEW)**. Per-target z-layers (via `linear_ceiling_probe.py`, not the
@@ -220,6 +220,29 @@ wrong after a lenient re-check): the "missed error" bucket is mostly label noise
 model right one wrong; difficulty held constant so text/`q_only` is pinned at 50%), each model's own
 hidden-state reader picks the failing model **54.8%** (vs 50% null, 61.9% SE ceiling) — a **real but small,
 underpowered (n=42)** model-specific increment, the question-level view of E25/E26. Full arc: EXPERIMENTS.md E32.
+
+**E33 — is `z_aligned` worth it GIVEN the text proxy `q_resp_only`? ➜ NO.** The E27–E30 headlines
+compare the ensemble vs the *supervised SEP*; but `q_resp_only` (model-agnostic text, trained once on
+the Llama-2 reference) needs **zero target fitting and zero target sampling**, while `z_aligned` needs a
+per-target anchor set + Procrustes W. The sharp test is **ensemble vs `q_resp_only`-ALONE**. Built the
+missing **`Meta-Llama-3-8B-Instruct_trivia_qa_n1000_full`** (fresh E23 shared ids; mean_acc 0.651 / CAE
+0.466; 0/1000 corrupt; on /vol/bitbucket + W&B `stage1_records_Meta-Llama-3-8B-Instruct_trivia_qa_n1000:v0`,
+verified by fetch) so all 3 targets eval at **N=1000**. (1) **SE-fidelity** (`procrustes_e33_ens_vs_qresp.py`,
+paired bootstrap): Δ AUROC(ens − q_resp) = DeepSeek **+0.012** / Mistral **+0.014** / Llama-3 **+0.018**
+(CIs exclude 0 but tiny; **FLAT across CKA 0.25→0.87**, non-monotonic on Spearman → the E25/E26
+model-specific increment is largely **redundant with the difficulty signal text already carries**). Fresh
+Llama-3 `q_resp` AUROC 0.827 vs the optimistic within-set N=200 0.874. (2) **Correctness** (all 3 at fresh
+N=1000, 10k paired bootstrap, `correctness_e33_ens_vs_qresp.py` → `correctness_ens_vs_qresp.json`):
+Δ(z_aligned − q_resp) = −0.005 / −0.005 / **+0.003**, **every CI includes 0** → z_aligned is
+statistically **indistinguishable** from text on wrong-answer detection. **Correction:** the earlier E31
+N=200 within-set Llama-3 showed −0.034 ("z worse"); at N=1000 it is +0.003 — a **small-sample artifact**,
+so say "no significant correctness benefit", NOT "worse". **Verdict: `q_resp_only` is the right primitive
+for a deployable proxy; `z_aligned` is a small SE-only top-up not worth its per-target cost.** Tooling:
+`build_e23_fresh_fenced.sh` (E23 fresh-ids build + `gpu_reserve` fencing — NOTE fencing reserves *memory*,
+not compute; a co-tenant's kernels still time-slice yours). **Driver gotcha (fixed):** the correctness
+driver called `arm_preds(...)` *inside a per-id list comprehension* → ~1000× recompute (~30 min/target);
+one call + index → ~2 min/target. `arm_preds` reloads are near-free (OS-cached 3B backbone); the cost is
+the proxy forward passes. Full arc: EXPERIMENTS.md E33; results table `RESULTS.md`.
 
 **Cross-LLM transfer (E20) — the thesis result.** Frozen Llama-2 proxy → Llama-3-8B, 5-seed Spearman
 (control = same harness on Llama-2's own 200, reproduces ID to 4 sig figs):
