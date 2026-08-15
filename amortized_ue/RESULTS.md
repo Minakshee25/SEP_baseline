@@ -138,5 +138,27 @@ barely transfers (CKA 0.25): the **text arm carries it**, and aligned-z still ad
 - Tooling: `procrustes_alignment.py` (E24/E25, `--position/--source_layer/--target_layer`),
   `procrustes_e30_ensemble_sep.py`, `gpu_reserve.py` + `build_n2000_waiter.sh` (GPU fencing).
 
-*Scope note: this file is the cross-LLM (E20–E30) results record. It does not re-enumerate every
+## E33 — Is `z_aligned` worth it given the text proxy? (the sharp cost/benefit)
+
+The E27–E30 headlines compare the ensemble against the **supervised SEP**. But the text arm
+`q_resp_only` needs **no target fitting and no target sampling**, while `z_aligned` needs a per-target
+anchor set + Procrustes `W`. Comparing the ensemble against **`q_resp_only`-ALONE** (fit n2000 → eval
+fresh n1000; built the missing **Llama-3 fresh n1000**, mean_acc 0.651/CAE 0.466, so all three targets
+are N=1000):
+
+| target | CKA | q_resp AUROC | Δ AUROC (ens − q_resp) | Δ Spearman | z_aligned − q_resp on **correctness** |
+|---|---|---|---|---|---|
+| DeepSeek | 0.25 | 0.857 | +0.012 [+0.003, +0.023] | +0.029 | **−0.006** |
+| Mistral | 0.80 | 0.852 | +0.014 [+0.002, +0.026] | +0.022 | **−0.005** |
+| Llama-3 | 0.87 | 0.827 | +0.018 [+0.006, +0.029] | +0.035 | **−0.034** (N=200) |
+
+**Verdict: `z_aligned` is not worth its per-target cost.** On SE it adds only +0.012–0.018 AUROC, and
+this does **not** scale with CKA (best-case same-family Llama-3 ≈ worst-case DeepSeek). On
+**correctness** (detecting wrong answers) the hidden-state arm is **worse than text alone** on all
+three targets. The transferable signal is in the **model-agnostic text**, not the aligned geometry;
+the Platonic alignment is real but operationally marginal. Artifacts:
+`procrustes_e30_ens_vs_qresp_<slug>.json`, `procrustes_e33_ens_vs_qresp.py`,
+`correctness_e33_ens_vs_qresp.py`, `build_e23_fresh_fenced.sh`. See `../EXPERIMENTS.md` E33.
+
+*Scope note: this file is the cross-LLM (E20–E33) results record. It does not re-enumerate every
 superseded single-LLM config/ablation — those live in `../EXPERIMENTS.md`.*

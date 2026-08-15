@@ -1259,6 +1259,66 @@ needs the (cheap, CPU) firming-up run above.
 
 ---
 
+## E33 — Is `z_aligned` worth it GIVEN the text proxy `q_r_proxy`? — ✅ no: marginal on SE, negative on correctness, CKA-independent
+
+**Motivation.** Every "alignment helps" headline (E27/E29/E30) compares the label-free ensemble
+(aligned-z + `q_resp_only`) against the **supervised SEP**. But `q_resp_only` — the model-agnostic
+**text** arm, trained once on the Llama-2 reference — needs **zero** target-side fitting and **zero**
+target sampling, whereas the aligned-z arm needs a per-target anchor set + a Procrustes **W**. So the
+sharp question is not "ensemble vs SEP" but **"ensemble vs `q_resp_only`-ALONE"**: does the
+hidden-state arm earn its per-target cost? And the "model-specific increment" (E25/E26) is measured
+against a shared-**difficulty** control *inside the z pathway* — but the text arm already reads
+difficulty, so that increment may be **redundant** with text.
+
+**New data built.** `Meta-Llama-3-8B-Instruct_trivia_qa_n1000_full` on the E23 fresh shared ids
+(mean_acc 0.651 / CAE 0.466 / incorrect-rate 0.349; integrity-scanned, 0/1000 corrupt) — the fresh
+disjoint eval Llama-3 lacked in E30, so all three targets now evaluate at **N=1000**. Built with the
+new **`build_e23_fresh_fenced.sh`** (E23 fresh-ids recipe + `gpu_reserve` fencing from
+`build_n2000_waiter.sh`, so a co-tenant can't OOM the run mid-flight).
+
+**(1) SE-fidelity: `ensemble − q_resp_only-ALONE`** (`procrustes_e33_ens_vs_qresp.py`; reference
+Llama-2 TBG:22/SLT:15; fit n2000 → eval fresh n1000; 1000-resample paired bootstrap; rank-fusion):
+
+| target | CKA (E30) | model-specific increment (E30) | q_resp AUROC | **Δ AUROC (ens − q_resp)** | **Δ Spearman** |
+|---|---|---|---|---|---|
+| DeepSeek | 0.25 | +0.008 (n.s.) | 0.857 | **+0.012 [+0.003, +0.023]** | +0.029 [+0.014, +0.045] |
+| Mistral | 0.80 | +0.032 (sig) | 0.852 | **+0.014 [+0.002, +0.026]** | +0.022 [+0.005, +0.041] |
+| Llama-3 | 0.87 | +0.069 (N=200 n.s.) | 0.827 | **+0.018 [+0.006, +0.029]** | +0.035 [+0.016, +0.052] |
+
+All Δ CIs exclude 0 — z_aligned adds *real* SE signal over text — but the magnitude is **small and
+essentially flat across CKA** (0.012→0.018 over CKA 0.25→0.87, overlapping CIs, and non-monotonic on
+Spearman where DeepSeek +0.029 > Mistral +0.022). **The "model-specific increment" does NOT translate
+into a proportional gain over the text arm** because that arm already carries the shared-difficulty
+signal. *(Bonus: the fresh-n1000 Llama-3 `q_resp` AUROC is 0.827, vs the E30 within-set N=200 split's
+optimistic 0.874 — the disjoint fresh eval is the honest number.)*
+
+**(2) Correctness: does z_aligned catch WRONG-but-fluent answers text misses?** From the committed
+E31 `correctness_eval_<model>.json` (all fresh N=1000; Llama-3 is the E31 N=200 within-set split —
+its fresh-n1000 correctness recompute was attempted but `arm_preds` ran pathologically slow, ~30
+min/target on the busy box, and was aborted; the tool is committed as `correctness_e33_ens_vs_qresp.py`):
+
+| target | z_aligned AUROC_inc | q_resp AUROC_inc | ensemble | **z_aligned − q_resp** | ensemble − q_resp |
+|---|---|---|---|---|---|
+| Mistral (N=1000) | 0.720 | 0.725 | 0.731 | **−0.005** | +0.006 |
+| DeepSeek (N=1000) | 0.758 | 0.764 | 0.772 | **−0.006** | +0.008 |
+| Llama-3 (N=200) | 0.705 | 0.739 | 0.730 | **−0.034** | −0.009 |
+
+**On detecting wrong answers, the hidden-state arm is *worse* than the text proxy for every target**
+— the opposite of "z catches fluent errors text misses." Fusing z in adds a negligible +0.006/+0.008
+(Mistral/DeepSeek) and actually **hurts** on Llama-3.
+
+**Conclusion.** Given `q_resp_only`, `z_aligned` is **not worth its per-target cost**: a small
+(+0.012–0.018) SE-only top-up that does **not** scale with representational compatibility, and it is
+**negative** on the metric that matters (wrong-answer detection). The transferable uncertainty signal
+lives in the **model-agnostic text**, not the aligned hidden-state geometry — the Platonic-alignment
+result (E24–E30) is scientifically real but **operationally marginal**. **`q_resp_only` is the right
+primitive for a deployable amortized-UE proxy.** Artifacts: `procrustes_e30_ens_vs_qresp_<slug>.json`
+(SE deltas), `build_e23_fresh_fenced.sh`, `procrustes_e33_ens_vs_qresp.py`,
+`correctness_e33_ens_vs_qresp.py`. Open: a clean fresh-n1000 Llama-3 correctness recompute when the box
+is idle (dataset already built).
+
+---
+
 ## Where we stand (2026-08-12)
 
 **Cross-LLM transfer characterised end-to-end (E20–E27).** Text transfers directly; **raw** hidden
