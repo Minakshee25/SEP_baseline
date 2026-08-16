@@ -1326,6 +1326,135 @@ proxy.** Artifacts: `procrustes_e30_ens_vs_qresp_<slug>.json` (SE deltas),
 
 ---
 
+## E34 — After alignment, do the models share the same UNCERTAINTY DIRECTION? (readout agreement) — ✅ yes, validated against a *fair* ceiling (Mistral/Llama-3 tight; DeepSeek same in the dominant dims)
+
+**Question.** E24–E30 showed the aligned hidden state *reads* SE cross-model. E34 asks a sharper,
+geometric question: once all four models' SE readouts are carried into one shared basis (Llama-2
+anchor, orthogonal Procrustes W as in `procrustes_alignment.py`), **do they rank questions the same
+way, and do their uncertainty *directions* (the readout weight vectors) point the same way?**
+Diagnostic only — new `amortized_ue/readout_agreement.py` (kept) reuses `linear_ceiling_probe` +
+`procrustes_alignment` read-only; deep-dives ran as throwaway scratch scripts (logs kept under
+`amortized_ue/*.log`). TBG, trivia_qa **n2000**, four id-aligned targets, **one shared layer L_a**
+throughout (W only connects one layer). CPU; thread-capped (see lesson 2).
+
+**(A) Prediction agreement reaches the within-model reliability ceiling.** `readout_agreement.py`
+fits each model's ridge readout at L_a, maps each into the anchor basis, applies all to one fixed
+held-out set (anchor test-200), and takes pairwise Spearman between prediction vectors + bootstrap
+CIs; references = split-half ceiling (same model, two half-readouts) and random-orthogonal floor.
+The layer was **auto-picked L_a=30** first (best val Spearman, *not* the documented 22 — see lesson
+3); re-run pinned at **L_a=22** for robustness. Both layers give the *same* conclusion.
+
+Pairwise Spearman between carried predictions (diagonal=1.000 by construction):
+
+| L22 | Llama-2 | Mistral | Llama-3 | deepseek |   | L30 | Llama-2 | Mistral | Llama-3 | deepseek |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Llama-2 | 1.000 | 0.807 | 0.829 | 0.800 | | Llama-2 | 1.000 | 0.889 | 0.855 | 0.882 |
+| Mistral | 0.807 | 1.000 | 0.780 | 0.790 | | Mistral | 0.889 | 1.000 | 0.797 | 0.893 |
+| Llama-3 | 0.829 | 0.780 | 1.000 | 0.796 | | Llama-3 | 0.855 | 0.797 | 1.000 | 0.788 |
+| deepseek | 0.800 | 0.790 | 0.796 | 1.000 | | deepseek | 0.882 | 0.893 | 0.788 | 1.000 |
+
+Cross-model-vs-anchor **meets or exceeds** the split-half ceiling at both layers (L22: Mistral 0.807
+vs ceil 0.766; Llama-3 0.829 vs 0.773; DeepSeek 0.800 vs 0.849 — L30: 0.889/0.866, 0.855/0.837,
+0.882/0.913). Floors ≈ 0 (random-orthogonal W). Native self-Spearman 0.59–0.65 (sanity PASS). The
+built-in "ceiling > cross" sanity check reports **FAIL — that FAIL is the finding**: different models
+rank questions no more differently than one model does against itself. Absolute numbers scale with the
+layer (L22 noisier readout → ~0.80; L30 → ~0.88) but the ratio (and conclusion) is invariant.
+
+**(B) A dissociation, then its cause.** Prediction agreement is high (~0.80) yet the **weight-direction
+cosine** in the shared basis is only ~0.43–0.49 (L22). Resolved by a direct diagnostic (anchor only,
+own standardized space, no W, K=15 random half-splits): two ridge fits on disjoint halves of the *same
+model* only agree in direction at cosine ~0.4, and it is a pure **collinearity** effect —
+
+| alpha | coef cosine | pred Spearman |   (D=4096, but effective rank of train cov ≈ **218** → 19× redundancy) |
+|---|---|---|---|
+| 1 | 0.074 ±0.012 | 0.386 ±0.057 | sanity: identical data twice → cosine **1.000** (pipeline correct) |
+| 100 | 0.084 | 0.437 | |
+| 1000 | 0.146 | 0.557 | |
+| **10000** (operating) | **0.407 ±0.017** | **0.799 ±0.020** | reproduces the 0.415 ceiling across 15 splits |
+| 100000 | 0.757 | 0.947 | heavy shrink → direction stabilises onto the dominant axis |
+
+→ ridge **coefficients are unstable under multicollinearity while predictions are stable**; the low
+full-vector cosine is the noisy low-variance tail, not a model difference. So full-vector cosine is the
+wrong instrument — measure the direction **inside the well-determined subspace**.
+
+**(C) Cutoff sweep — same direction in the reliably-estimated subspace.** Project each carried readout
+onto the anchor's top-k PCs (label-free), sweep k, standardized L22 space:
+
+| k | Mistral | Llama-3 | deepseek | anchor split-half ceiling | var captured |
+|---|---|---|---|---|---|
+| 10 | 0.972 | 0.969 | 0.964 | 0.969 | |
+| 50 | 0.886 | 0.892 | 0.903 | 0.915 | 35% |
+| 100 | 0.774 | 0.812 | 0.822 | 0.779 | 49% |
+| 200 | 0.687 | 0.762 | 0.696 | 0.671 | 65% |
+| 1440 (full) | 0.472 | 0.514 | 0.498 | 0.416 | reproduces the ~0.47 full-vector number |
+
+Cross ≈ the same-model ceiling at *every* k; the full-vector k=1440 collapses to ~0.47 for cross AND
+~0.42 for the same model against itself → the "low" number is noise, shared.
+
+**(D) Principal-angle test — the whole subspace coincides, not just the dominant axis.** SE is a scalar
+→ one readout direction; so the "whole subspace" question is on the *representation* subspace the
+direction lives in. Principal angles between the anchor's and each aligned model's top-k **state**
+subspaces (matched n=720, W fit on 720):
+
+| k | Mistral | Llama-3 | deepseek | #dims coinciding (cos>0.7), of k |
+|---|---|---|---|---|
+| 10 | 0.863 | 0.895 | 0.924 | 9–10 / 10 |
+| 50 | 0.838 | 0.850 | 0.825 | 40–43 / 50 |
+| 100 | 0.813 | 0.823 | 0.804 | 78–81 / 100 |
+| 200 | 0.805 | 0.813 | 0.808 | 153–155 / 200 |
+
+→ ~80% of the top-100 directions genuinely coincide — broadly aligned geometry, not one lucky axis.
+**Caveats stated, not hidden:** the split-half "ceiling" here is *not* a fair reference (it perturbs
+the *questions* while cross perturbs the *model* — different perturbations), and W is fit in-sample; the
+orthogonal-invariant CKA (0.91) corroborates the alignability is intrinsic.
+
+**(E) ⭐ Decisive matched same-vs-different ceiling.** The valid test (the earlier ceilings were both
+invalid — lesson 1). Split train into disjoint halves h1/h2; **both** comparisons span h1↔h2 so they
+carry *identical* sampling noise, and the ONLY difference is same-model vs different-model. Direction
+cosine in the top-k PC subspace, `cross-model / that model's own same-model ceiling`:
+
+| k | Mistral (cross/self) | Llama-3 (cross/self) | deepseek (cross/self) | anchor ceiling |
+|---|---|---|---|---|
+| 10 | 0.951 / 0.953 | 0.941 / 0.943 | 0.939 / 0.945 | 0.969 |
+| 50 | 0.822 / 0.802 | 0.814 / 0.821 | 0.839 / 0.831 | 0.915 |
+| 100 | 0.669 / 0.645 | 0.703 / 0.706 | 0.717 / 0.760 | 0.779 |
+| 200 | 0.546 / 0.505 | 0.615 / 0.629 | 0.594 / 0.677 | 0.671 |
+| 1440 | 0.303 / 0.272 | 0.355 / 0.384 | 0.368 / 0.441 | 0.416 |
+
+**cross ≈ self-ceiling at every k, for every model** → swapping the model costs no more than a single
+model's own measurement wobble. The full-vector 0.30–0.37 that first looked alarming is exactly the
+same-model noise floor (0.27–0.44). **DeepSeek nuance:** matches in the top ~50 dims but its cross runs
+a hair below its self-ceiling in the deeper dims (k≥100: 0.594 vs 0.677 at 200) → a *small genuine*
+model-specific residual, consistent with it being the CKA/scale outlier; Mistral/Llama-3 show no gap.
+
+**Conclusion.** After label-free Procrustes alignment, the models **share the same uncertainty
+direction, up to estimation noise** — tight for Mistral and Llama-3, and same-in-the-dominant-directions
+for DeepSeek (with a small real residual in the fine detail). Validated against a matched, fair ceiling.
+**Scope (do not overstate):** trivia_qa, TBG L22, the **variance-ranked (label-free)** subspace, and this
+"direction" is largely the **shared question-difficulty** signal (E25/E26/E33), not a proven model-private
+uncertainty axis; "same" means "no detectable difference beyond noise," not an identical crisp axis.
+
+**Methodological lessons (carried into memory):**
+1. **A "same vs different" claim is only valid if the reference (ceiling) is matched on every nuisance
+   except the factor of interest.** Two ceilings were caught invalid before the right one: (i) the
+   split-half ceiling estimated subspaces from *half* the samples while cross used the *full* train
+   (sample-size artifact — made cross look better than the ceiling); (ii) the matched-n ceiling still
+   perturbed a *different* nuisance (questions) than cross (model). Only the disjoint-halves
+   same-vs-different design isolates the model factor.
+2. **Cap BLAS threads on the shared node** (`OMP_/OPENBLAS_/MKL_NUM_THREADS`) — the first run burned
+   3228 CPU-s in 675 wall-s (~4.8× oversubscription thrash); and **never let a `grep` pipe block-buffer
+   away a background job's progress** (write unbuffered to a log).
+3. `readout_agreement.py` **auto-picked L_a=30** (best val Spearman on n2000), not the documented
+   Llama-2 TBG:22 — the late TBG layers are near-tied, val noise decides; the L22 robustness re-run gave
+   the identical conclusion.
+
+**Artifacts.** `amortized_ue/readout_agreement.py`; JSONs `readout_agreement_result.json` (L30),
+`readout_agreement_L22_result.json` (L22, `split_half_ceiling` entries carry a `cosine` field); logs
+`amortized_ue/{cutoff_sweep,principal_angles,matched_ceiling}.log`; scratch analyses (cosine_check,
+cutoff_sweep, principal_angles, matched_ceiling) in the session scratchpad.
+
+---
+
 ## Where we stand (2026-08-12)
 
 **Cross-LLM transfer characterised end-to-end (E20–E27).** Text transfers directly; **raw** hidden

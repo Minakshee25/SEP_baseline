@@ -1,0 +1,196 @@
+{
+  "anchor": "Llama-2-7b-chat",
+  "models": [
+    "Llama-2-7b-chat",
+    "Mistral-7B-Instruct-v0.2",
+    "Meta-Llama-3-8B-Instruct",
+    "deepseek-llm-7b-chat"
+  ],
+  "dataset": "trivia_qa",
+  "num_samples": 2000,
+  "position": "TBG",
+  "layer_L_a": 30,
+  "n_test": 200,
+  "boot": 2000,
+  "native_self_spearman": {
+    "Llama-2-7b-chat": 0.5853315991548673,
+    "Mistral-7B-Instruct-v0.2": 0.6057886864815106,
+    "Meta-Llama-3-8B-Instruct": 0.6236430249171858,
+    "deepseek-llm-7b-chat": 0.6367799191063749
+  },
+  "readout_alpha": {
+    "Llama-2-7b-chat": 10000.0,
+    "Mistral-7B-Instruct-v0.2": 10000.0,
+    "Meta-Llama-3-8B-Instruct": 10000.0,
+    "deepseek-llm-7b-chat": 10000.0
+  },
+  "pairwise_spearman": {
+    "Llama-2-7b-chat|Llama-2-7b-chat": 1.0,
+    "Llama-2-7b-chat|Mistral-7B-Instruct-v0.2": 0.8888482952542135,
+    "Llama-2-7b-chat|Meta-Llama-3-8B-Instruct": 0.8552063223889991,
+    "Llama-2-7b-chat|deepseek-llm-7b-chat": 0.8815641146240641,
+    "Mistral-7B-Instruct-v0.2|Llama-2-7b-chat": 0.8888482952542135,
+    "Mistral-7B-Instruct-v0.2|Mistral-7B-Instruct-v0.2": 1.0,
+    "Mistral-7B-Instruct-v0.2|Meta-Llama-3-8B-Instruct": 0.7970093150878982,
+    "Mistral-7B-Instruct-v0.2|deepseek-llm-7b-chat": 0.8930497154207689,
+    "Meta-Llama-3-8B-Instruct|Llama-2-7b-chat": 0.8552063223889991,
+    "Meta-Llama-3-8B-Instruct|Mistral-7B-Instruct-v0.2": 0.7970093150878982,
+    "Meta-Llama-3-8B-Instruct|Meta-Llama-3-8B-Instruct": 1.0,
+    "Meta-Llama-3-8B-Instruct|deepseek-llm-7b-chat": 0.7881628611483059,
+    "deepseek-llm-7b-chat|Llama-2-7b-chat": 0.8815641146240641,
+    "deepseek-llm-7b-chat|Mistral-7B-Instruct-v0.2": 0.8930497154207689,
+    "deepseek-llm-7b-chat|Meta-Llama-3-8B-Instruct": 0.7881628611483059,
+    "deepseek-llm-7b-chat|deepseek-llm-7b-chat": 1.0
+  },
+  "pairwise_spearman_ci95": {
+    "Llama-2-7b-chat|Llama-2-7b-chat": [
+      0.9999999999999999,
+      1.0
+    ],
+    "Llama-2-7b-chat|Mistral-7B-Instruct-v0.2": [
+      0.8467402903310708,
+      0.9230069860857278
+    ],
+    "Llama-2-7b-chat|Meta-Llama-3-8B-Instruct": [
+      0.8053757958789602,
+      0.8966500543280587
+    ],
+    "Llama-2-7b-chat|deepseek-llm-7b-chat": [
+      0.836583927541952,
+      0.9155940902248915
+    ],
+    "Mistral-7B-Instruct-v0.2|Llama-2-7b-chat": [
+      0.8467402903310708,
+      0.9230069860857278
+    ],
+    "Mistral-7B-Instruct-v0.2|Mistral-7B-Instruct-v0.2": [
+      0.9999999999999999,
+      1.0
+    ],
+    "Mistral-7B-Instruct-v0.2|Meta-Llama-3-8B-Instruct": [
+      0.7292958406780932,
+      0.8525137925411048
+    ],
+    "Mistral-7B-Instruct-v0.2|deepseek-llm-7b-chat": [
+      0.8558882862178819,
+      0.9240398823366522
+    ],
+    "Meta-Llama-3-8B-Instruct|Llama-2-7b-chat": [
+      0.8053757958789602,
+      0.8966500543280587
+    ],
+    "Meta-Llama-3-8B-Instruct|Mistral-7B-Instruct-v0.2": [
+      0.7292958406780932,
+      0.8525137925411048
+    ],
+    "Meta-Llama-3-8B-Instruct|Meta-Llama-3-8B-Instruct": [
+      0.9999999999999999,
+      1.0
+    ],
+    "Meta-Llama-3-8B-Instruct|deepseek-llm-7b-chat": [
+      0.71480980352481,
+      0.845460395755236
+    ],
+    "deepseek-llm-7b-chat|Llama-2-7b-chat": [
+      0.836583927541952,
+      0.9155940902248915
+    ],
+    "deepseek-llm-7b-chat|Mistral-7B-Instruct-v0.2": [
+      0.8558882862178819,
+      0.9240398823366522
+    ],
+    "deepseek-llm-7b-chat|Meta-Llama-3-8B-Instruct": [
+      0.71480980352481,
+      0.845460395755236
+    ],
+    "deepseek-llm-7b-chat|deepseek-llm-7b-chat": [
+      0.9999999999999999,
+      1.0
+    ]
+  },
+  "split_half_ceiling": {
+    "Llama-2-7b-chat": {
+      "spearman": 0.8960669484144582,
+      "lo95": 0.8563758159543828,
+      "hi95": 0.9279891312447868
+    },
+    "Mistral-7B-Instruct-v0.2": {
+      "spearman": 0.8656649795726725,
+      "lo95": 0.8181103103785357,
+      "hi95": 0.903876602329295
+    },
+    "Meta-Llama-3-8B-Instruct": {
+      "spearman": 0.8366404464860634,
+      "lo95": 0.7797610332240109,
+      "hi95": 0.8837588487253533
+    },
+    "deepseek-llm-7b-chat": {
+      "spearman": 0.9125151068652105,
+      "lo95": 0.8760697518950359,
+      "hi95": 0.9397636791707196
+    }
+  },
+  "random_orthogonal_floor": {
+    "Mistral-7B-Instruct-v0.2": {
+      "mean": 0.06134212955983618,
+      "std": 0.11901104357972862
+    },
+    "Meta-Llama-3-8B-Instruct": {
+      "mean": 0.04153621955765361,
+      "std": 0.23090699257104913
+    },
+    "deepseek-llm-7b-chat": {
+      "mean": -0.0437406763224153,
+      "std": 0.07906503079040915
+    }
+  },
+  "pairwise_cosine_std": {
+    "Llama-2-7b-chat|Llama-2-7b-chat": 0.9999999998878542,
+    "Llama-2-7b-chat|Mistral-7B-Instruct-v0.2": 0.38918818105690683,
+    "Llama-2-7b-chat|Meta-Llama-3-8B-Instruct": 0.4611668037449654,
+    "Llama-2-7b-chat|deepseek-llm-7b-chat": 0.28170338376757387,
+    "Mistral-7B-Instruct-v0.2|Llama-2-7b-chat": 0.38918818105690683,
+    "Mistral-7B-Instruct-v0.2|Mistral-7B-Instruct-v0.2": 0.9999999999939044,
+    "Mistral-7B-Instruct-v0.2|Meta-Llama-3-8B-Instruct": 0.37194309608657083,
+    "Mistral-7B-Instruct-v0.2|deepseek-llm-7b-chat": 0.6487162254922658,
+    "Meta-Llama-3-8B-Instruct|Llama-2-7b-chat": 0.4611668037449654,
+    "Meta-Llama-3-8B-Instruct|Mistral-7B-Instruct-v0.2": 0.37194309608657083,
+    "Meta-Llama-3-8B-Instruct|Meta-Llama-3-8B-Instruct": 0.9999999999857712,
+    "Meta-Llama-3-8B-Instruct|deepseek-llm-7b-chat": 0.28967926395120286,
+    "deepseek-llm-7b-chat|Llama-2-7b-chat": 0.28170338376757387,
+    "deepseek-llm-7b-chat|Mistral-7B-Instruct-v0.2": 0.6487162254922658,
+    "deepseek-llm-7b-chat|Meta-Llama-3-8B-Instruct": 0.28967926395120286,
+    "deepseek-llm-7b-chat|deepseek-llm-7b-chat": 0.9999999999986248
+  },
+  "cka_vs_anchor": {
+    "Mistral-7B-Instruct-v0.2": 0.8648364932651111,
+    "Meta-Llama-3-8B-Instruct": 0.8713884893784049,
+    "deepseek-llm-7b-chat": 0.671521705055813
+  },
+  "reconstruction_vs_anchor": {
+    "Mistral-7B-Instruct-v0.2": {
+      "cosine_before": 0.0007217360544018447,
+      "cosine_after": 0.39923813939094543,
+      "recon_err_before": 1.0352800662127901,
+      "recon_err_after": 0.9265552817032231
+    },
+    "Meta-Llama-3-8B-Instruct": {
+      "cosine_before": 3.0840979889035225e-05,
+      "cosine_after": 0.4093362092971802,
+      "recon_err_before": 1.0560712918333062,
+      "recon_err_after": 0.9157403463463143
+    },
+    "deepseek-llm-7b-chat": {
+      "cosine_before": 0.0004798545560333878,
+      "cosine_after": 0.39876267313957214,
+      "recon_err_before": 1.0248863381192566,
+      "recon_err_after": 0.9345040475637875
+    }
+  },
+  "sanity": {
+    "diagonal_ok": true,
+    "ceiling_above_cross": false,
+    "floor_near_zero": true,
+    "native_in_range": true
+  }
+}

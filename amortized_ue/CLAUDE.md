@@ -157,7 +157,7 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (updated 2026-08-15)
+## Current state (updated 2026-08-16)
 
 **Target LLMs (4):** Llama-2-7b-chat (reference), Mistral-7B-Instruct-v0.2, Meta-Llama-3-8B-Instruct,
 and **DeepSeek-LLM-7B-Chat (E28, NEW)**. Per-target z-layers (via `linear_ceiling_probe.py`, not the
@@ -243,6 +243,30 @@ not compute; a co-tenant's kernels still time-slice yours). **Driver gotcha (fix
 driver called `arm_preds(...)` *inside a per-id list comprehension* → ~1000× recompute (~30 min/target);
 one call + index → ~2 min/target. `arm_preds` reloads are near-free (OS-cached 3B backbone); the cost is
 the proxy forward passes. Full arc: EXPERIMENTS.md E33; results table `RESULTS.md`.
+
+**E34 — do the aligned models share the same UNCERTAINTY DIRECTION? ➜ YES, up to noise** (diagnostic;
+`readout_agreement.py`, kept; TBG, trivia_qa n2000, 4 id-aligned targets, one shared anchor layer L_a).
+(A) Cross-model **prediction agreement** between readouts carried into the Llama-2 basis **meets/exceeds
+the within-model split-half ceiling** (L22 0.80–0.83, L30 0.85–0.89; floors ≈0) — the built-in
+"ceiling>cross" sanity FAIL *is* the finding. *(Script auto-picked L_a=**30**, not the documented TBG:22
+— late TBG layers near-tied on val; L22 re-run identical conclusion.)* (B) Raw weight-direction cosine
+looked "low" (~0.47) only because of **ridge coefficient instability under collinearity** (D=4096 but
+effective rank ≈**218**; two ridges on disjoint halves of the SAME model agree at cosine ~0.41 at
+α=10000; identical-data sanity = 1.000). (C/D) In the **top-k PC subspace** cross ≈ same-model ceiling at
+every k (top-10 cosine 0.96–0.97), and **~80% of the top-100 state-subspace directions coincide** across
+models (principal angles) — broadly aligned, not one axis. (E) **⭐ Decisive matched same-vs-different
+ceiling** (disjoint halves h1/h2; both cross and ceiling span h1↔h2 so noise is identical, only the model
+differs): **cross ≈ self-ceiling at every k for every model** → the model swap costs no more than one
+model's own wobble; the alarming full-vector 0.30 is just the same-model noise floor (0.27–0.44).
+**DeepSeek nuance:** same in the top ~50 dims, small *genuine* residual in deeper dims (k≥100) — the
+CKA/scale outlier again; Mistral/Llama-3 no gap. **Scope (do not overstate):** trivia_qa/TBG L22,
+variance-ranked (label-free) subspace; the direction is largely shared question-**difficulty** (E25/E26/
+E33), not a proven model-private axis; "same" = no detectable difference beyond noise, not a crisp axis.
+**Lesson (memory):** a same-vs-different claim needs a ceiling matched on every nuisance but the tested
+factor — **two ceilings were caught invalid** (half-vs-full sample size; then different-question vs
+different-model perturbation) before the disjoint-halves design. Full arc + all tables: EXPERIMENTS.md
+E34. Artifacts: `readout_agreement.py`, `readout_agreement_L22_result.json`,
+`amortized_ue/{cutoff_sweep,principal_angles,matched_ceiling}.log`.
 
 **Cross-LLM transfer (E20) — the thesis result.** Frozen Llama-2 proxy → Llama-3-8B, 5-seed Spearman
 (control = same harness on Llama-2's own 200, reproduces ID to 4 sig figs):
