@@ -442,6 +442,16 @@ label-free rank-fusion ≥ supervised SEP on correctness too; method ordering ma
 Llama-3). `correctness_eval.py` + `correctness_eval_*.json`. See EXPERIMENTS.md E31.
 
 **NOW — pick the next thrust (all open):**
+- **E35 follow-ups (harden the pooling result — RESULTS ARE NOT REVIEW-VERIFIED):**
+  - **Resume `/code-review`** on `amortized_ue/e35_pooling_*.py` (it was stopped before emitting findings
+    for token cost) — one bug was already found+fixed, so an independent pass is warranted before trusting.
+  - **Add bootstrap CIs** to the pooling deltas (currently 3–4 seeds, no CIs → "small & consistent", not
+    "significant"); and **fix the α-selection asymmetry** (pooled selects α on a 3× larger val than single).
+  - **⭐ The real untapped lever — different questions per model:** all E35 pooling used models run on the
+    *same* 1440 questions (needed for alignment), so pooling adds model-diversity but **not question
+    coverage**, and both single+pooled ridges are **data-saturated (~800 Q)**. Test whether giving each
+    source model **distinct** questions (keeping a small shared anchor set for `W`) lets pooling actually
+    improve — needs new Stage-1 generation on fresh prompts.
 - **3rd-family alignment (breadth):** build Llama-3 n2000 → replicate the E24/E25 controls + the E27 SEP
   comparison on Llama-3, to check the alignment findings generalise beyond the Llama-2↔Mistral pair.
 - **Anchor-count efficiency sweep for W:** how *few* paired anchors suffice to fit a good Procrustes W?
