@@ -157,7 +157,7 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (updated 2026-08-16)
+## Current state (updated 2026-08-17)
 
 **Target LLMs (4):** Llama-2-7b-chat (reference), Mistral-7B-Instruct-v0.2, Meta-Llama-3-8B-Instruct,
 and **DeepSeek-LLM-7B-Chat (E28, NEW)**. Per-target z-layers (via `linear_ceiling_probe.py`, not the
@@ -266,7 +266,28 @@ E33), not a proven model-private axis; "same" = no detectable difference beyond 
 factor — **two ceilings were caught invalid** (half-vs-full sample size; then different-question vs
 different-model perturbation) before the disjoint-halves design. Full arc + all tables: EXPERIMENTS.md
 E34. Artifacts: `readout_agreement.py`, `readout_agreement_L22_result.json`,
-`amortized_ue/{cutoff_sweep,principal_angles,matched_ceiling}.log`.
+`amortized_ue/e34_{cosine_instability,cutoff_sweep,principal_angles,matched_ceiling}.py` + `.log`.
+
+**E35 — POOL multiple aligned models into one ridge? ➜ small yes, but data-saturated + marginal vs text.**
+E34's shared direction makes pooling *valid* (averaging estimates of the same direction). Leave-one-out
+(train on 3 aligned models → test held-out 4th's `te`; Llama-2 frame; label-free). **⚠️ user-caught bug:**
+v1 pooled **raw** SE labels across models with different SE scales (DeepSeek mean 0.78 vs Llama-3 0.48)
+while states were per-model centered → per-model label offsets over-regularized the ridge, making pooling
+look *worse*. **Fix:** per-model SE-label z-scoring + per-model feature scaler (target uses its OWN scaler);
+lifted pooling +0.02–0.03. **Results:** pooled **ties oracle best-single**, **beats a fixed Llama-2 anchor
+by ~+0.015** (never hurts). The clean **matched-partition control** (SAME questions + SAME rows, only
+1-model vs 3-model routing) → pooled ≥ single by +0.012–0.020 at full data: a **small but real diversity
+effect**; the big low-data lead in the naive sweep was **mostly 3× rows**. **1440 rows == 4320 rows** (Δ≈0)
+→ ridge **data-saturated (~800 Q)**; only *more unique questions* would help, but all models share the same
+questions (needed for alignment) so pooling adds **model-diversity, not question coverage**. **Not better
+than the strong baseline:** a marginal top-up over the text proxy `q_resp_only` (E33, needs no target
+forward pass). **Inference:** per new target — one-time **label-free** calibration (run target+anchor on
+shared anchor Qs, fit `W_T`), then **one forward pass/query** → `W_T` → standardize → ridge → SE. **Target
+criteria:** white-box states, **hidden dim 4096** (square Procrustes), **high CKA after `W`** (E30/E34: CKA
+not family; verify label-free first). **Caveats:** 3–4 seeds, **no CIs** (so "small & consistent", not
+"significant"); pooled α-val 3× larger; one bug fixed; a `/code-review` was **stopped before findings** →
+scripts not review-verified. Full arc + tables: EXPERIMENTS.md E35. Artifacts:
+`amortized_ue/e35_pooling_{loo_pilot,datasize_sweep,matched_partition}.py`.
 
 **Cross-LLM transfer (E20) — the thesis result.** Frozen Llama-2 proxy → Llama-3-8B, 5-seed Spearman
 (control = same harness on Llama-2's own 200, reproduces ID to 4 sig figs):

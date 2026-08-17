@@ -1455,6 +1455,59 @@ cutoff_sweep, principal_angles, matched_ceiling) in the session scratchpad.
 
 ---
 
+## E35 — Can we POOL multiple aligned models' data into one ridge that beats a single-model ridge? — ⚠️ small yes (ties oracle best-single, beats a fixed anchor by ~+0.015), but data-saturated and marginal vs the text baseline
+
+**Question.** E34 showed the 4 models share the same uncertainty *direction* after alignment — which makes **pooling** statistically valid (you'd be averaging noisy estimates of the *same* direction, not blending different targets). So: train one ridge on several aligned models' data, does it transfer to an *unseen* model better than a single-model ridge? Leave-one-out: train on 3 models (aligned into the Llama-2 TBG-L22 frame, label-free Procrustes), test on the held-out 4th's held-out questions (`te`, disjoint from train questions). Diagnostic only; the target LLMs are pre-existing (we did **not** select them by direction — E34 *verified* the direction, which is the eligibility check, not a selection step).
+
+**⚠️ A real bug was found mid-experiment (user-caught) and fixed.** v1 pooled the models' **raw** SE labels while the states were per-model **centered** — but the models have very different SE scales (mean CAE: Llama-3 0.48, Mistral 0.48, Llama-2 0.58, **DeepSeek 0.78**). So pooling injected per-model label **offsets** the centered states couldn't explain → the ridge over-regularized and pooling looked *worse* than single (Δ −0.02 to −0.03). **Fix:** z-score each source's SE labels (own train stats) + a per-model feature scaler; standardize the held-out target with its **own** scaler. That lifted pooling by up to **+0.03** (Mistral +0.021, Llama-3 +0.029). Lesson filed in memory (see `pooling-per-model-normalization`).
+
+**(1) LOO pilot (fixed).** Pooled-3 vs the single-source ridges (Spearman on held-out `te`, n=200):
+
+| held-out | pooled-3 | best single (oracle) | Llama-2 single (fixed, deployable) |
+|---|---|---|---|
+| Llama-2 | 0.613 | 0.631 | — |
+| Mistral | 0.558 | 0.569 | 0.543 |
+| Llama-3 | 0.591 | 0.590 | 0.564 |
+| DeepSeek | 0.576 | 0.595 | 0.576 |
+
+Pooled **ties the oracle best-single** (Δ −0.017 to 0.000, all CIs include 0) and **beats the fixed Llama-2 anchor** (+0.01–0.03). ("Best single" is an oracle — you only know which source is best *after* seeing the target's answers, so you can't use it for a genuinely unseen model.)
+
+**(2) Data-size sweep (single Llama-2 `s` / pooled-3 `p`, per-model normalized).** Less data hurts; pooled ≥ single at every size:
+
+| n_sub | Mistral s/p | Llama-3 s/p | DeepSeek s/p |
+|---|---|---|---|
+| 50 | 0.463/0.493 | 0.506/0.546 | 0.510/0.547 |
+| 200 | 0.486/0.524 | 0.509/0.526 | 0.535/0.581 |
+| 800 | 0.551/0.556 | 0.563/0.570 | 0.580/0.580 |
+| 1440 | 0.543/0.558 | 0.564/0.591 | 0.576/0.576 |
+
+Both curves rise to a **plateau at ~800 questions** (revises the old "~400" heuristic) — no regime where less data helps.
+
+**(3) ⭐ Matched-total PARTITIONED control (the clean test).** The pilot/sweep gave pooled 3× the rows, so its low-data lead was confounded with row count. Clean design: **same question set AND same total rows** on both arms — single routes all `total` questions through Llama-2; pooled **partitions the SAME questions** into 3 groups, one per source. Only 1-model vs 3-model routing differs:
+
+| total rows | Mistral s/p | Llama-3 s/p | DeepSeek s/p |
+|---|---|---|---|
+| 150 | 0.458/0.462 | 0.541/0.536 | 0.494/0.517 |
+| 600 | 0.533/0.538 | 0.567/0.576 | 0.549/0.564 |
+| 1200 | 0.539/0.544 | 0.571/0.577 | 0.569/0.571 |
+| 1440 | 0.543/**0.560** | 0.564/**0.584** | 0.576/**0.588** |
+
+Pooled ≥ single in 14/15 cells; at full data all 3 targets +0.012–0.020. **So the genuine diversity effect is small (~+0.015) but real and never negative** — and the *large* low-data lead in sweep (2) was **mostly the 3× rows**, not diversity (at matched rows the low-data gap collapses to ~+0.005).
+
+**(4) 1440 (matched, 1 view/Q) vs 4320 (unmatched, 3 views/Q):** Mistral 0.560 vs 0.558, Llama-3 0.584 vs 0.591, DeepSeek 0.588 vs 0.576 → **tripling the rows changes nothing** (Δ avg ≈ −0.002). Both pools cover the **same 1,440 unique questions**; extra rows are redundant model-views. **What determines performance is the number of unique questions, not rows.**
+
+**Conclusions.**
+1. **Pooling ties the oracle best-single and beats a fixed anchor by a small, safe ~+0.015** (never hurts). Much of the earlier apparent advantage was row count; the genuine model-diversity effect is small but consistent.
+2. **Both single and pooled ridges are data-saturated** (~800 questions). More rows / more model-views on the **same** questions don't help — **only more distinct questions would**, which needs new Stage-1 generation.
+3. **Structural limit:** all 4 models were run on the **same** questions (required for alignment), so pooling can only add **model-diversity, not question coverage** — capping how much it can ever help on this data.
+4. **Not better than the strong baselines.** It's a marginal top-up over the text proxy `q_resp_only` (E33), which needs **no** target forward pass / white-box access / alignment. So E35 refines the hidden-state-transfer line but doesn't change E33's verdict that text is the deployable primitive.
+
+**Inference use (how the ridge would deploy) + model criteria.** Offline: train the ridge on aligned source states→SE. Per new target T: **one-time label-free calibration** — run T *and* the anchor on shared "anchor questions," fit `W_T` (orthogonal Procrustes, no SE labels); then **one forward pass per query** → grab T's TBG-L22 state → `W_T` → standardize → ridge → SE. **A target qualifies iff:** white-box hidden-state access, **matching hidden dim (4096** — square Procrustes; other widths need a rectangular map we haven't built), and **adequate alignability = high CKA after `W`** (E30/E34: CKA, not family; verify label-free before trusting — DeepSeek is the low-CKA cautionary case).
+
+**Caveats (honesty).** 3–4 seeds, **no CIs** → ~+0.015 is "small and consistent," not "significant." Minor asymmetry: pooled selects α on a 3× larger val set. **One bug found+fixed**; a `/code-review` was started then **stopped before emitting findings** (token cost) — so these scripts are **not** independently review-verified. Artifacts: `amortized_ue/e35_pooling_{loo_pilot,datasize_sweep,matched_partition}.py`; logs `amortized_ue/{loo_pilot,datasize_sweep,loo_pilot_v2,loo_datasize_v2,matched_partition}.log`. E34 direction deep-dive scripts saved as `amortized_ue/e34_{cosine_instability,cutoff_sweep,principal_angles,matched_ceiling}.py`.
+
+---
+
 ## Where we stand (2026-08-12)
 
 **Cross-LLM transfer characterised end-to-end (E20–E27).** Text transfers directly; **raw** hidden
