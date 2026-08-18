@@ -157,12 +157,17 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (updated 2026-08-17)
+## Current state (updated 2026-08-18)
 
 **Target LLMs (4):** Llama-2-7b-chat (reference), Mistral-7B-Instruct-v0.2, Meta-Llama-3-8B-Instruct,
-and **DeepSeek-LLM-7B-Chat (E28, NEW)**. Per-target z-layers (via `linear_ceiling_probe.py`, not the
-3B sweep): Llama-2 **TBG:22/SLT:15**, Mistral **TBG:31/SLT:20**, **DeepSeek TBG:28/SLT:16** (best SLT:16,
-0.680; 30-layer model), **Llama-3 best SLT:31** (0.708, on n2000; `scratch_xllm/{deepseek,llama3}_layer_pick.json`).
+and **DeepSeek-LLM-7B-Chat (E28, NEW)**. Per-target z-layers **re-confirmed LEAK-FREE
+(2026-08-17, `reconfirm_layers.py`, selection on val / 5-fold CV, never test)**: Llama-2 **TBG:30**
+(≈22, tied; SLT:15 for SLT arm), Mistral **TBG:31**, **Llama-3 TBG:31** (5-fold CV; test 0.623), DeepSeek
+**SLT:16** (0.629). **⚠️ Correction:** the old `scratch_xllm/*_layer_pick.json` picked the best layer on
+the **TEST set** (`best_id` = `id_test_spearman`, a leak) — so the earlier "**Llama-3 best SLT:31 (0.708)**"
+was a **test-selection artifact** (SLT:31 ranks #24/66 under CV; CV picks TBG:31, matching E30's
+TBG:31→Llama-2 alignment). Also each model's best is NOT layer 22 (three peak at late TBG). JSONs:
+`scratch_xllm/reconfirm_{<model>}_val_single_split.json` + `reconfirm_Meta-Llama-3-8B-Instruct_cv5.json`.
 
 **Stage-1 datasets (target LLM Llama-2-7b-chat):** trivia_qa n400 (`stage1_records:v0`), **n2000**
 (`stage1_records_n2000`; split 1440/360/200 seed 42; the ID dataset), squad n1000 (OOD; mean_acc
@@ -288,6 +293,29 @@ not family; verify label-free first). **Caveats:** 3–4 seeds, **no CIs** (so "
 "significant"); pooled α-val 3× larger; one bug fixed; a `/code-review` was **stopped before findings** →
 scripts not review-verified. Full arc + tables: EXPERIMENTS.md E35. Artifacts:
 `amortized_ue/e35_pooling_{loo_pilot,datasize_sweep,matched_partition}.py`.
+
+**⭐ E37 — MULTI-TARGET PROXY, leave-one-LLM-out (the Exp-2 thesis experiment) — DONE.** One proxy
+(frozen Llama-3.2-3B + LoRA, ~26M trainable) trained on 3 targets' ALIGNED z + text, LOLO-tested on the
+held-out 4th (all 4 = Llama-2/Mistral/Llama-3/DeepSeek). `z` = per-source best-TBG → Llama-2 TBG:30 frame
+(E36 layers, label-free Procrustes); **per-model normalization**; **SAME questions to all sources** (the
+model-invariance signal — NOT a disjoint partition). Arms z/z_q/z_q_resp/q_only/q_resp_only + **fuse =
+rank-fusion(z⊕q_resp_only)**; baseline = ridge on the same aligned pooled z (label-free on target). 3 seeds.
+**Results (3-seed means, Spearman): fuse 0.664 / q_resp_only 0.648 / ridge 0.591** (means across Llama-2
+0.679·0.680·0.604, Mistral 0.667·0.630·0.586, Llama-3 0.659·0.622·0.607, DeepSeek 0.650·0.662·0.565).
+**Findings:** (1) **label-free fusion ≥ supervised-on-sources ridge on ALL 4 by mean**; (2) **`q_resp_only`
+(text, NO target hidden states) beats the ridge on all 4** — the model-agnostic pathway transfers across
+every LLM swap (the thesis); (3) **z tracks CKA** (beats ridge only on high-CKA Mistral; on low-CKA DeepSeek
+text dominates); (4) **late > early fusion**; (5) `q_only` 0.550. **Significance (conservative unpaired
+bootstrap over 200 examples): fuse BEATS ridge on 3/4** (overlaps Llama-3), q_resp_only 2/4, z never —
+**paired bootstrap PENDING** (needs ridge per-example preds recomputed). **Step-1 slice first verified the
+pipeline** (proxy z → unseen Llama-3 0.586±0.007 vs ridge 0.607 vs chance 0.056). **⚠️ Per-seed data was
+LOST once (missing `json.dump`) then fully recovered by a deterministic re-run** — `exp2_run.py` now saves
+per-fold incrementally + per-example predictions ([[persist-results-before-done]]). **Deployable proxy**
+(`--deploy`, all-4 pool) trains with ALL checkpoints (`results/deploy_checkpoints/`) + full training log
+(`results/deploy_curves.json`: per-step loss/lr/grad-norm + per-epoch train/val/spearman + config).
+Caveats: 3 seeds; Llama-2 native-frame ridge inflated; unique-Q coverage capped at 1440. Artifacts:
+`exp2_run.py`, `exp2_step1_zarm.py`, `results/exp2_{lolo_full,lolo_foldmeans,summary}.*`,
+`scratch_xllm/stage_to_data2.sh`. Full arc + per-seed table: EXPERIMENTS.md E37.
 
 **Cross-LLM transfer (E20) — the thesis result.** Frozen Llama-2 proxy → Llama-3-8B, 5-seed Spearman
 (control = same harness on Llama-2's own 200, reproduces ID to 4 sig figs):
@@ -447,6 +475,21 @@ Llama-3). `correctness_eval.py` + `correctness_eval_*.json`. See EXPERIMENTS.md 
     for token cost) — one bug was already found+fixed, so an independent pass is warranted before trusting.
   - **Add bootstrap CIs** to the pooling deltas (currently 3–4 seeds, no CIs → "small & consistent", not
     "significant"); and **fix the α-selection asymmetry** (pooled selects α on a 3× larger val than single).
+  - **✅ Re-run E35 with PROPER per-model layers (source side) — DONE 2026-08-17.**
+    `e35_pooling_matched_partition_bestlayer.py` (audited clone of `matched_partition.py`; only the layer
+    indexing changed): each **source at its leak-free best TBG** (Mistral 31, Llama-3 31, DeepSeek 28) →
+    Llama-2 anchor (tested TBG:30 and 22). Findings: **(1) best-source lifted the hobbled models** —
+    pooled@1440 Mistral 0.560→**0.594** (+0.032), Llama-3 0.584→**0.603** (+0.017); DeepSeek ~0
+    (0.588→0.579/0.589, already near-best at 22). Clean isolation (best-source vs shared-22, both anchor 22):
+    Mistral +0.032, Llama-3 +0.017, DeepSeek +0.001. **(2) Pooling conclusion HOLDS** — diversity effect
+    (pooled−single) still ~+0.02, always positive; magnitudes corrected upward, story unchanged. **(3)
+    Depth-matching hypothesis REJECTED** — anchor 30 vs 22 is a **wash** (all deltas ≤0.010, within 4-seed
+    noise; 22 even marginally ahead on single-source, plausibly because Llama-2 L22 generalizes slightly
+    better on test). **Chose anchor 30** (best→best internal consistency, per user), **carrying 22 as a
+    cheap comparison**. ⚠️ 4 seeds, **no CIs** → "small & consistent", not "significant". JSONs
+    `scratch_xllm/e35_bestlayer_matched_anchor{30,22}.json`. **Corrected Exp-2 baseline** (pooled@1440,
+    anchor 30): Mistral 0.594 / Llama-3 0.603 / DeepSeek 0.579. **Still open:** re-run the loo_pilot +
+    datasize_sweep with best layers too (only matched_partition was redone); add bootstrap CIs.
   - **⭐ The real untapped lever — different questions per model:** all E35 pooling used models run on the
     *same* 1440 questions (needed for alignment), so pooling adds model-diversity but **not question
     coverage**, and both single+pooled ridges are **data-saturated (~800 Q)**. Test whether giving each
@@ -456,9 +499,16 @@ Llama-3). `correctness_eval.py` + `correctness_eval_*.json`. See EXPERIMENTS.md 
   comparison on Llama-3, to check the alignment findings generalise beyond the Llama-2↔Mistral pair.
 - **Anchor-count efficiency sweep for W:** how *few* paired anchors suffice to fit a good Procrustes W?
   Quantifies the only label-free cost (paired forward passes). Cheap, CPU, reuses existing data.
-- **Multi-target training (Exp 2):** train one proxy on Llama-2 **+** Mistral (both 4096-dim; needs a new
-  multi-source Stage-2 loader), then **leave-one-out** test on unseen Llama-3. If z now transfers to
-  Llama-3 → multi-target training induces a model-agnostic hidden code. Both n2000 sets exist.
+- **✅ Multi-target training (Exp 2) — DONE (E37).** Built `exp2_run.py` (multi-source aligned loader +
+  LOLO/deploy driver, all 5 arms + late fusion) + `exp2_step1_zarm.py` (verified pipeline slice). 4-fold
+  LOLO, 3-seed means: **fuse 0.664 / q_resp_only 0.648 / ridge 0.591** — label-free fusion ≥ ridge on all
+  4; text beats ridge on all 4 with no target hidden states; z tracks CKA; late>early. Conservative
+  bootstrap: fuse beats ridge 3/4. See Current state E37 + EXPERIMENTS.md E37 (per-seed table).
+  **Still open:** paired bootstrap (recompute ridge per-example preds); the deployable all-4 proxy run
+  (checkpoints + training curves) is in progress. **Deviation from plan (better):** used **same-questions
+  pooling** (each Q to all sources → model-invariance signal) NOT the disjoint matched-partition, and
+  anchor **TBG:30** (best→best); layers reconfirmed leak-free (Llama-2 TBG:30, Mistral/Llama-3 TBG:31,
+  DeepSeek SLT:16 — E36).
 
 **Pending / carried over:**
 3. **(Partly done)** `amortized_ue/RESULTS.md` now holds the **four-model cross-LLM picture (E20–E30)**:

@@ -156,3 +156,7 @@ amortized_ue/stage2/runs/
 scratch_xllm/
 
 .env
+
+# Exp-2 deploy checkpoints (large; pushed to W&B, not git)
+amortized_ue/results/deploy_checkpoints/
+amortized_ue/results/deploy_ckpt_smoke/
