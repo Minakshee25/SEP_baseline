@@ -1587,3 +1587,104 @@ map even **transfers across domains** (trivia→squad).
 E24/E25 controls + E27 SEP comparison on Llama-3); an **anchor-count efficiency sweep** for W (how few
 paired anchors suffice — quantifies the only label-free cost); multi-target / leave-one-out proxy
 training; and compile `amortized_ue/RESULTS.md`. **Consolidated to-do list: `amortized_ue/CLAUDE.md`.**
+
+## E36 — E35 pooling re-run with LEAK-FREE BEST layers (source side) + a layer-selection leak fix — ✅ magnitudes corrected up for Mistral/Llama-3, pooling conclusion holds, anchor 22-vs-30 a wash
+
+**Why.** Prepping the Exp-2 multi-target proxy, the user asked to reconfirm each target's best layer.
+This surfaced a **selection leak** and made the E35 baseline provisional.
+
+**(1) Layer-selection leak (fixed).** `linear_ceiling_probe.main` picked the best *layer* by
+`id_test_spearman` — the **test set** (the per-layer ridge alpha was correctly val-selected, but the
+cross-layer argmax was on test). The saved `scratch_xllm/*_layer_pick.json` inherited this. New
+`reconfirm_layers.py` selects (position, layer) on **val / 5-fold CV**, never test, with a printed
+4-point leakage self-audit; validated on synthetic data. **Leak-free best TBG layers:** Llama-2 **30**
+(≈22 plateau, tied), Mistral **31**, Llama-3 **31** (CV; the old "SLT:31 0.708" was a test-selection
+artifact — ranks #24/66 under CV — RETRACTED), DeepSeek **28** (flat plateau L18–29; unlike the others
+it does *not* peak at its final layer). Nothing downstream actually used the leaked `best_id` (E30
+aligned Llama-3 on TBG:31, the correct layer), and Llama-2's fixed-layer work sat on the 22↔30 plateau,
+so **no prior conclusion is overturned** — but E35 ran on suboptimal *source* layers.
+
+**(2) E35 best-layer re-run** (`e35_pooling_matched_partition_bestlayer.py`; audited clone, only layer
+indexing changed — sources at their best TBG, aligned into Llama-2 anchor; anchor 30 and 22 both run).
+- **Best-source lifts the hobbled models.** Pooled@1440: Mistral 0.560→**0.594** (+0.032), Llama-3
+  0.584→**0.603** (+0.017), DeepSeek ~0 (already near-best at 22). Clean isolation (best-source vs
+  shared-22, both anchor 22): +0.032 / +0.017 / +0.001. So E35's magnitudes **were understated** for
+  Mistral/Llama-3.
+- **Pooling conclusion HOLDS.** Diversity effect (pooled−single) still ~+0.02, always positive — proper
+  layers raised absolute numbers but not the qualitative story.
+- **Depth-matching hypothesis REJECTED.** Anchor 30 vs 22 is a **wash** (all deltas ≤0.010, 4-seed noise;
+  22 even marginally ahead on single-source, plausibly because Llama-2 L22 generalizes slightly better on
+  test). Chose **anchor 30** for internal best→best consistency; carry 22 as a cheap comparison.
+
+**Corrected Exp-2 baseline** (best-layer pooled@1440, anchor 30): **Mistral 0.594 / Llama-3 0.603 /
+DeepSeek 0.579**. ⚠️ 4 seeds, **no CIs** ("small & consistent", not "significant"). Artifacts:
+`amortized_ue/reconfirm_layers.py`, `e35_pooling_matched_partition_bestlayer.py`,
+`scratch_xllm/reconfirm_*`, `scratch_xllm/e35_bestlayer_matched_anchor{30,22}.json`. **Still open:** redo
+loo_pilot + datasize_sweep with best layers; bootstrap CIs. Lesson filed: [[audit-leakage-before-presenting]].
+
+## E37 — Multi-target cross-LLM PROXY, leave-one-LLM-out (the thesis experiment) — ✅ label-free text+aligned-z FUSION beats the supervised-on-sources ridge on all 4 targets
+
+**The Exp-2 build.** Train ONE proxy (frozen Llama-3.2-3B + LoRA, projector→k=4 soft tokens, ~26M
+trainable) on several target LLMs' **aligned** hidden states + text, then **leave-one-LLM-out**: hold out
+each of 4 targets (Llama-2/Mistral/Llama-3/DeepSeek, trivia_qa n2000), train on the other 3, test on the
+held-out target's 200-question `te`. `z` = per-source best-TBG → Llama-2 TBG:30 frame (label-free
+Procrustes, E36 layers), never raw. **Per-model normalization** (feature scaler + SE-label z-score, train
+only). **Pooling = SAME questions to all sources** (each Q seen through all 3 source models → the
+model-invariance signal; NOT a disjoint partition — that denies invariance and confounds model with the
+question set). Arms: z / z_q / z_q_resp / q_only / q_resp_only + **fuse = rank-fusion(z ⊕ q_resp_only)**.
+Baseline: ridge on the same aligned pooled z (also label-free on the target). 3 seeds. Same-questions
+pooling verified (disjoint 480×3 vs same-480-to-all-3); step-1 slice (`exp2_step1_zarm.py`) verified the
+pipeline first (proxy z transfers to unseen Llama-3 at 0.586 ± 0.007, ridge 0.607, chance 0.056).
+
+**Results — 4-fold LOLO, 3-seed means (Spearman):**
+
+| arm | Llama-2 | Mistral | Llama-3 | DeepSeek | MEAN | needs target z? |
+|-----|---------|---------|---------|----------|------|-----------------|
+| ridge_z | 0.604 | 0.586 | 0.607 | 0.565 | 0.591 | yes |
+| z | 0.564 | 0.600 | 0.586 | 0.531 | 0.570 | yes |
+| z_q | 0.574 | 0.586 | 0.599 | 0.572 | 0.583 | yes |
+| z_q_resp | 0.587 | 0.596 | 0.612 | 0.550 | 0.586 | yes |
+| q_only | 0.578 | 0.502 | 0.546 | 0.573 | 0.550 | **no** |
+| **q_resp_only** | 0.680 | 0.630 | 0.622 | 0.662 | **0.648** | **no** |
+| **fuse(z⊕qresp)** | 0.679 | 0.667 | 0.659 | 0.650 | **0.664** | partial |
+
+**Per-seed Spearman [seed0, seed1, seed2]** (ridge is deterministic — no seeds; from `exp2_lolo_full.json`):
+
+| arm | Llama-2 (ridge 0.604) | Mistral (ridge 0.586) | Llama-3 (ridge 0.607) | DeepSeek (ridge 0.565) |
+|-----|------------------------|------------------------|------------------------|-------------------------|
+| z | [0.551, 0.593, 0.547] | [0.606, 0.591, 0.602] | [0.585, 0.578, 0.595] | [0.509, 0.560, 0.523] |
+| z_q | [0.583, 0.548, 0.591] | [0.589, 0.595, 0.573] | [0.635, 0.598, 0.564] | [0.543, 0.601, 0.573] |
+| z_q_resp | [0.617, 0.556, 0.587] | [0.635, 0.579, 0.574] | [0.601, 0.627, 0.608] | [0.569, 0.559, 0.523] |
+| q_only | [0.601, 0.585, 0.548] | [0.506, 0.512, 0.489] | [0.547, 0.563, 0.528] | [0.572, 0.583, 0.565] |
+| q_resp_only | [0.679, 0.673, 0.688] | [0.625, 0.623, 0.641] | [0.603, 0.641, 0.622] | [0.690, 0.641, 0.656] |
+| fuse(z⊕qresp) | [0.671, 0.698, 0.669] | [0.669, 0.658, 0.675] | [0.648, 0.671, 0.657] | [0.659, 0.641, 0.651] |
+
+Seed spreads are tight (std ~0.007–0.03; the early-fusion arms z_q/z_q_resp are the noisiest, up to ~0.03).
+The recovery re-run reproduced the original run's per-seed values byte-for-byte (deterministic seeds).
+
+**Findings.** (1) **Label-free fusion ≥ supervised-on-sources ridge on all 4 by mean** (0.664 vs 0.591)
+— replicates E27's late-fusion headline across targets. (2) **`q_resp_only` (text, no target hidden
+states) beats the ridge on all 4 by mean** (0.648 vs 0.591) — the model-agnostic pathway transfers across
+every LLM swap (the thesis). (3) **z tracks CKA** (E30): proxy z beats ridge only on high-CKA Mistral
+(0.600 vs 0.586); on low-CKA DeepSeek the text arm dominates (0.662) and z is weak (0.531). (4) **Late >
+early fusion** (fuse 0.664 ≫ z_q/z_q_resp 0.583/0.586). (5) `q_only` (question alone, zero target forward
+pass) 0.550 mean.
+
+**Significance (bootstrap over 200 examples, seed-avg preds, vs ridge scalar — CONSERVATIVE unpaired):**
+**fuse BEATS ridge on 3/4** (Mistral/DeepSeek/Llama-2; overlaps Llama-3), q_resp_only on 2/4, z never.
+⚠️ Paired bootstrap (arm−ridge per resample, more powerful) PENDING — needs ridge per-example preds
+recomputed (not saved).
+
+**Caveats.** 3 seeds (spreads tight, std ~0.007–0.03); **per-seed data was LOST once (missing json.dump)
+then fully recovered by a deterministic re-run** — `exp2_run.py` now saves per-fold incrementally +
+per-example predictions; Llama-2 fold has a native-frame advantage (anchor → no cross-align; its ridge
+0.604 is inflated), text still beats it; unique-question coverage fixed at 1440 (all models share
+questions for alignment) — the proxy is more question-hungry than the ridge (structural cap, step-1).
+
+**Deployable proxy (running):** `--deploy` trains the reusable proxy on ALL 4 models (5760 rows) with
+ALL checkpoints saved (`results/deploy_checkpoints/`) + full training log (`results/deploy_curves.json`:
+per-step loss/lr/grad-norm, per-epoch train/val-mse/val-spearman, best-epoch/wall-time/params, config).
+
+**Artifacts.** `exp2_run.py`, `exp2_step1_zarm.py`, `results/exp2_lolo_full.json` (per-seed + preds),
+`results/exp2_lolo_foldmeans.json`, `scratch_xllm/stage_to_data2.sh` (parallel /data2 staging). Lessons:
+[[persist-results-before-done]], [[always-save-checkpoints]].

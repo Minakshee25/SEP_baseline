@@ -164,3 +164,30 @@ marginal. Artifacts:
 
 *Scope note: this file is the cross-LLM (E20–E33) results record. It does not re-enumerate every
 superseded single-LLM config/ablation — those live in `../EXPERIMENTS.md`.*
+
+## E. Multi-target PROXY, leave-one-LLM-out (E37) — label-free fusion ≥ supervised-on-sources ridge on all 4
+
+One proxy (frozen Llama-3.2-3B + LoRA, ~26M trainable) trained on 3 targets' **aligned** z + text,
+leave-one-LLM-out tested on the held-out 4th (200 questions). Aligned z (per-source best-TBG → Llama-2
+TBG:30), per-model normalization, **same questions to all sources** (model-invariance signal). 3 seeds.
+
+**4-fold LOLO, 3-seed means (Spearman):**
+
+| arm | Llama-2 | Mistral | Llama-3 | DeepSeek | MEAN | target z? |
+|-----|---------|---------|---------|----------|------|-----------|
+| ridge_z (baseline) | 0.604 | 0.586 | 0.607 | 0.565 | 0.591 | yes |
+| z (proxy) | 0.564 | 0.600 | 0.586 | 0.531 | 0.570 | yes |
+| z_q | 0.574 | 0.586 | 0.599 | 0.572 | 0.583 | yes |
+| z_q_resp | 0.587 | 0.596 | 0.612 | 0.550 | 0.586 | yes |
+| q_only | 0.578 | 0.502 | 0.546 | 0.573 | 0.550 | **no** |
+| **q_resp_only** | 0.680 | 0.630 | 0.622 | 0.662 | **0.648** | **no** |
+| **fuse(z⊕qresp)** | 0.679 | 0.667 | 0.659 | 0.650 | **0.664** | partial |
+
+- **Label-free fusion ≥ ridge on all 4 by mean** (0.664 vs 0.591); **`q_resp_only` (text, no target
+  hidden states) beats ridge on all 4** (0.648) — model-agnostic pathway transfers across every swap.
+- **z tracks CKA** (beats ridge only on high-CKA Mistral; text carries low-CKA DeepSeek); **late > early**.
+- Significance (conservative unpaired bootstrap, 200 examples): **fuse beats ridge 3/4** (overlaps
+  Llama-3), q_resp_only 2/4, z never. Paired bootstrap pending (needs ridge per-example preds).
+- Caveats: 3 seeds; Llama-2 native-frame ridge inflated; per-seed data lost-then-recovered (deterministic
+  re-run). Deployable all-4 proxy: checkpoints + training curves (`results/deploy_*`). Full arc:
+  EXPERIMENTS.md E37 (full per-seed table there); data in `results/exp2_lolo_full.json`.

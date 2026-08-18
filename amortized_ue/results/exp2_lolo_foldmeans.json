@@ -1,0 +1,94 @@
+{
+  "experiment": "exp2 LOLO 4-fold x 5-arm + late-fusion (3-seed means)",
+  "note": "per-fold MEANS recovered from run logs; per-seed values were not saved this run",
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "anchor_layer": 30,
+  "source_layers": {
+    "Llama-2": 30,
+    "Mistral": 31,
+    "Llama-3": 31,
+    "DeepSeek": 28
+  },
+  "folds": [
+    {
+      "target": "Mistral",
+      "sources": [
+        "Llama-2",
+        "Llama-3",
+        "DeepSeek"
+      ],
+      "n_unique_q": 1440,
+      "rows": 4320,
+      "metrics": {
+        "ridge_z": 0.586,
+        "z": 0.6,
+        "z_q": 0.586,
+        "z_q_resp": 0.596,
+        "q_only": 0.502,
+        "q_resp_only": 0.63,
+        "fuse(z+qresp)": 0.667
+      }
+    },
+    {
+      "target": "Llama-3",
+      "sources": [
+        "Llama-2",
+        "Mistral",
+        "DeepSeek"
+      ],
+      "n_unique_q": 1440,
+      "rows": 4320,
+      "metrics": {
+        "ridge_z": 0.607,
+        "z": 0.586,
+        "z_q": 0.599,
+        "z_q_resp": 0.612,
+        "q_only": 0.546,
+        "q_resp_only": 0.622,
+        "fuse(z+qresp)": 0.659
+      }
+    },
+    {
+      "target": "DeepSeek",
+      "sources": [
+        "Llama-2",
+        "Mistral",
+        "Llama-3"
+      ],
+      "n_unique_q": 1440,
+      "rows": 4320,
+      "metrics": {
+        "ridge_z": 0.565,
+        "z": 0.531,
+        "z_q": 0.572,
+        "z_q_resp": 0.55,
+        "q_only": 0.573,
+        "q_resp_only": 0.662,
+        "fuse(z+qresp)": 0.65
+      }
+    },
+    {
+      "target": "Llama-2",
+      "sources": [
+        "Mistral",
+        "Llama-3",
+        "DeepSeek"
+      ],
+      "n_unique_q": 1440,
+      "rows": 4320,
+      "metrics": {
+        "ridge_z": 0.604,
+        "z": 0.564,
+        "z_q": 0.574,
+        "z_q_resp": 0.587,
+        "q_only": 0.578,
+        "q_resp_only": 0.68,
+        "fuse(z+qresp)": 0.679
+      }
+    }
+  ]
+}
