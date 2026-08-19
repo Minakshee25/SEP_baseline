@@ -1781,3 +1781,97 @@ always disjoint from fit ids — re-verified: n2000 ∩ fresh-n1000 = 0 for all 
 **Artifacts.** `amortized_ue/correctness_eval_e37.py`, `amortized_ue/results/correctness_eval_e37.json`
 (per-target metrics + per-seed AUROCs + bootstrap CIs + **ridge per-example preds**),
 `amortized_ue/correctness_e37.log`. Runs on CPU in `se_probes` (~25 min, `--data_dir /data2/mn1025/stage1`).
+
+---
+
+## E39 — OOD (cross-DATASET) correctness eval: trivia-fit → squad — ⚠️ E38's parity with sampling does NOT survive the shift; the proxy still beats SEP
+
+**Motivation.** E38 found the E37 proxy's text arm statistically **on par with 10-sample sampling** at
+detecting wrong answers — but only **in-distribution** (trivia_qa, the dataset everything was fit on).
+This asks the harder question: **under a dataset shift, how well does the proxy detect wrong answers vs
+SE and SEP?** New additive script **`amortized_ue/correctness_eval_ood.py`**. Everything is fit/trained on
+trivia_qa and evaluated on **squad n1000 (all 1000 rows)**. squad is a real shift: mean accuracy **0.236 /
+0.228** vs trivia ~0.65 (incorrect rate **0.77** vs 0.35), mean CAE 1.50 vs 0.59. **squad records exist for
+Llama-2 and Mistral only** → a 2-target study.
+
+**⚠️ Which proxy — E37's LOLO run saved NO checkpoints** (`--ckpt_dir` was never passed), so the
+leave-one-LLM-out proxy cannot be run on new data without retraining ([[always-save-checkpoints]] again).
+The two proxies that DO exist are both reported and answer different questions:
+- **DEPLOY** (`results/deploy_checkpoints/`, 3 seeds, all-4-model trivia-trained) — pure **cross-DATASET**
+  test; the target **was** in the training pool, so **not** cross-LLM and **not** label-free w.r.t. the
+  target. It is the fair peer of SEP (both saw the target's own trivia labels; both tested on squad).
+- **REFERENCE** (`runs/REFERENCE_multipos_p1024_5arm_ckpt/`, 5 seeds, Llama-2-only) — **text arms only**
+  (its z arm is in Llama-2's native basis, at chance on a model swap without Procrustes W). On **Mistral**
+  this is **cross-LLM AND cross-dataset, fully label-free** — the strict thesis test.
+
+**Results — AUROC_incorrect on squad (N=1000/target):**
+
+| predictor | Llama-2 | Mistral | MEAN |
+|---|---|---|---|
+| **true semantic entropy (10-sample)** | **0.784** | 0.774 | **0.779** |
+| SEP, single best layer (supervised) | 0.603 | 0.667 | 0.635 |
+| SEP, 5-layer concat (supervised) | 0.631 | 0.665 | 0.648 |
+| ridge_z (pooled 3-source aligned) | 0.641 | 0.703 | 0.672 |
+| deploy z | 0.636 | 0.714 | 0.675 |
+| deploy z_q_resp | 0.657 | 0.735 | 0.696 |
+| deploy q_only | 0.647 | 0.662 | 0.655 |
+| **deploy q_resp_only** | 0.716 | **0.763** | 0.739 |
+| deploy fuse(z ⊕ q_resp) | 0.701 | 0.761 | 0.731 |
+| **reference q_resp_only** (label-free on Mistral) | 0.692 | **0.713** | 0.703 |
+| random control | 0.537 | 0.522 | 0.529 |
+
+**⭐ Finding 1 — sampling is robust to the shift, amortization is not.** Restricting E38's ID numbers to
+these same two targets (a fair matched comparison; true SE / SEP / ridge_z are constructed identically in
+both, so those rows are strictly apples-to-apples):
+
+| predictor | ID (trivia) | OOD (squad) | Δ |
+|---|---|---|---|
+| **true 10-sample SE** | 0.773 | 0.779 | **+0.007 — flat** |
+| q_resp_only | 0.797 | 0.739 | −0.058 |
+| fuse | 0.786 | 0.731 | −0.055 |
+| ridge_z | 0.736 | 0.672 | −0.064 |
+| z | 0.741 | 0.675 | −0.066 |
+| SEP single | 0.666 | 0.635 | −0.031 |
+
+**True SE barely moves under the dataset swap while every amortized predictor loses 0.03–0.07.** Paired
+bootstrap vs true SE: `q_resp_only` **−0.068\*** (Llama-2, CI excludes 0) / −0.011 (Mistral, includes 0).
+**So E38's "on par with sampling" is an IN-DISTRIBUTION phenomenon and does NOT survive the shift** —
+this **restores E31's "sampling beats amortization"** in the OOD regime. *(⚠️ the proxy rows here are the
+DEPLOY proxy, not E38's LOLO proxy, so the proxy Δ is indicative, not strictly matched; the true-SE /
+SEP / ridge_z rows are.)*
+
+**Finding 2 — the proxy still beats supervised SEP out of distribution, significantly on BOTH targets.**
+Δ AUROC_incorrect vs SEP-single: `q_resp_only` **+0.113\*** (Llama-2) / **+0.096\*** (Mistral); `fuse`
++0.098\* / +0.095\*; `z_q_resp` +0.055\* / +0.068\*; `deploy_z` +0.034 / +0.048\*; `ridge_z` +0.038 /
++0.036 (both include 0, marginally). Amortization degrades under shift, but **less than the in-model
+probe it replaces**.
+
+**⭐ Finding 3 — the strict thesis test PASSES.** `reference_q_resp_only` on **Mistral** is the Llama-2-trained
+proxy that **never saw Mistral and never saw squad**, fully label-free: **0.713 vs Mistral's own supervised
+SEP 0.667, Δ +0.046 [+0.004, +0.089] (excludes 0)**. A proxy trained on a *different model* and a
+*different dataset* beats the target's own supervised probe.
+
+**Finding 4 — `q_only` collapses OOD** (deploy 0.655, reference 0.628 — barely above `ridge_z`, and on
+Mistral *below* SEP). The **response** text carries the transferable signal, not the question; consistent
+with the ID `q_resp_only` ≫ `q_only` gap. **Finding 5 — target-in-pool is worth ~0.05:** on Mistral,
+deploy (saw Mistral trivia) 0.763 vs reference (never saw Mistral) 0.713.
+
+**PRR tells the same story more starkly** (true SE 0.522/0.495 · q_resp_only 0.451/0.501 · SEP 0.206/0.304);
+on Mistral `fuse` PRR 0.519 nominally exceeds true SE's 0.495 while its AUROC is slightly lower.
+
+**Caveats.** **2 targets only** (squad exists for Llama-2/Mistral alone). The DEPLOY rows are **not
+label-free** w.r.t. the target — only the `reference_*` rows are, which is why Finding 3 rests on the
+Mistral reference row. **Llama-2's SEP is anomalously weak again** (0.603, selected layer TBG:21 vs
+Mistral's TBG:30) exactly as in E38, so its Δ-vs-SEP is inflated — **Mistral is the clean column**.
+squad's base rate is 0.77 incorrect ⇒ PRR / acc@coverage are more informative than AUPRC.
+AUROC_SE uses `best_split` refit on the squad rows (the documented OOD convention — the label scale shifts).
+
+**Second latent bug found + fixed.** `exp2_run.py` wrote the `checkpoint/v1` format tag but omitted the
+`k` and `transform` meta keys, so `stage2.checkpoint.load_checkpoint` **KeyErrors on its own checkpoints**.
+Fixed in `exp2_run.py` for future runs (targets are z-scored per model upstream, so the identity transform
+is the honest record); `correctness_eval_ood.py` carries a compat loader (`_load_exp2_ckpt`) for the files
+already on disk.
+
+**Artifacts.** `amortized_ue/correctness_eval_ood.py`, `amortized_ue/results/correctness_eval_ood.json`,
+`amortized_ue/correctness_ood.log`. Env `amortized_stage2` + GPU (~15 min);
+`--trivia_dir /data2/mn1025/stage1` (squad always reads the default path — /data2 holds only trivia).

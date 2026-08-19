@@ -349,6 +349,35 @@ changes** (fit/eval ids always disjoint; re-verified n2000 ∩ fresh-n1000 = 0 f
 `correctness_eval_e37.py`, `results/correctness_eval_e37.json`, `correctness_e37.log`. Full arc:
 EXPERIMENTS.md E38.
 
+**⚠️ E39 — OOD (cross-DATASET) correctness: trivia-fit → squad — E38's parity with sampling does NOT
+survive the shift.** `correctness_eval_ood.py`, squad n1000, **Llama-2 + Mistral only** (the only two with
+squad records); squad is a real shift (mean_acc 0.236/0.228 vs trivia ~0.65; incorrect rate 0.77).
+**⚠️ E37's LOLO run saved NO checkpoints**, so the proxies run are **DEPLOY** (all-4 trivia-trained →
+cross-dataset only, target WAS in pool, NOT label-free — the fair peer of SEP) and **REFERENCE**
+(Llama-2-only, text arms only → on **Mistral** it is **cross-LLM AND cross-dataset, fully label-free**).
+**AUROC_incorrect (Llama-2 / Mistral / MEAN):** true 10-sample SE 0.784/0.774 (**0.779**) · SEP-single
+0.603/0.667 (0.635) · SEP-5layer (0.648) · ridge_z (0.672) · deploy z (0.675) · deploy z_q_resp (0.696) ·
+deploy q_only (0.655) · **deploy q_resp_only 0.716/0.763 (0.739)** · deploy fuse (0.731) ·
+**reference q_resp_only 0.692/0.713 (0.703)** · random (0.529).
+**(1) ⭐ Sampling is ROBUST to the shift, amortization is NOT.** Matched to the same 2 targets, ID→OOD:
+**true SE 0.773→0.779 (flat, +0.007)** while q_resp_only 0.797→0.739, fuse 0.786→0.731, ridge_z
+0.736→0.672, z 0.741→0.675, SEP 0.666→0.635. vs true SE: q_resp_only **−0.068\*** (Llama-2) / −0.011
+(Mistral, includes 0) ⇒ **E38's "on par with sampling" is IN-DISTRIBUTION ONLY; this RESTORES E31's
+"sampling beats amortization" out of distribution.** *(Proxy rows are DEPLOY not LOLO ⇒ indicative; the
+true-SE/SEP/ridge_z rows are strictly matched.)* **(2) The proxy still beats supervised SEP OOD,
+significantly on BOTH targets** (q_resp_only +0.113\*/+0.096\*; fuse +0.098\*/+0.095\*) — amortization
+degrades **less than the in-model probe it replaces**. **(3) ⭐ Strict thesis test PASSES:**
+`reference_q_resp_only` on Mistral (never saw Mistral, never saw squad, label-free) **0.713 vs Mistral's
+own SEP 0.667, Δ +0.046 [+0.004,+0.089] excludes 0**. **(4) `q_only` COLLAPSES OOD** (0.655/0.628, on
+Mistral *below* SEP) → the **response** text carries the transferable signal, not the question.
+**(5) Target-in-pool ≈ +0.05** (Mistral: deploy 0.763 vs reference 0.713). **Caveats:** 2 targets; DEPLOY
+rows not label-free (Finding 3 rests on the Mistral reference row); **Llama-2's SEP anomalously weak again**
+(0.603, TBG:21) so its Δ-vs-SEP is inflated — **Mistral is the clean column**; base rate 0.77 ⇒ prefer
+PRR/acc@coverage over AUPRC. **Second latent bug fixed:** `exp2_run.py` wrote the `checkpoint/v1` tag but
+omitted `k`/`transform`, so `load_checkpoint` **KeyErrors on its own checkpoints** — fixed for future runs,
+with a compat loader (`_load_exp2_ckpt`) for existing files. Artifacts: `correctness_eval_ood.py`,
+`results/correctness_eval_ood.json`, `correctness_ood.log`. Full arc: EXPERIMENTS.md E39.
+
 **Cross-LLM transfer (E20) — the thesis result.** Frozen Llama-2 proxy → Llama-3-8B, 5-seed Spearman
 (control = same harness on Llama-2's own 200, reproduces ID to 4 sig figs):
 
