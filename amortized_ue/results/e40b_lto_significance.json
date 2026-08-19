@@ -1,0 +1,110 @@
+{
+ "config": {
+  "data_dir": "/data2/mn1025/stage1",
+  "ckpt_dir": "results/e40_ridge_checkpoints",
+  "anchor_layer": 30,
+  "boot": 2000,
+  "perm": 5000,
+  "out": "results/e40b_lto_significance.json"
+ },
+ "loo_null": {
+  "perfect_difficulty_oracle_residual_corr": -0.9999999999999986,
+  "analytic_expectation": -1.0,
+  "ridge_residual_corr_from_saved_ckpt": 0.07489860019252133,
+  "note": "A PERFECT pure-difficulty predictor scores -1.0 under leave-one-out, so 0 is NOT the no-information baseline there; E40's [C]/[D]/[F] are biased downward."
+ },
+ "G_lto": {
+  "Llama-2_vs_Mistral": {
+   "r_dP_dY": 0.15263903485800784,
+   "r_boot95": [
+    0.017150713637116066,
+    0.2893559419266684
+   ],
+   "perm_p": 0.0426,
+   "pair_acc": 0.5025,
+   "acc_boot95": [
+    0.4325,
+    0.575
+   ]
+  },
+  "Llama-2_vs_Llama-3": {
+   "r_dP_dY": 0.08510121307034993,
+   "r_boot95": [
+    -0.03771485810428101,
+    0.20155314954377526
+   ],
+   "perm_p": 0.1844,
+   "pair_acc": 0.4925,
+   "acc_boot95": [
+    0.4225,
+    0.565
+   ]
+  },
+  "Llama-2_vs_DeepSeek": {
+   "r_dP_dY": 0.0011046413047732934,
+   "r_boot95": [
+    -0.12465419633108325,
+    0.12703424227241594
+   ],
+   "perm_p": 0.984,
+   "pair_acc": 0.4875,
+   "acc_boot95": [
+    0.42,
+    0.555
+   ]
+  },
+  "Mistral_vs_Llama-3": {
+   "r_dP_dY": 0.2618281880443243,
+   "r_boot95": [
+    0.14450506274110897,
+    0.37995579202752294
+   ],
+   "perm_p": 0.0,
+   "pair_acc": 0.5577889447236181,
+   "acc_boot95": [
+    0.4923636363636364,
+    0.6262786494385478
+   ]
+  },
+  "Mistral_vs_DeepSeek": {
+   "r_dP_dY": 0.11171491481555065,
+   "r_boot95": [
+    -0.04231815571727317,
+    0.2524556513967597
+   ],
+   "perm_p": 0.1564,
+   "pair_acc": 0.542713567839196,
+   "acc_boot95": [
+    0.4725,
+    0.6105527638190955
+   ]
+  },
+  "Llama-3_vs_DeepSeek": {
+   "r_dP_dY": 0.057022235712512526,
+   "r_boot95": [
+    -0.07032459932411186,
+    0.17951333292166044
+   ],
+   "perm_p": 0.3858,
+   "pair_acc": 0.5050251256281407,
+   "acc_boot95": [
+    0.4371859296482412,
+    0.5703606415917973
+   ]
+  }
+ },
+ "pooled": {
+  "r_dP_dY": 0.1099300183837534,
+  "r_boot95": [
+   0.026700823874708436,
+   0.19187019648378742
+  ],
+  "perm_p": 0.0002,
+  "pair_acc": 0.5146198830409356,
+  "acc_boot95": [
+   0.47740585774058575,
+   0.5497502046570857
+  ],
+  "n_pairs_scored": 1200
+ }
+}

@@ -378,6 +378,44 @@ omitted `k`/`transform`, so `load_checkpoint` **KeyErrors on its own checkpoints
 with a compat loader (`_load_exp2_ckpt`) for existing files. Artifacts: `correctness_eval_ood.py`,
 `results/correctness_eval_ood.json`, `correctness_ood.log`. Full arc: EXPERIMENTS.md E39.
 
+**⚠️ E40 — is the pooled multi-model RIDGE model-SPECIFIC, or only a question-difficulty detector?**
+Asks whether, on questions where the targets genuinely disagree (SE_Llama-2 1.8 vs SE_Mistral 1.2), the
+shared probe reproduces the disagreement — i.e. whether it preserves "THIS model is uncertain", not just
+"this question is hard". **Answer: genuinely model-specific but THIN — 12.6% of the attainable.**
+There is plenty to predict (question effect 65.7% of normalized SE variance, **model-specific residual
+34.3%**; cross-model SE Spearman only 0.486–0.583; **40.1% of model-pairs differ by >0.5 nats**). Clean
+result (leave-TWO-out, see below): pooled **r(dP,dY) = +0.110 [+0.027, +0.192], sign-flip p = 0.0002**,
+against a matched split-half ceiling of **0.870**. **The signal lives only in the LARGE gaps** —
+magnitude-weighted correlation is significant while unweighted pair-ordering accuracy is not (0.515
+[0.477, 0.550]); in the LOO frame accuracy climbs 0.509 → 0.531 → 0.547 → **0.600** with gap size.
+**Gated by alignment quality, not uniform:** Mistral↔Llama-3 **+0.262** (p<0.001) carries most of it,
+while the low-CKA **Llama-2↔DeepSeek pair is exactly +0.001** (E30's CKA story again). **Response TEXT is
+far more model-specific than the aligned hidden state** (`q_resp_only` +0.237 ≫ `z` +0.090 ≈ `ridge_z`
++0.075; ordinal only, biased frame) — the sampled answer IS the model's own output, whereas alignment
+rotates hidden states into a shared frame that washes out what makes each model distinctive.
+
+> **⚠️ METHODOLOGICAL — reuse this.** **The leave-ONE-out null is NEGATIVE, not zero.** For target T the
+> probe trains on the other 3 models, so it estimates *their* SE; since the model-specific residuals sum
+> to zero, `mean_{k≠T} s_k = −s_T/3`, so **a predictor that knows nothing about T is ANTI-correlated with
+> it**. Proved exactly: the perfect pure-difficulty LOO predictor scores **−1.0000**. Caught only because
+> the `q_only` control (question text only — identical input for every target, so it *cannot* be
+> model-specific) came out −0.097 (p=0.013) instead of ~0. **Never assume chance = 0 for a LOO
+> model-specificity metric.** The fix is the **leave-TWO-out** design: one ridge scores BOTH members of a
+> held-out pair, so `dP = P_A − P_B` shares weights and the artifact cancels — a question-only predictor
+> gives `dP = 0`, so the null really is 0. Also: the difficulty-oracle semi-partial is **biased UP** (the
+> oracle is itself noisy; a noiseless difficulty predictor scores +0.27) — always print its matched null.
+
+Caveats: N=200 questions (wide CIs; only 1 of 6 pairs individually significant, pooled result leans on
+Mistral↔Llama-3); the LTO probes train on only **2** source models so +0.110 is likely a mild
+UNDER-estimate; Llama-2 is the anchor (identity W) so its pairs aren't clean cross-model tests.
+**Checkpoint gap found + fixed (user-caught): the whole E35/E36/E37 ridge line had NEVER saved a fitted
+ridge** — `exp2_run.py --ckpt_dir` covers the proxy (`train_arm`) but not `ridge_on_z`. Now
+`save_ridge_bundle()`/`load_ridge_bundle()` persist the **full inference chain** (per-model Procrustes W +
+centering, scalers, label z-stats, all 10 ridges, `meta.json`) to
+`stage2/runs/E40_pooled_multimodel_ridge/checkpoints/`. Artifacts: `e40_model_specificity.py`,
+`e40b_lto_significance.py`, `e40c_lto_ceiling.py`, `results/e40{,b,c}_*.json`. `se_probes`, CPU, minutes,
+**`--data_dir /data2/mn1025/stage1`** (3.5s vs minutes on NFS). Full arc: EXPERIMENTS.md E40.
+
 **Cross-LLM transfer (E20) — the thesis result.** Frozen Llama-2 proxy → Llama-3-8B, 5-seed Spearman
 (control = same harness on Llama-2's own 200, reproduces ID to 4 sig figs):
 
@@ -529,6 +567,21 @@ cross-domain. See EXPERIMENTS.md E24–E27 + "Where we stand" conclusions 5–7.
 SE-fidelity ≠ correctness (−0.10 to −0.15 AUROC); true 10-sample SE is the best correctness detector;
 label-free rank-fusion ≥ supervised SEP on correctness too; method ordering matches on 3/4 (differs on
 Llama-3). `correctness_eval.py` + `correctness_eval_*.json`. See EXPERIMENTS.md E31.
+
+**DONE — model-specificity of the pooled ridge (E40):** the ridge preserves genuine per-model uncertainty
+but only 12.6% of the attainable, only on large disagreements, and only for well-aligned pairs; the
+**leave-one-out null is NEGATIVE (−1.0 for a perfect difficulty predictor)** so use the leave-TWO-out
+design for any such test. The multi-model ridge is now **saved** (it never had been). See EXPERIMENTS.md E40.
+
+**Opened by E40 (new, untouched):**
+- **Re-read E37's LOLO conclusions in light of the negative LOO null** — E37/E38 scored *absolute* SE
+  fidelity, which the artifact does not touch, so those headlines stand; but any *model-specific* reading
+  of a LOLO number is biased down. Worth one pass to check nothing in the write-up leans that way.
+- **Raise the power of the E40 clean test:** N=200 held-out questions and 2-source LTO probes are the
+  binding limits. A 3-source clean design needs a 5th target LLM; more questions need fresh Stage-1.
+- **Does the SLM proxy preserve more model-specificity than the ridge?** [F] hints yes for `q_resp_only`
+  (+0.237 vs +0.075) but only in the biased LOO frame — a clean answer needs the proxy retrained
+  leave-TWO-out (GPU), which would also test whether response text is genuinely the model-specific channel.
 
 **NOW — pick the next thrust (all open):**
 - **E35 follow-ups (harden the pooling result — RESULTS ARE NOT REVIEW-VERIFIED):**

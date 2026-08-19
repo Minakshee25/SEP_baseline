@@ -1875,3 +1875,113 @@ already on disk.
 **Artifacts.** `amortized_ue/correctness_eval_ood.py`, `amortized_ue/results/correctness_eval_ood.json`,
 `amortized_ue/correctness_ood.log`. Env `amortized_stage2` + GPU (~15 min);
 `--trivia_dir /data2/mn1025/stage1` (squad always reads the default path — /data2 holds only trivia).
+
+---
+
+## E40 — Is the pooled multi-model RIDGE model-SPECIFIC, or only a question-difficulty detector? — ⚠️ genuinely model-specific but thin (12.6% of the attainable), gated by alignment quality; **and the leave-one-out null is NEGATIVE, not zero**
+
+**Question (user's framing).** Find questions where the target LLMs genuinely disagree in semantic
+entropy (SE_Llama-2(x)=1.8 vs SE_Mistral(x)=1.2) and ask whether the shared probe reproduces that
+disagreement. If it does, the probe has not merely learned "this is a hard question" — it has preserved
+"THIS model is uncertain about this question". This is the sharp version of E25's Mechanism-A control,
+applied to the **E35/E36/E37 pooled ridge** (aligned hidden states → SE), not to the SLM proxy.
+
+**Design.** 4 targets × the SAME 2000 trivia questions, id-joined; `splits(2000)` → tr/va/te, and `te`
+(200 questions) is IDENTICAL across models, which is what makes a matrix analysis valid. Leave-one-LLM-out:
+for target T one ridge trains on the other 3 aligned models (label-free Procrustes into the Llama-2
+best-TBG frame, per-model feature scaler + per-model SE z-score, α on the pooled source val) → **P[4,200]**
+vs **Y[4,200]**, every column produced by a probe that never saw that model. Per-model normalization is
+**mandatory, not a choice**: the ridge trains on per-model z-scored labels, so the per-model SE offset
+(mean CAE: Llama-3 .486, Mistral .492, Llama-2 .586, DeepSeek .794) is unrepresentable by construction —
+comparing raw SE across models would score the probe on a constant it was built not to emit. Primary
+normalization = within-model rank→normal quantile over `te`; robustness = z-score on the target's own VAL.
+
+**Audits (all passed, before reading any headline).** Rebuilt ridge te-Spearman 0.6036/0.5865/0.6070/0.5649
+vs E37's 0.6038/0.5861/0.6070/0.5648, and its **per-example preds correlate 1.000 with E38's saved
+`ridge_te_preds`** → the refit IS the E37 ridge. E37 `target_y` vs freshly loaded labels: max dev 5.9e-08
+(float32 storage in E37's JSON, not a mismatch) — this also validates the `/data2` copy. Checkpoint
+reload dev 2.4e-07. Analysis primitives were validated on synthetic data first (a difficulty-only
+predictor must score 0.000 residual / 0.500 pair-accuracy; a model-specific one must score high).
+
+**⚠️ The measurement was broken, and the `q_only` CONTROL caught it.** `q_only` (E37 proxy arm, question
+text only — its input is IDENTICAL for all four targets, so it cannot know which model it predicts for)
+must score ~0 on any model-specificity metric. It scored **−0.097 (p=0.013)**. Not a coding bug — a
+structural property of leave-one-out: for target T the probe is trained on the other 3, so it estimates
+*their* SE, and since the model-specific residuals sum to zero, `mean_{k≠T} s_k = −s_T/3`. **A predictor
+carrying no information about T is ANTI-correlated with it.** Proved exactly (E40b): the perfect
+pure-difficulty LOO predictor `D_T = mean_{k≠T} Y_k` satisfies `R_D = −(1/3)R_Y` identically →
+**residual corr = −1.0000** (numerically confirmed). ⇒ **"chance = 0" is WRONG for any leave-one-out
+model-specificity metric**, and E40's [C]/[D]/[F] are all biased DOWNWARD.
+
+**The clean estimand (E40b) — leave-TWO-out.** One ridge (trained on the other two models) scores BOTH
+members of the held-out pair, so `dP = P_A − P_B` uses the SAME weights and the fold-composition artifact
+cancels; a question-only predictor gives `dP = 0` exactly ⇒ **the null IS 0**. Bootstrap over the 200
+questions + an exact sign-flip permutation test:
+
+| held-out pair | r(dP,dY) | boot95 | sign-flip p | pair-acc |
+|---|---|---|---|---|
+| Mistral vs Llama-3 | **+0.262** | [+0.145, +0.380] | 0.0000 | 0.558 |
+| Llama-2 vs Mistral | +0.153 | [+0.017, +0.289] | 0.0426 | 0.502 |
+| Mistral vs DeepSeek | +0.112 | [−0.042, +0.252] | 0.1564 | 0.543 |
+| Llama-2 vs Llama-3 | +0.085 | [−0.038, +0.202] | 0.1844 | 0.492 |
+| Llama-3 vs DeepSeek | +0.057 | [−0.070, +0.180] | 0.3858 | 0.505 |
+| Llama-2 vs DeepSeek | **+0.001** | [−0.125, +0.127] | 0.9840 | 0.487 |
+| **POOLED (n=1200)** | **+0.110** | **[+0.027, +0.192]** | **0.0002** | 0.515 [0.477, 0.550] |
+
+**Findings.**
+1. **There IS disagreement to predict.** Question effect = **65.7%** of normalized SE variance,
+   **model-specific residual 34.3%**; cross-model SE Spearman only **0.486–0.583**; raw |SE_a − SE_b|
+   mean 0.464 / median 0.325 / p90 1.234, with **40.1% of pairs > 0.5 nats**. The user's 1.8-vs-1.2 case
+   is common, not exotic.
+2. **⭐ The ridge is genuinely model-specific — but thin.** Pooled clean-frame r = **+0.110**
+   (p=0.0002) against a **matched split-half ceiling of 0.870** (E40c, computed for the pair-difference
+   estimand, not borrowed from the LOO residual) ⇒ it recovers **12.6% of the attainable disagreement**.
+   So the probe is *mostly* a question-difficulty detector with a small, real per-model component.
+3. **The signal lives only in the LARGE gaps.** Magnitude-weighted correlation is significant while
+   unweighted pair-ordering accuracy is not (0.515 [0.477, 0.550]) — it gets the direction right when the
+   models differ a lot and is at chance when they differ a little. Same shape in the biased LOO frame,
+   where accuracy climbs monotonically with gap size: 0.509 (all) → 0.531 (top 50%) → 0.547 (top 25%) →
+   **0.600 (top 9%)**.
+4. **Model-specificity is gated by alignment quality, not uniform.** One pair carries most of it
+   (Mistral↔Llama-3 +0.262); the **low-CKA DeepSeek pair is exactly zero** (Llama-2↔DeepSeek +0.001) —
+   consistent with E30's "alignability tracks CKA, not family". Same ordering per-model in the LOO frame
+   (Mistral 0.195, Llama-3 0.107, Llama-2 0.022, DeepSeek −0.024).
+5. **Response TEXT is a far more model-specific channel than the aligned hidden state.** In the (biased,
+   ordinal-only) LOO frame: `q_resp_only` **+0.237** ≫ `z_q_resp` +0.097 ≈ `z` +0.090 ≈ `ridge_z` +0.075
+   ≫ `q_only` −0.097 (the no-information baseline). Counterintuitive but coherent with E33/E38: the
+   sampled answer IS the model's own output, whereas alignment rotates hidden states into a shared frame
+   that washes out much of what makes each model distinctive.
+6. **[E] semi-partial vs a difficulty oracle is BIASED UP and must not be read alone** — the oracle
+   (mean true SE of the other 3) is itself noisy, so even a *noiseless* pure-difficulty predictor keeps a
+   positive partial correlation (+0.27 in synthetic control). The matched empirical null `r(Pbar,Y|D)` is
+   printed alongside; it exceeds the ridge's value on Llama-2 and DeepSeek.
+
+**Robustness.** val-z-score normalization instead of rank-qnorm: +0.061 (vs +0.075), pair-acc(top25)
+0.520 (vs 0.547) — same conclusion.
+
+**Caveats (stated, not smoothed).** **N=200 questions** ⇒ wide CIs throughout; only 1 of 6 pairs is
+individually significant and the pooled result rests largely on Mistral↔Llama-3. **The leave-two-out
+probes train on only 2 source models**, so they are weaker than the 3-source LOO ridge — the clean design
+costs power, and +0.110 is likely a mild UNDER-estimate of what a 3-source probe preserves. The [F] arm
+comparison sits in the biased frame and is **ordinal only**. Llama-2 is the alignment anchor (identity W,
+native frame), so its pairs are not clean cross-model tests. Ridge is deterministic (no seed variance);
+the E37 proxy arms are 3-seed-averaged predictions.
+
+**⚠️ Checkpoint gap found + fixed (user-caught).** The **entire E35/E36/E37 hidden-state line had never
+persisted a single fitted ridge** — `e35_pooling_*.py` write JSON only, and `exp2_run.py`'s `--ckpt_dir`
+covers `train_arm` (the proxy) but not `ridge_on_z`, which fits, returns a Spearman scalar and drops the
+model; the only surviving trace was E38's `ridge_te_preds`. "Checkpoint" had been read too narrowly as
+"neural checkpoint". Fixed: `save_ridge_bundle()`/`load_ridge_bundle()` persist the **full inference
+chain** — per-model Procrustes W + centering mean (the expensive part), feature scalers, per-model SE
+label z-stats, all 10 fitted ridges (4 LOO + 6 LTO) with alphas, and `meta.json` (splits/ids/layers/
+inference recipe) — to **`stage2/runs/E40_pooled_multimodel_ridge/checkpoints/`** (179MB), i.e. the same
+`stage2/runs/<RUN>/checkpoints/` convention as every other trained artifact here, already covered by the
+blanket gitignore on that path → W&B, not git. E40b **reuses the saved bundle with no refit**, which
+doubles as the proof it loads.
+
+**Artifacts.** `amortized_ue/e40_model_specificity.py` (build + [A]–[G] + checkpointing),
+`amortized_ue/e40b_lto_significance.py` (the negative-null proof + CIs on the clean test),
+`amortized_ue/e40c_lto_ceiling.py` (matched ceiling); `results/e40_model_specificity.json`,
+`results/e40b_lto_significance.json`, `results/e40c_lto_ceiling.json`;
+`stage2/runs/E40_pooled_multimodel_ridge/checkpoints/`. Env `se_probes`, CPU, minutes. **Run with
+`--data_dir /data2/mn1025/stage1`** (node-local ext4: 3.5s to read 2000 records vs minutes on the NFS).

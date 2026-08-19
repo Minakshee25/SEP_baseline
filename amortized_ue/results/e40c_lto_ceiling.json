@@ -1,0 +1,8 @@
+{
+ "n_splits": 200,
+ "pair_difference_r5": 0.6096968512011883,
+ "pair_difference_r10_spearman_brown": 0.7575300290190917,
+ "ceiling_sqrt_r10": 0.8703620103262157,
+ "observed_pooled_r": 0.11,
+ "frac_of_ceiling": 0.12638419266343148
+}

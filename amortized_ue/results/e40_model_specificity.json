@@ -1,0 +1,363 @@
+{
+ "config": {
+  "anchor_layer": 30,
+  "data_dir": "/data2/mn1025/stage1",
+  "boot": 2000,
+  "perm": 2000,
+  "ceiling_splits": 200,
+  "out": "results/e40_model_specificity.json",
+  "ckpt_dir": "results/e40_ridge_checkpoints"
+ },
+ "audits": {
+  "ridge_spearman_rebuilt": {
+   "Llama-2": 0.6036349321739974,
+   "Mistral": 0.5864696318628272,
+   "Llama-3": 0.6070137905076162,
+   "DeepSeek": 0.5649106793351713
+  },
+  "ridge_alpha": {
+   "Llama-2": 10000.0,
+   "Mistral": 10000.0,
+   "Llama-3": 10000.0,
+   "DeepSeek": 10000.0
+  },
+  "ridge_spearman_e37": {
+   "Mistral": 0.5861,
+   "Llama-3": 0.607,
+   "DeepSeek": 0.5648,
+   "Llama-2": 0.6038
+  },
+  "e37_target_y_max_abs_dev": {
+   "Llama-2": 5.867353514155127e-08,
+   "Mistral": 5.867353514155127e-08,
+   "Llama-3": 5.867353514155127e-08,
+   "DeepSeek": 5.867353514155127e-08
+  },
+  "ridge_pred_corr_with_e38": {
+   "Llama-2": 1.0,
+   "Mistral": 1.0,
+   "Llama-3": 1.0,
+   "DeepSeek": 1.0
+  },
+  "ckpt_roundtrip_max_abs_dev": 2.384185791015625e-07
+ },
+ "A_variance": {
+  "total_var_normed": 0.7381417144172456,
+  "question_effect_var": 0.4853224033442743,
+  "model_specific_resid_var": 0.2528193110729714,
+  "frac_question_effect": 0.6574921778095562,
+  "raw_SE_mean_by_model": {
+   "Llama-2": 0.553009364056397,
+   "Mistral": 0.4764052848671818,
+   "Llama-3": 0.4480388621933921,
+   "DeepSeek": 0.8076104158476513
+  },
+  "raw_SE_sd_by_model": {
+   "Llama-2": 0.6327844066147971,
+   "Mistral": 0.6134416106872947,
+   "Llama-3": 0.6523087002125177,
+   "DeepSeek": 0.7715178320404097
+  },
+  "raw_abs_gap_between_models": {
+   "mean": 0.4641022091707203,
+   "median": 0.3250829733914482,
+   "p90": 1.2335936047003702,
+   "frac_gap_gt_0.5": 0.4008333333333333
+  },
+  "cross_model_SE_spearman": {
+   "Llama-2~Mistral": 0.54,
+   "Llama-2~Llama-3": 0.505,
+   "Llama-2~DeepSeek": 0.583,
+   "Mistral~Llama-3": 0.521,
+   "Mistral~DeepSeek": 0.506,
+   "Llama-3~DeepSeek": 0.486
+  }
+ },
+ "B_ceiling": {
+  "n_splits": 200,
+  "residual_r5": 0.6097484437886475,
+  "residual_r10_spearman_brown": 0.7575698502973109,
+  "residual_ceiling_sqrt_r10": 0.8703848862987632,
+  "marginal_r5": 0.7891051547094752,
+  "marginal_r10_spearman_brown": 0.8821227222249153,
+  "marginal_ceiling_sqrt_r10": 0.9392138852385623
+ },
+ "C_headline": {
+  "residual_corr_pearson": 0.07489860019252133,
+  "residual_corr_spearman": 0.06040890555701233,
+  "bootstrap_mean_ci": [
+   0.073698752964119,
+   -0.010688837207880764,
+   0.15634416745848642
+  ],
+  "perm_null_mean_sd": [
+   -0.0002621913112235047,
+   0.03820728730672228
+  ],
+  "perm_p_value": 0.054,
+  "frac_of_ceiling": 0.08605227569038013,
+  "per_model": {
+   "Llama-2": {
+    "pearson": 0.02207250714842479,
+    "spearman": 0.04056179178540945
+   },
+   "Mistral": {
+    "pearson": 0.19459799265787353,
+    "spearman": 0.15278638396447178
+   },
+   "Llama-3": {
+    "pearson": 0.10704592444364858,
+    "spearman": 0.09464919449620296
+   },
+   "DeepSeek": {
+    "pearson": -0.023558560685248697,
+    "spearman": -0.01536738024182918
+   }
+  },
+  "marginal_corr_pearson": 0.5980428496168864
+ },
+ "D_discordant_pairs": {
+  "top_100pct": {
+   "n_pairs": 1197,
+   "gap_threshold_normed": 0.0,
+   "accuracy": 0.5087719298245614,
+   "ci95": [
+    0.48045069694695136,
+    0.5370931627021716
+   ]
+  },
+  "top_50pct": {
+   "n_pairs": 600,
+   "gap_threshold_normed": 0.4713636987181895,
+   "accuracy": 0.5308333333333334,
+   "ci95": [
+    0.4909011447251812,
+    0.5707655219414856
+   ]
+  },
+  "top_25pct": {
+   "n_pairs": 300,
+   "gap_threshold_normed": 0.9798812827889427,
+   "accuracy": 0.5466666666666666,
+   "ci95": [
+    0.4903333180802124,
+    0.6030000152531209
+   ]
+  },
+  "top_9pct": {
+   "n_pairs": 120,
+   "gap_threshold_normed": 1.367281092039649,
+   "accuracy": 0.6,
+   "ci95": [
+    0.5123461352820082,
+    0.6876538647179917
+   ]
+  }
+ },
+ "E_semipartial": {
+  "Llama-2": {
+   "r_PY": 0.6036349321739974,
+   "r_DY": 0.658869868409354,
+   "r_PY_given_D": 0.286766164132168,
+   "r_PbarY_given_D_NULL": 0.3544021144584777,
+   "r_PD": 0.6744246445343632
+  },
+  "Mistral": {
+   "r_PY": 0.5864696318628272,
+   "r_DY": 0.6254467607730012,
+   "r_PY_given_D": 0.25696597779314106,
+   "r_PbarY_given_D_NULL": 0.13634585779437083,
+   "r_PD": 0.7128607157722131
+  },
+  "Llama-3": {
+   "r_PY": 0.6070137905076162,
+   "r_DY": 0.5965540925785138,
+   "r_PY_given_D": 0.3438589602516351,
+   "r_PbarY_given_D_NULL": 0.26770513831304654,
+   "r_PD": 0.6771052294450608
+  },
+  "DeepSeek": {
+   "r_PY": 0.5649106793351713,
+   "r_DY": 0.6339457179812226,
+   "r_PY_given_D": 0.24886438732914334,
+   "r_PbarY_given_D_NULL": 0.39210532419121025,
+   "r_PD": 0.6641242516110952
+  }
+ },
+ "F_arms": {
+  "z": {
+   "residual_corr": 0.09018679652408434,
+   "marginal_corr": 0.5994966977419065,
+   "perm_p": 0.027,
+   "boot_ci": [
+    0.08811100662369101,
+    0.0025863933470150558,
+    0.1790705753017529
+   ],
+   "frac_of_ceiling": 0.10361714448833773,
+   "discordant_top25pct": 0.5416666666666666
+  },
+  "z_q": {
+   "residual_corr": 0.07305871185233488,
+   "marginal_corr": 0.6069803148577038,
+   "perm_p": 0.075,
+   "boot_ci": [
+    0.0704280822331775,
+    -0.013256555582084866,
+    0.15726504969112548
+   ],
+   "frac_of_ceiling": 0.08393839668219742,
+   "discordant_top25pct": 0.5083333333333333
+  },
+  "z_q_resp": {
+   "residual_corr": 0.09712591561038025,
+   "marginal_corr": 0.6235031180697952,
+   "perm_p": 0.015,
+   "boot_ci": [
+    0.09522064667201181,
+    0.013441257393494116,
+    0.17649427917726052
+   ],
+   "frac_of_ceiling": 0.11158961643210494,
+   "discordant_top25pct": 0.5633333333333334
+  },
+  "q_only": {
+   "residual_corr": -0.09705145519756331,
+   "marginal_corr": 0.5677187835293427,
+   "perm_p": 0.013,
+   "boot_ci": [
+    -0.09476921442559785,
+    -0.17840038930880617,
+    -0.005435960150553279
+   ],
+   "frac_of_ceiling": -0.11150406759734337,
+   "discordant_top25pct": 0.455
+  },
+  "q_resp_only": {
+   "residual_corr": 0.23682263913412366,
+   "marginal_corr": 0.6723630880656335,
+   "perm_p": 0.0,
+   "boot_ci": [
+    0.23726514386508837,
+    0.1428850187612037,
+    0.32116747692225084
+   ],
+   "frac_of_ceiling": 0.27208955815075275,
+   "discordant_top25pct": 0.6116666666666667
+  },
+  "ridge_z_pooled": {
+   "residual_corr": 0.07489860019252133,
+   "marginal_corr": 0.5980428496168864,
+   "perm_p": 0.054,
+   "boot_ci": [
+    0.073698752964119,
+    -0.010688837207880764,
+    0.15634416745848642
+   ],
+   "frac_of_ceiling": 0.08605227569038013,
+   "discordant_top25pct": 0.5466666666666666
+  }
+ },
+ "G_leave_two_out": {
+  "Llama-2_vs_Mistral": {
+   "sources": [
+    "Llama-3",
+    "DeepSeek"
+   ],
+   "alpha": 10000.0,
+   "te_spearman": {
+    "Llama-2": 0.6136928766450321,
+    "Mistral": 0.5930861349663002
+   },
+   "diff_corr_pearson": 0.15263903485800784,
+   "pair_acc_all": 0.49,
+   "n_all": 200,
+   "pair_acc_top25": 0.48,
+   "n_top25": 50
+  },
+  "Llama-2_vs_Llama-3": {
+   "sources": [
+    "Mistral",
+    "DeepSeek"
+   ],
+   "alpha": 10000.0,
+   "te_spearman": {
+    "Llama-2": 0.6103241162342623,
+    "Llama-3": 0.6212844159112098
+   },
+   "diff_corr_pearson": 0.08510121307034993,
+   "pair_acc_all": 0.485,
+   "n_all": 200,
+   "pair_acc_top25": 0.54,
+   "n_top25": 50
+  },
+  "Llama-2_vs_DeepSeek": {
+   "sources": [
+    "Mistral",
+    "Llama-3"
+   ],
+   "alpha": 10000.0,
+   "te_spearman": {
+    "Llama-2": 0.5847531898947952,
+    "DeepSeek": 0.5765085387109035
+   },
+   "diff_corr_pearson": 0.0011046413047732934,
+   "pair_acc_all": 0.48,
+   "n_all": 200,
+   "pair_acc_top25": 0.38,
+   "n_top25": 50
+  },
+  "Mistral_vs_Llama-3": {
+   "sources": [
+    "Llama-2",
+    "DeepSeek"
+   ],
+   "alpha": 10000.0,
+   "te_spearman": {
+    "Mistral": 0.5830490457932048,
+    "Llama-3": 0.580369709031874
+   },
+   "diff_corr_pearson": 0.2618281880443243,
+   "pair_acc_all": 0.5477386934673367,
+   "n_all": 199,
+   "pair_acc_top25": 0.7450980392156863,
+   "n_top25": 51
+  },
+  "Mistral_vs_DeepSeek": {
+   "sources": [
+    "Llama-2",
+    "Llama-3"
+   ],
+   "alpha": 10000.0,
+   "te_spearman": {
+    "Mistral": 0.5853190054439112,
+    "DeepSeek": 0.5855599481551088
+   },
+   "diff_corr_pearson": 0.11171491481555065,
+   "pair_acc_all": 0.5276381909547738,
+   "n_all": 199,
+   "pair_acc_top25": 0.6,
+   "n_top25": 50
+  },
+  "Llama-3_vs_DeepSeek": {
+   "sources": [
+    "Llama-2",
+    "Mistral"
+   ],
+   "alpha": 10000.0,
+   "te_spearman": {
+    "Llama-3": 0.6066474519997529,
+    "DeepSeek": 0.5484700520061503
+   },
+   "diff_corr_pearson": 0.057022235712512526,
+   "pair_acc_all": 0.5025125628140703,
+   "n_all": 199,
+   "pair_acc_top25": 0.5,
+   "n_top25": 50
+  }
+ },
+ "robustness_valzscore": {
+  "residual_corr": 0.060625216014078054,
+  "discordant_top25pct": 0.52
+ }
+}
