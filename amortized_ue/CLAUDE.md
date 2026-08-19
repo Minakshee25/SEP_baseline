@@ -317,6 +317,38 @@ Caveats: 3 seeds; Llama-2 native-frame ridge inflated; unique-Q coverage capped 
 `exp2_run.py`, `exp2_step1_zarm.py`, `results/exp2_{lolo_full,lolo_foldmeans,summary}.*`,
 `scratch_xllm/stage_to_data2.sh`. Full arc + per-seed table: EXPERIMENTS.md E37.
 
+**⭐ E38 — CORRECTNESS eval of the E37 LOLO proxy (does it catch WRONG answers?) — DONE.** E37 scored
+only vs the SE label; E38 re-scores the **same 200 held-out `te` rows per fold** vs `incorrect = 1`
+(`correctness_eval_e37.py`, additive, trains nothing — reads E37's saved per-example preds; CPU/`se_probes`,
+~25 min with `--data_dir /data2/mn1025/stage1`). **Audits passed first:** id-mapping exact (max dev
+**0.000e+00** on all 4 folds), ridge rebuilt to **4 dp** (and its **per-example preds are now saved** →
+closes E37's "paired bootstrap PENDING"), and the script **reproduces E31's Llama-3 column exactly**
+(0.775/0.720/0.729) via a different code path. **AUROC_incorrect (Mistral/Llama-3/DeepSeek/Llama-2, MEAN):**
+true 10-sample SE 0.762/0.775/0.821/0.783 (**0.785**) · SEP-single 0.721/0.720/0.740/0.611 (0.698) ·
+SEP-5layer (0.721) · ridge_z (0.729) · z (0.728) · z_q_resp (0.755) · q_only (0.738) ·
+**`q_resp_only` 0.796/0.767/0.844/0.797 (0.801)** · fuse (0.781). **Findings:** (1) **⭐ `q_resp_only` is
+statistically ON PAR with the true 10-sample SE** — all 4 paired-bootstrap CIs include 0 — with **no
+sampling, no target hidden states, no target labels**; say *on par*, **NOT** "beats" (nominally ahead,
+0.801 vs 0.785, leads 3/4, but no CI excludes 0). **This UPDATES E31 finding #2** ("sampling beats
+amortization"), which held for the E27/E30-era closed-form predictors but **not** for the E37 trained proxy.
+(2) **Label-free proxy > supervised SEP on correctness, sig. on 3/4** (Δ +0.074\*/+0.047/+0.103\*/+0.186\*)
+→ E37's headline is not an SE-scoring artifact. (3) **Multi-source training helped, apples-to-apples:** on
+Llama-3's *identical* 200 rows `q_resp_only` goes **0.739 (E31 single-source ref proxy) → 0.767 (E37 3-source
+LOLO)**. (4) **SE→correctness drop is smallest for text** (q_resp_only +0.062 vs true SE +0.215, SEP +0.113,
+z ~+0.100). (5) **Orderings DIFFER on all 4** — SE-fidelity **over-ranks `fuse`, under-ranks `q_resp_only`**;
+⇒ **for wrong-answer detection pick `q_resp_only`, not the SE-optimal `fuse`.** (6) z significantly *below*
+true SE on DeepSeek (low-CKA), echoing E33. **Caveats:** **N=200/fold → wide CIs (±0.06–0.08)**, the main
+limit; the **Llama-2 fold is not a clean cross-model test** (anchor = native frame, *and* its SEP is
+anomalously weak at 0.611 / layer TBG:21 vs TBG:28–31 elsewhere) so its Δ-vs-SEP is inflated — the 3/4
+significance rests on the clean Mistral + DeepSeek folds; 3 seeds; ~10% label noise (E32) ⇒ mild
+under-estimates. **Bug fixed en route in `correctness_eval.py` (E31):** `label_free["q_resp_only"]` was
+hardcoded `True` but on the **reference target (Llama-2)** that predictor IS the Llama-2-trained proxy →
+now `not is_reference`, matching `aligned_z_ridge`/`rank_fusion_ensemble`. **Metadata-only — no AUROC
+changes** (fit/eval ids always disjoint; re-verified n2000 ∩ fresh-n1000 = 0 for all 4). ⚠️ the committed
+`correctness_eval_*.json` still carry the pre-fix flag (re-run needs GPU + `amortized_stage2`). Artifacts:
+`correctness_eval_e37.py`, `results/correctness_eval_e37.json`, `correctness_e37.log`. Full arc:
+EXPERIMENTS.md E38.
+
 **Cross-LLM transfer (E20) — the thesis result.** Frozen Llama-2 proxy → Llama-3-8B, 5-seed Spearman
 (control = same harness on Llama-2's own 200, reproduces ID to 4 sig figs):
 
@@ -504,8 +536,10 @@ Llama-3). `correctness_eval.py` + `correctness_eval_*.json`. See EXPERIMENTS.md 
   LOLO, 3-seed means: **fuse 0.664 / q_resp_only 0.648 / ridge 0.591** — label-free fusion ≥ ridge on all
   4; text beats ridge on all 4 with no target hidden states; z tracks CKA; late>early. Conservative
   bootstrap: fuse beats ridge 3/4. See Current state E37 + EXPERIMENTS.md E37 (per-seed table).
-  **Still open:** paired bootstrap (recompute ridge per-example preds); the deployable all-4 proxy run
-  (checkpoints + training curves) is in progress. **Deviation from plan (better):** used **same-questions
+  **Ridge per-example preds now saved by E38** (`results/correctness_eval_e37.json` → `ridge_te_preds`,
+  rebuild verified to 4 dp) — the SE-target paired bootstrap vs ridge is now unblocked but **not yet run**.
+  The deployable all-4 proxy run (checkpoints + training curves) is DONE
+  (`results/deploy_checkpoints/`, `results/deploy_curves.json`). **Deviation from plan (better):** used **same-questions
   pooling** (each Q to all sources → model-invariance signal) NOT the disjoint matched-partition, and
   anchor **TBG:30** (best→best); layers reconfirmed leak-free (Llama-2 TBG:30, Mistral/Llama-3 TBG:31,
   DeepSeek SLT:16 — E36).

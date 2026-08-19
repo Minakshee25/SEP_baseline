@@ -1688,3 +1688,96 @@ per-step loss/lr/grad-norm, per-epoch train/val-mse/val-spearman, best-epoch/wal
 **Artifacts.** `exp2_run.py`, `exp2_step1_zarm.py`, `results/exp2_lolo_full.json` (per-seed + preds),
 `results/exp2_lolo_foldmeans.json`, `scratch_xllm/stage_to_data2.sh` (parallel /data2 staging). Lessons:
 [[persist-results-before-done]], [[always-save-checkpoints]].
+
+---
+
+## E38 — Correctness eval of the E37 LOLO proxy: does it actually catch WRONG answers? — ✅ yes; `q_resp_only` is statistically ON PAR with 10-sample sampling and beats supervised SEP on 3/4
+
+**Motivation.** E37 scored the leave-one-LLM-out proxy against the **semantic-entropy label only**.
+E31 had shown SE-fidelity ≠ correctness (−0.10 to −0.15 AUROC) for the *E27/E30-era* predictors
+(closed-form ridge / rank-fusion), but the **trained multi-target proxy was never re-scored that way**.
+New additive script **`amortized_ue/correctness_eval_e37.py`** (trains nothing; reads E37's saved
+per-example predictions). Detection label **`incorrect = 1`**; eval rows = the **same 200 held-out `te`
+rows E37 reported**, per fold, so every number is directly comparable to the E37 Spearman table.
+
+**Audits run before reading any number** (all passed):
+- **ID-mapping audit:** re-derived each fold's `te` ids (`sorted(manifest ids)` → `splits(2000)`) and
+  checked their SE labels against E37's saved `target_y` → **max deviation 0.000e+00 on all 4 folds.**
+- **Ridge rebuild:** recomputed E37's ridge baseline end-to-end → Spearman reproduces the saved scalar
+  to **4 dp on all 4 folds** (0.5861/0.6070/0.5648/0.6038). Its **per-example preds are now saved**
+  (`ridge_te_preds`), closing E37's "paired bootstrap PENDING — ridge preds not saved".
+- **Independent reproduction of E31:** Llama-3's fold scores the *same* 200 rows E31 used, and this
+  script reproduces E31's baselines **exactly** (true SE 0.775, SEP 0.720, SEP-5 0.729) via a different
+  code path.
+
+**Results — AUROC for detecting a WRONG answer (`incorrect`), per held-out target (N=200 each):**
+
+| predictor | Mistral | Llama-3 | DeepSeek | Llama-2 | MEAN | label-free on target? |
+|---|---|---|---|---|---|---|
+| true semantic entropy (10-sample) | 0.762 | 0.775 | 0.821 | 0.783 | 0.785 | NO (is the label) |
+| SEP, single best layer (supervised) | 0.721 | 0.720 | 0.740 | 0.611 | 0.698 | NO |
+| SEP, 5-layer concat (supervised) | 0.739 | 0.729 | 0.736 | 0.679 | 0.721 | NO |
+| ridge_z (E37 baseline) | 0.739 | 0.720 | 0.724 | 0.733 | 0.729 | yes |
+| z (proxy) | 0.748 | 0.708 | 0.723 | 0.733 | 0.728 | yes |
+| z_q_resp (proxy, early fusion) | 0.755 | 0.748 | 0.764 | 0.752 | 0.755 | yes |
+| q_only (proxy) | 0.725 | 0.709 | 0.766 | 0.751 | 0.738 | yes |
+| **q_resp_only (proxy, text only)** | **0.796** | **0.767** | **0.844** | **0.797** | **0.801** | **yes** |
+| fuse(z ⊕ q_resp) | 0.790 | 0.755 | 0.800 | 0.781 | 0.781 | yes |
+| random control | 0.498 | 0.511 | 0.490 | 0.472 | 0.493 | yes |
+
+**Per-seed spread (3 seeds, seed-mean ± std; the table above uses the seed-averaged prediction):**
+`q_resp_only` 0.782±0.013 / 0.761±0.003 / 0.825±0.029 / 0.789±0.007; `fuse` 0.785±0.013 / 0.750±0.001 /
+0.790±0.014 / 0.775±0.005. Spreads are tight; seed-averaging the *predictions* adds ~+0.01 over the mean
+of per-seed AUROCs (ensembling), which is why the headline row sits slightly above the seed means.
+
+**Paired bootstrap (B=10000, shared resample indices), Δ AUROC_incorrect:**
+
+| arm | vs supervised SEP (single) | vs true 10-sample SE |
+|---|---|---|
+| **q_resp_only** | **+0.074\* / +0.047 / +0.103\* / +0.186\*** (sig. on 3/4) | +0.033 / −0.008 / +0.023 / +0.014 — **all 4 CIs include 0** |
+| fuse(z ⊕ q_resp) | +0.068\* / +0.034 / +0.059\* / +0.170\* (sig. on 3/4) | +0.027 / −0.020 / −0.021 / −0.002 — all 4 include 0 |
+| ridge_z | +0.018 / −0.000 / −0.016 / +0.122\* (sig. on 1/4) | −0.023 / −0.054 / −0.096\* / −0.050 |
+| z | +0.027 / −0.013 / −0.017 / +0.122\* (sig. on 1/4) | −0.015 / −0.067 / −0.097\* / −0.050 |
+
+(order Mistral / Llama-3 / DeepSeek / Llama-2; \* = 95% CI excludes 0.)
+
+**Findings.**
+1. **⭐ The text arm closes the gap to sampling.** `q_resp_only` is **statistically indistinguishable
+   from the true 10-sample SE** on all four targets (every paired CI includes 0), while needing **no
+   sampling, no target hidden states, and no target labels**. State this as *on par*, **not** "beats" —
+   the mean is nominally ahead (0.801 vs 0.785) and it leads on 3/4, but no CI excludes 0.
+   **This UPDATES E31 finding #2** ("sampling beats amortization for correctness"), which held for the
+   E27/E30-era closed-form predictors but does **not** hold for the E37 multi-target trained proxy.
+2. **Label-free proxy > supervised SEP on correctness**, significantly on 3/4 (`q_resp_only`; Llama-3's
+   CI includes 0) — E37's SE-fidelity headline is **not an artifact of scoring against SE**. Mean
+   0.801 vs SEP-single 0.698 / SEP-5layer 0.721.
+3. **Multi-source training genuinely helped, measured apples-to-apples.** On Llama-3's *identical* 200
+   rows, `q_resp_only` goes **0.739 (E31: single-source Llama-2 reference proxy) → 0.767 (E37: 3-source
+   LOLO proxy)**, +0.028, with every baseline in the column reproducing exactly.
+4. **The SE→correctness drop is smallest for the text arms.** Mean AUROC_SE − AUROC_inc: true SE +0.215,
+   SEP +0.113, ridge_z/z ≈ +0.100, **`q_resp_only` +0.062**, `q_only` +0.073. The hidden-state pathway
+   over-fits *SE fidelity* relative to what actually predicts wrongness; text degrades least.
+5. **Orderings DIFFER on all 4 targets** (vs E31's "match on 3/4"). Consistently, ranking by SE-fidelity
+   **over-ranks `fuse` and under-ranks `q_resp_only`**: `fuse` is 1st-or-2nd by SE on every target but
+   `q_resp_only` is 1st-or-2nd by correctness on every target. **Practical consequence: if the goal is
+   catching wrong answers, pick `q_resp_only`, not the SE-optimal `fuse`.**
+6. **z stays the weak arm** and is significantly *below* true SE on DeepSeek (the low-CKA outlier) —
+   consistent with E33 ("z_aligned adds nothing significant on correctness over text").
+
+**Caveats (stated, not smoothed).** **N=200 per fold** → CIs are wide (±0.06–0.08); this is the main
+limit and is why "on par with sampling" is the honest read rather than a win. **The Llama-2 fold is not
+a clean cross-model test** — Llama-2 is the alignment anchor (native frame, no cross-align) *and* its
+SEP baseline is anomalously weak (0.611; selected layer TBG:21 vs TBG:28–31 for the others), so every
+Llama-2 Δ-vs-SEP is inflated; the 3/4 significance claim rests on Mistral + DeepSeek, which are clean.
+3 seeds. Correctness labels are ~10% noisy (E32) ⇒ these AUROCs are mild **under**-estimates.
+
+**Bug fixed en route (`correctness_eval.py`, E31).** `label_free["q_resp_only"]` was hardcoded `True`;
+on the **reference target (Llama-2)** the `q_resp_only` predictor *is* the Llama-2-trained REFERENCE
+proxy, so it is not label-free there — same caveat the script already applied to `aligned_z_ridge` /
+`rank_fusion_ensemble` (`not is_reference`). **Metadata-only: no reported AUROC changes** (eval ids were
+always disjoint from fit ids — re-verified: n2000 ∩ fresh-n1000 = 0 for all 4 targets). The committed
+`correctness_eval_*.json` still carry the pre-fix flag (re-running E31 needs the GPU + `amortized_stage2`).
+
+**Artifacts.** `amortized_ue/correctness_eval_e37.py`, `amortized_ue/results/correctness_eval_e37.json`
+(per-target metrics + per-seed AUROCs + bootstrap CIs + **ridge per-example preds**),
+`amortized_ue/correctness_e37.log`. Runs on CPU in `se_probes` (~25 min, `--data_dir /data2/mn1025/stage1`).

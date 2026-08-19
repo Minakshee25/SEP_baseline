@@ -292,7 +292,9 @@ def evaluate_target(target, fit_n, eval_n, is_reference, dataset="trivia_qa",
         preds["q_resp_only"] = qr_eval
         cz, cr = ecdf(z_tr), ecdf(qr_tr)
         preds["rank_fusion_ensemble"] = 0.5 * (cz(z_eval) + cr(qr_eval))
-        label_free["q_resp_only"] = True; needs_target_llm["q_resp_only"] = False
+        # q_resp_only is the REFERENCE (Llama-2) proxy: label-free on a *different* target, but on the
+        # reference itself it was trained on that model's own SE labels -- same caveat as aligned-z.
+        label_free["q_resp_only"] = not is_reference; needs_target_llm["q_resp_only"] = False
         label_free["rank_fusion_ensemble"] = not is_reference; needs_target_llm["rank_fusion_ensemble"] = True
     except Exception as e:                                       # proxy env / GPU unavailable
         have_text = False
