@@ -252,7 +252,12 @@ def train_arm(train, val, tgt, arm, seeds, cfg, model, torch, nn, sched_fn,
         if ckpt_dir is not None:
             from amortized_ue.stage2.checkpoint import save_checkpoint as _save
             os.makedirs(ckpt_dir, exist_ok=True)
+            # `k` and `transform` are part of the checkpoint/v1 metadata contract -- without them
+            # stage2.checkpoint.load_checkpoint KeyErrors on our own files (hit in E39). Targets here
+            # are z-scored PER MODEL upstream in build_fold, so there is no single decode: predictions
+            # are already in standardized space and the identity transform is the honest record.
             meta = {"arm": arm, "seed": int(seed), "tag": tag, "h_in": int(model.h_in),
+                    "k": int(cfg.k_soft_tokens), "transform": {"mean": 0.0, "std": 1.0},
                     "proxy_model": cfg.proxy_model, "config": cfg.as_dict()}
             _save(model, meta, os.path.join(ckpt_dir, f"{tag}_{arm}_seed{seed}.pt"))
         p = predict(tgt, zte).numpy()
