@@ -31,8 +31,10 @@ from amortized_ue.stage2.checkpoint import read_meta, _cfg_from_meta, load_check
 REF = "amortized_ue/stage2/runs/REFERENCE_multipos_p1024_5arm_ckpt/checkpoints"
 
 
-def arm_preds(arm, model_name, dataset, num_samples):
-    paths = sorted(glob.glob(os.path.join(REF, f"{arm}_seed*.pt")))
+def arm_preds(arm, model_name, dataset, num_samples, ckpt_dir=None):
+    """ckpt_dir defaults to REF (the Llama-2-trained REFERENCE proxy); pass e.g. the E22 Mistral
+    proxy's checkpoint dir to score a proxy trained on a DIFFERENT source model (E42)."""
+    paths = sorted(glob.glob(os.path.join(ckpt_dir or REF, f"{arm}_seed*.pt")))
     cfg = dataclasses.replace(_cfg_from_meta(read_meta(paths[0])), stage1_model_name=model_name,
                               stage1_dataset=dataset, stage1_num_samples=num_samples, ood_dataset=None, smoke=False)
     data = Stage2Data(cfg)

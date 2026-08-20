@@ -1,0 +1,49 @@
+{
+  "target": "Mistral-7B-Instruct-v0.2",
+  "eval_dataset": "squad",
+  "fit_dataset": "trivia_qa (Mistral only)",
+  "n_test": 1000,
+  "mean_accuracy": 0.228,
+  "positive_rate_incorrect": 0.772,
+  "id_mapping_max_dev": 5.867353514155127e-08,
+  "metrics": {
+    "q_only": {
+      "auroc_incorrect": 0.6471968457412962,
+      "auprc_incorrect": 0.8506741110361413,
+      "prr": 0.2910176896789453,
+      "accuracy_coverage": {
+        "1.0": 0.228,
+        "0.9": 0.24,
+        "0.75": 0.26266666666666666,
+        "0.5": 0.304
+      },
+      "provenance": "Mistral-trained proxy (E22, 5 seeds) -> Mistral squad (in-model, cross-dataset only)"
+    },
+    "q_resp_only": {
+      "auroc_incorrect": 0.7479376874829561,
+      "auprc_incorrect": 0.9097693904780291,
+      "prr": 0.43767899428975215,
+      "accuracy_coverage": {
+        "1.0": 0.228,
+        "0.9": 0.25222222222222224,
+        "0.75": 0.288,
+        "0.5": 0.352
+      },
+      "provenance": "Mistral-trained proxy (E22, 5 seeds) -> Mistral squad (in-model, cross-dataset only)"
+    }
+  },
+  "frozen_baselines_reused_from": "amortized_ue/results/correctness_eval_e41_ood_fixedlayer.json",
+  "frozen_baseline_auroc_incorrect": {
+    "true_semantic_entropy": 0.7742563176074904,
+    "sep_single_e36_layer": 0.6692800654485955,
+    "sep_single_best_layer": 0.6671098081992546,
+    "reference_q_resp_only": 0.7130942641578037,
+    "deploy_q_resp_only": 0.7628738296518498
+  },
+  "bootstrap_q_resp_vs_q_only_internal": {
+    "mean": 0.10078380031879557,
+    "lo95": 0.06832132422377366,
+    "hi95": 0.1331693039645708,
+    "n_valid_resamples": 10000
+  }
+}

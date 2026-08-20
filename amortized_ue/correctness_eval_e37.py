@@ -40,14 +40,17 @@ from amortized_ue.config import Stage1Config
 from amortized_ue.linear_ceiling_probe import load_matrix, splits
 from amortized_ue.stage2.data import best_split, binarize_entropy
 from amortized_ue.correctness_eval import (
-    load_accuracy, sep_single_val_selected, sep_5layer_concat,
+    load_accuracy, sep_single_val_selected, sep_single_fixed_layer, sep_5layer_concat,
     accuracy_coverage, prediction_rejection_ratio, paired_bootstrap_auc, ci, COVERAGES)
 from amortized_ue import exp2_run as E2
 
 # E37 arms in report order, then the fusion. Every one is label-free on the held-out target.
 PROXY_ARMS = ["z", "z_q", "z_q_resp", "q_only", "q_resp_only"]
 LONG = {v: k for k, v in E2.SHORT.items()}          # "Mistral" -> "Mistral-7B-Instruct-v0.2"
-BASELINES = ["sep_single_best_layer", "true_semantic_entropy"]
+# sep_single_e36_layer is the PRIMARY supervised baseline (E41): the per-run val re-selection in
+# sep_single_best_layer is high-variance on Llama-2's near-tied late-TBG band (picked TBG:21, test
+# AUROC_inc 0.611, vs 0.669 at E36's TBG:30). Both are reported so the correction is auditable.
+BASELINES = ["sep_single_e36_layer", "sep_single_best_layer", "true_semantic_entropy"]
 
 
 def ridge_preds_for_fold(data, sp, target_long, sources_long, al, fsc):
@@ -109,13 +112,20 @@ def evaluate_fold(fold, data, sp, al, fsc, bootstrap=10000, data_dir=None):
 
     sep1_p, sep1_au_se, sep1_choice, thr, ybe, _ = sep_single_val_selected(
         hid, y_all, tr, va, hid, y_all, te)
+    # E41: same probe at E36's leak-free CV-selected layer (never re-selected on this run's val split)
+    e36_layer = E2.BEST_TBG[target]
+    sepf_p, sepf_au_se, sepf_choice, _, _ = sep_single_fixed_layer(
+        hid, y_all, tr, va, hid, y_all, te, "TBG", e36_layer)
     sep5_p, sep5_au_se, sep5_choice = sep_5layer_concat(hid, y_all, tr, va, hid, y_all, te)
     preds["sep_single_best_layer"] = sep1_p[te]
+    preds["sep_single_e36_layer"] = sepf_p[te]
     preds["sep_5layer_concat"] = sep5_p[te]
-    label_free["sep_single_best_layer"] = label_free["sep_5layer_concat"] = False
+    label_free["sep_single_best_layer"] = label_free["sep_single_e36_layer"] = False
+    label_free["sep_5layer_concat"] = False
     yb_eval = ybe[te]
     del hid
-    print(f"  SEP single {sep1_choice} SE-AUROC {sep1_au_se:.3f} | 5-layer {sep5_choice[0]} "
+    print(f"  SEP single val-selected {sep1_choice} SE-AUROC {sep1_au_se:.3f} | "
+          f"E36-fixed {sepf_choice} SE-AUROC {sepf_au_se:.3f} | 5-layer {sep5_choice[0]} "
           f"L{sep5_choice[1][0]}-{sep5_choice[1][-1]} SE-AUROC {sep5_au_se:.3f}")
 
     # E37 ridge baseline (recomputed; per-example preds were never saved)
@@ -194,6 +204,7 @@ def evaluate_fold(fold, data, sp, al, fsc, bootstrap=10000, data_dir=None):
             "positive_rate_incorrect": pos_rate, "mean_accuracy": float(acc.mean()),
             "detection_label": "incorrect = 1", "best_split": float(thr),
             "sep_single_choice": list(sep1_choice), "sep_single_auroc_vs_se": sep1_au_se,
+            "sep_e36_layer_choice": list(sepf_choice), "sep_e36_layer_auroc_vs_se": sepf_au_se,
             "sep_5layer_auroc_vs_se": sep5_au_se, "ridge_alpha": float(r_alpha),
             "ridge_spearman_rebuilt": E2.rho(r_pred, y_saved), "ridge_spearman_e37": fold["ridge_z"],
             "id_mapping_max_dev": max_dev, "bootstrap_resamples": bootstrap,
