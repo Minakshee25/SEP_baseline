@@ -48,13 +48,16 @@ from amortized_ue.config import Stage1Config
 from amortized_ue.linear_ceiling_probe import load_matrix, splits
 from amortized_ue.stage2.data import best_split, binarize_entropy
 from amortized_ue.correctness_eval import (
-    load_accuracy, sep_single_val_selected, sep_5layer_concat,
+    load_accuracy, sep_single_val_selected, sep_single_fixed_layer, sep_5layer_concat,
     accuracy_coverage, prediction_rejection_ratio, paired_bootstrap_auc, ci, COVERAGES)
 from amortized_ue import exp2_run as E2
 
 OOD_TARGETS = ["Llama-2-7b-chat", "Mistral-7B-Instruct-v0.2"]      # the only two with squad records
 DEPLOY_CKPTS = "amortized_ue/results/deploy_checkpoints"
-BASELINES = ["sep_single_best_layer", "true_semantic_entropy"]
+# sep_single_e36_layer is PRIMARY (E41): sep_single_best_layer re-selects the layer on trivia val,
+# which is high-variance on Llama-2's near-tied late-TBG band (picked TBG:21, matching E38's bug).
+# Both reported so the correction is auditable.
+BASELINES = ["sep_single_e36_layer", "sep_single_best_layer", "true_semantic_entropy"]
 
 
 # ---- squad z in the trivia-fitted aligned frame (label-free) ---------------------------------
@@ -166,14 +169,21 @@ def evaluate_target(target, data, sp, al, fsc, anchor_layer, bootstrap=10000,
     eval_rows = np.arange(len(sids))
     sep1_p, sep1_au_se, sep1_choice, thr, ybe, _ = sep_single_val_selected(
         thid, ty, tr, va, shid, sy, eval_rows)
+    # E41: same probe at E36's leak-free CV-selected layer (never re-selected on trivia val here)
+    e36_layer = layer                                # == E2.BEST_TBG[target] / anchor_layer above
+    sepf_p, sepf_au_se, sepf_choice, _, _ = sep_single_fixed_layer(
+        thid, ty, tr, va, shid, sy, eval_rows, "TBG", e36_layer)
     sep5_p, sep5_au_se, sep5_choice = sep_5layer_concat(thid, ty, tr, va, shid, sy, eval_rows)
     preds["sep_single_best_layer"] = sep1_p
+    preds["sep_single_e36_layer"] = sepf_p
     preds["sep_5layer_concat"] = sep5_p
     provenance["sep_single_best_layer"] = f"trivia-fit {sep1_choice} -> squad (supervised, in-model)"
+    provenance["sep_single_e36_layer"] = f"trivia-fit {sepf_choice} -> squad (supervised, in-model, E36 layer)"
     provenance["sep_5layer_concat"] = f"trivia-fit {sep5_choice[0]} -> squad (supervised, in-model)"
     yb_eval = ybe                                   # best_split refit convention: see note below
     del thid, shid
-    print(f"  SEP single {sep1_choice} (trivia-fit) squad SE-AUROC {sep1_au_se:.3f} | "
+    print(f"  SEP single val-selected {sep1_choice} squad SE-AUROC {sep1_au_se:.3f} | "
+          f"E36-fixed {sepf_choice} squad SE-AUROC {sepf_au_se:.3f} | "
           f"5-layer {sep5_choice[0]} L{sep5_choice[1][0]}-{sep5_choice[1][-1]} {sep5_au_se:.3f}")
 
     # ---- ridge_z: E37's pooled 3-source aligned ridge, trivia-fit -> squad ----------------------
@@ -273,6 +283,7 @@ def evaluate_target(target, data, sp, al, fsc, anchor_layer, bootstrap=10000,
     return {"target": target, "eval_dataset": "squad", "fit_dataset": "trivia_qa", "n_test": n,
             "mean_accuracy": float(acc.mean()), "positive_rate_incorrect": pos_rate,
             "sep_single_choice": list(sep1_choice), "sep_single_auroc_vs_se": sep1_au_se,
+            "sep_e36_layer_choice": list(sepf_choice), "sep_e36_layer_auroc_vs_se": sepf_au_se,
             "sep_5layer_auroc_vs_se": sep5_au_se, "ridge_alpha": float(best[1]),
             "best_split_refit_on_squad": float(thr), "bootstrap_resamples": bootstrap,
             "metrics": metrics, "bootstrap_auroc_incorrect": vs}

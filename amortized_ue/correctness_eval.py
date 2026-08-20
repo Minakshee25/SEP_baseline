@@ -115,6 +115,27 @@ def sep_single_val_selected(fit_hidden, fit_y, tr, va, eval_hidden, eval_y, eval
     return best[2], eval_au, best[1], float(thr), ybe, float(best_on_eval)
 
 
+def sep_single_fixed_layer(fit_hidden, fit_y, tr, va, eval_hidden, eval_y, eval_rows, pos, layer):
+    """SEP at a FIXED (pos, layer) instead of re-selecting per run — same fit/binarisation as
+    sep_single_val_selected, only the layer choice differs.
+
+    Why (E41): sep_single_val_selected re-picks the layer on a single 360-row val split, and on
+    Llama-2 the late-TBG band is a near-tie (L21 and L23 tie at val 0.7763; the whole L18-32 band
+    spans 0.036) so val noise decides — it landed on TBG:21, whose test AUROC_incorrect is 0.611
+    vs 0.669 at TBG:30. E36 already fixed each target's best TBG layer on val/5-fold CV (never
+    test): Llama-2 30, Mistral 31, Llama-3 31, DeepSeek 28 (exp2_run.BEST_TBG) -- the same layers
+    the z arms use. Passing those in is leak-free and lower-variance than re-selecting.
+
+    Returns (eval_prob[all rows], eval_auroc_vs_SE, (pos,layer), thr, yb_eval)."""
+    thr = best_split(torch.tensor(fit_y[tr]))
+    ybf = binarize_entropy(torch.tensor(fit_y), thr).numpy()
+    ybe = binarize_entropy(torch.tensor(eval_y), thr).numpy()
+    sel = eval_rows[ybe[eval_rows] >= 0]
+    trv = tr[ybf[tr] >= 0]
+    p = _fit_predict(fit_hidden[pos][layer], ybf, trv, eval_hidden[pos][layer])
+    return p, float(roc_auc_score(ybe[sel], p[sel])), (pos, int(layer)), float(thr), ybe
+
+
 def sep_5layer_concat(fit_hidden, fit_y, tr, va, eval_hidden, eval_y, eval_rows, n_top=5):
     """SEP on the concatenation of the top-n_top layers (Llama-2-7B => layers 28-32; arXiv:2406.15927
     Table 4). Position (TBG|SLT) chosen by FIT-VAL AUROC (leak-free); AUROC on eval_rows only.

@@ -1985,3 +1985,150 @@ doubles as the proof it loads.
 `results/e40b_lto_significance.json`, `results/e40c_lto_ceiling.json`;
 `stage2/runs/E40_pooled_multimodel_ridge/checkpoints/`. Env `se_probes`, CPU, minutes. **Run with
 `--data_dir /data2/mn1025/stage1`** (node-local ext4: 3.5s to read 2000 records vs minutes on the NFS).
+
+---
+
+## E41 — Fix Llama-2's SEP layer-selection variance (user-caught) + rerun E38/E39 — ✅ correction applied, no headline overturned
+
+**Why.** Comparing the E37/E38 proxy against each target's own supervised SEP, Llama-2's SEP was an
+outlier: 0.611 AUROC_incorrect vs 0.72–0.74 for the other three targets, inflating the proxy's
+apparent edge on Llama-2 to +0.186. User asked to check the layer selection rather than take the
+number at face value ("we already have the best layer for Llama-2, ~30 — check E36/EXPERIMENTS.md").
+
+**Diagnosis (`sep_layer_diag.py`, scratch, not committed — dumps val/test AUROC for all 66
+(pos,layer) combos on all 4 targets).** `sep_single_val_selected` picks the layer by AUROC on a
+360-row val split — leak-free, but on Llama-2 the late-TBG band is a genuine near-tie: **TBG:21 and
+TBG:23 tie at val 0.7763 to 4dp**, and the whole TBG L18-32 band spans only 0.036 in val AUROC.
+E36's TBG:30 (chosen separately, on 5-fold CV, for the ridge/z arms) sits at val-rank 8/66 — 0.017
+off the "winner" — but scores **0.669 vs 0.611 on test AUROC_incorrect**, while the leaky
+test-oracle over all 66 combos is only **0.687**. So Llama-2's SEP is genuinely the weakest of the
+four (no layer reaches Mistral/DeepSeek's ~0.74), but 0.611 specifically was selection noise, not a
+property of the model. Mistral's val-selected layer also moved (TBG:30→31, val-rank 2/66); Llama-3
+and DeepSeek were already at their CV-optimal layer (val-rank 1/66 each) — matches E36's original
+finding "≈22 plateau, tied" for Llama-2 and confirms E34's lesson #3 (late TBG layers near-tied, val
+noise decides).
+
+**Fix (additive).** New `sep_single_fixed_layer()` in `correctness_eval.py` — identical
+fit/binarisation to `sep_single_val_selected`, layer passed in rather than re-selected.
+`correctness_eval_e37.py` and `correctness_eval_ood.py` both now score `sep_single_e36_layer`
+(E2.BEST_TBG per target — Llama-2 30, Mistral 31, Llama-3 31, DeepSeek 28) alongside the original
+`sep_single_best_layer`, and use the fixed-layer version as the primary bootstrap baseline.
+`sep_single_val_selected` itself is untouched (E31 stays reproducible). Outputs go to new files
+(`correctness_eval_e41_fixedlayer.json`, `correctness_eval_e41_ood_fixedlayer.json`) — E38/E39's
+committed jsons are untouched.
+
+**E38 rerun (ID, trivia, `se_probes`/CPU, `--data_dir /data2/mn1025/stage1`):**
+
+| target | SEP old | SEP fixed | Δ | Δ(q_resp_only − SEP), old | Δ(q_resp_only − SEP), fixed |
+|---|---|---|---|---|---|
+| Mistral | 0.721 | 0.738 | +0.017 | +0.074\* | +0.058 (now includes 0) |
+| Llama-3 | 0.720 | 0.720 | 0 | +0.047 | +0.047 |
+| DeepSeek | 0.740 | 0.740 | 0 | +0.103\* | +0.103\* |
+| Llama-2 | 0.611 | 0.669 | +0.058 | +0.186\* | +0.128\* |
+| **MEAN** | **0.698** | **0.717** | **+0.019** | +0.103 | **+0.084** |
+
+Only real change to a significance verdict: Mistral's proxy-vs-SEP gap is no longer significant on
+its own (was inflated by Mistral's SEP also landing 1 layer off its CV-optimum). DeepSeek and
+Llama-2 stay significant → **honest claim is "significant on 2/4 individually, positive on all 4,"
+not "3/4."** Everything else holds: `q_resp_only` still leads every target by mean AUROC_incorrect,
+still statistically on par with true 10-sample SE (all CIs include 0), "SE-fidelity over-ranks
+`fuse`, under-ranks `q_resp_only`" unchanged.
+
+**E39 rerun (OOD, trivia→squad, `amortized_stage2`/GPU):**
+
+| predictor | Llama-2 | Mistral | MEAN |
+|---|---|---|---|
+| true 10-sample SE | 0.784 | 0.774 | 0.779 |
+| SEP old | 0.603 | 0.667 | 0.635 |
+| **SEP fixed** | 0.621 | 0.669 | **0.645** (+0.010) |
+| deploy `q_resp_only` | 0.716 | 0.763 | 0.739 |
+| reference `q_resp_only` | 0.692 | 0.713 | 0.703 |
+
+Correction is much smaller OOD (+0.010 mean vs +0.019 ID) — plausible, since every hidden-state
+method is already degraded by the dataset shift, so a better layer buys less. **All three E39
+findings survive unchanged:** proxy still loses to true SE (deploy_q_resp_only Δ vs SE: Mistral
+−0.011 n.s. / Llama-2 −0.068\*); proxy still beats SEP-fixed significantly on both targets (+0.094\*
+Llama-2, +0.096\* Mistral); the strict thesis test still passes (reference_q_resp_only on Mistral
+0.713 vs SEP-fixed 0.669, Δ +0.046\* — essentially identical to the pre-fix number, since Mistral's
+own layer barely moved).
+
+**Takeaway.** The fix was worth doing — it replaces a baseline with a known selection-variance flaw
+with one chosen leak-free on CV — but it narrows rather than overturns the headline: the proxy's
+edge over SEP shrinks from "3/4 significant, mean +0.103" to "2/4 significant, mean +0.084" ID, and
+is essentially unchanged OOD. Lesson: [[audit-leakage-before-presenting]] extends to
+**selection-variance audits**, not just leakage — a leak-free selector chosen on a small val split
+can still be high-variance, and a near-tied plateau (E34/E36's recurring Llama-2 finding) is a sign
+to check before trusting a single-run selection.
+
+**Artifacts.** `correctness_eval.py::sep_single_fixed_layer` (new fn, additive), edits to
+`correctness_eval_e37.py`/`correctness_eval_ood.py` (additive predictor + baseline, new output
+paths). `results/correctness_eval_e41_fixedlayer.json`, `results/correctness_eval_e41_ood_fixedlayer.json`,
+`correctness_e41.log`, `correctness_e41_ood.log`.
+
+---
+
+## E42 — a proxy trained ONLY on Mistral's TriviaQA, tested on Mistral's squad (fills a gap E39 left open) — ✅ dataset-shift-only result, the cleanest single-source case yet
+
+**Why.** E39's OOD eval had a Llama-2-trained-only proxy on Llama-2's own squad (Reference,
+0.692 — pure dataset shift) but the matching Mistral case didn't exist: the only Mistral-side
+numbers were Deploy (all 4 models pooled, so not single-source) and Reference *evaluated on*
+Mistral (which stacks a model shift on top of the dataset shift). The direct mirror of "Llama-2
+proxy on Llama-2 squad" for Mistral was never run — checked first (`grep`'d `results/` and
+EXPERIMENTS.md for any prior Mistral+squad+proxy combination): confirmed absent, not just
+undocumented. It exists to build: the E22 role-swap proxy
+(`stage2/runs/E22_Mistral_proxy_p1024_5arm_ckpt/checkpoints`, 5 seeds, trained on Mistral trivia_qa
+n2000, all 5 arms saved, `checkpoint/v1` format identical to REFERENCE) was built for E22/E23's
+cross-LLM trivia test and simply never pointed at squad.
+
+**Method (additive, `mistral_trained_proxy_ood.py`).** `procrustes_e27_rank_fusion.arm_preds` got
+one new optional `ckpt_dir` param (default = REFERENCE's dir, so every existing caller — E27/E38/E39
+— is untouched) so it can load a DIFFERENT proxy's checkpoints. Text arms only (`q_only`,
+`q_resp_only`) — matches what's usable from Reference cross-model (z arms aren't run: E33 already
+established z isn't worth its cost relative to text, and this keeps the comparison to Reference
+apples-to-apples). Independently re-derives Mistral's squad ids/accuracy/SE via `load_records` (not
+`load_matrix`, a different code path) and asserts them against `correctness_eval_e41_ood_fixedlayer.json`'s
+frozen values before reusing SEP/SE from there — id-mapping audit **max dev 5.9e-08, MATCH** — so
+the true-SE/SEP numbers aren't refit (saves ~an hour of SEP layer-fitting) but the comparison is
+still verified apples-to-apples. Env `amortized_stage2` + free GPU, ~2 min.
+
+**Result:**
+
+| predictor | AUROC_incorrect | what it is |
+|---|---|---|
+| true 10-sample SE | 0.774 | frozen, reused from E41 |
+| **Mistral-trained proxy, `q_resp_only`** | **0.748** | **this run** |
+| reference (Llama-2-trained) proxy on Mistral | 0.713 | frozen, reused from E41 |
+| Mistral SEP, E41-fixed layer | 0.669 | frozen, reused from E41 |
+| Mistral-trained proxy, `q_only` | 0.647 | this run (control) |
+| Mistral SEP, old val-selected layer | 0.667 | frozen, reused from E41 |
+
+Internal check: Δ(q_resp_only − q_only) = **+0.101 [+0.068, +0.133]**, excludes 0 — the gain comes
+from reading the model's answer, not just the question, consistent with every other OOD result.
+
+**Findings.**
+1. **This is the smallest dataset-shift penalty seen anywhere in the OOD line.** vs true SE: −0.026,
+   vs Llama-2's single-source case (Reference on Llama-2, −0.092) and the cross-model case (Reference
+   on Mistral, −0.061). Single-source, single-model dataset shift costs less on Mistral than on
+   Llama-2 — consistent with Mistral being the higher-CKA, more "well-behaved" model throughout E29–E40.
+2. **Model-matched training beats cross-model training, dataset shift held constant.** Mistral-trained
+   → Mistral squad (0.748) beats Llama-2-trained → Mistral squad (0.713) by **+0.035**, isolating a
+   "knowing the target model helps" effect from the dataset shift itself (both rows are evaluated on
+   the identical 1000 Mistral/squad rows, only the training source differs).
+3. **Still beats SEP by a clear margin** (+0.079 vs the fixed-layer SEP, +0.081 vs the old one) even
+   in this single-source, no-target-labels setting.
+4. **The four-point dataset-shift-only ladder is now complete and orderly:** Llama-2-on-itself
+   (0.692) < Llama-2-on-Mistral / cross-model (0.713) < **Mistral-on-itself (0.748, this run)** <
+   Deploy/all-4-on-Mistral (0.763) — more or better-matched training data monotonically shrinks the
+   dataset-shift penalty, closing in on true SE (0.774) but never quite reaching it.
+
+**Caveats.** Single dataset-shift comparison (Mistral only — Llama-2's own-model number, 0.692, is
+the only other point in the same "single-source, own-model" cell); bootstrap CI only computed
+internally (q_resp_only vs q_only) — the deltas vs the frozen SEP/SE baselines are point estimates,
+not independently reconfirmed with paired CIs against this run's specific predictions (the frozen
+CIs from E41 apply to the *frozen* rows, not new pairings against this run's `q_resp_only`). No
+z/ridge arm run (deliberate, matches Reference's usable arm set, but means this isn't a full 5-arm
+picture the way E38/E39 are).
+
+**Artifacts.** `amortized_ue/mistral_trained_proxy_ood.py`, `amortized_ue/results/e42_mistral_trained_proxy_ood.json`,
+`amortized_ue/e42_mistral_proxy_ood.log`. One-line additive change to `procrustes_e27_rank_fusion.py`
+(`arm_preds` gains `ckpt_dir=None`, defaults preserve every existing caller).
