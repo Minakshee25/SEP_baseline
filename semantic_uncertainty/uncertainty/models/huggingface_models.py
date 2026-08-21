@@ -21,23 +21,58 @@ from uncertainty.models.base_model import BaseModel
 from uncertainty.models.base_model import STOP_SEQUENCES
 
 
+# blocks-execution (mn1025, 2026-08): reasoning models whose completions open with a blank
+# line and often a multi-line <think>...</think> block before the real answer, so the
+# default stop-on-'\n' rule fires either on generation step 1 or on the first newline
+# inside the still-open think block. See StoppingCriteriaSub.tolerate_thinking /
+# HuggingfaceModel.tolerate_thinking_for_stop.
+_LEADING_WHITESPACE_MODELS = ('Qwen3.8-27B', 'Qwen3.5-9B')
+
+# blocks-execution (mn1025, 2026-08): per-model generation budget override (see
+# HuggingfaceModel.__init__ below). Every model NOT in this dict keeps the
+# Stage1Config/CLI default (50) untouched -> byte-identical behavior.
+_EXTRA_TOKEN_BUDGET_MODELS = {'Qwen3.8-27B': 250, 'Qwen3.5-9B': 250}
+
+
 class StoppingCriteriaSub(StoppingCriteria):
     """Stop generations when they match a particular text or token."""
-    def __init__(self, stops, tokenizer, match_on='text', initial_length=None):
+    def __init__(self, stops, tokenizer, match_on='text', initial_length=None, tolerate_thinking=False):
         super().__init__()
         self.stops = stops
         self.initial_length = initial_length
         self.tokenizer = tokenizer
         self.match_on = match_on
+        # blocks-execution (mn1025, 2026-08): reasoning models (Qwen3.8-27B, Qwen3.5-9B; see
+        # huggingface_models.py _LEADING_WHITESPACE_MODELS below) open completions with a blank
+        # line, then often emit a multi-line <think>...</think> block before the real answer.
+        # The default stop check ('\n' in generation) fires on generation step 1 (the leading
+        # blank line) or -- once that's skipped -- on the first newline INSIDE an still-open
+        # <think> block, so the captured "answer" ends up empty or literally "<think>". Raising
+        # model_max_new_tokens does NOT fix this: the stop check fires within the first few
+        # tokens regardless of the budget, it never runs out of tokens in the first place.
+        # tolerate_thinking=True (a) strips LEADING whitespace before the stop match (same as
+        # before), and (b) suppresses the match entirely while a <think> tag is open (more
+        # '<think>' than '</think>' seen so far) so generation runs through the whole reasoning
+        # block uninterrupted and only stops at a newline AFTER </think> -- i.e. after the real
+        # answer. Off by default (False) for every other model -> byte-identical behavior.
+        self.tolerate_thinking = tolerate_thinking
         if self.match_on == 'tokens':
             self.stops = [torch.tensor(self.tokenizer.encode(i)).to('cuda') for i in self.stops]
             print(self.stops)
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
         del scores
+        generation_full = None
+        if self.tolerate_thinking:
+            generation_full = self.tokenizer.decode(input_ids[0][self.initial_length:], skip_special_tokens=False)
+            if generation_full.count('<think>') > generation_full.count('</think>'):
+                return False
         for stop in self.stops:
             if self.match_on == 'text':
-                generation = self.tokenizer.decode(input_ids[0][self.initial_length:], skip_special_tokens=False)
+                generation = generation_full if generation_full is not None else \
+                    self.tokenizer.decode(input_ids[0][self.initial_length:], skip_special_tokens=False)
+                if self.tolerate_thinking:
+                    generation = generation.lstrip()
                 match = stop in generation
             elif self.match_on == 'tokens':
                 # Can be dangerous due to tokenizer ambiguities.
@@ -215,6 +250,23 @@ class HuggingfaceModel(BaseModel):
                 max_memory={0: '80GIB'},
             )
 
+        elif 'qwen' in model_name.lower():
+            # blocks-execution (mn1025, 2026-08): Qwen family cross-LLM targets
+            # (Qwen3-8B, Qwen3.5/3.6/3.8-*). Qwen/{model_name} is never gated. Same minimal
+            # AutoTokenizer/AutoModelForCausalLM pattern as Mistral/DeepSeek above; no
+            # SE/clustering/probe logic touched. trust_remote_code=True defensively for the
+            # newer hybrid-attention (Qwen3.5+) checkpoints, harmless for plain Qwen3.
+            model_id = f'Qwen/{model_name}'
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_id, device_map='auto', token_type_ids=None,
+                clean_up_tokenization_spaces=False, trust_remote_code=True)
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                trust_remote_code=True,
+                device_map='auto',
+                torch_dtype=torch.bfloat16,
+            )
+
         elif 'falcon' in model_name:
             model_id = f'tiiuae/{model_name}'
             self.tokenizer = AutoTokenizer.from_pretrained(
@@ -241,7 +293,13 @@ class HuggingfaceModel(BaseModel):
                 device_map='auto',
             )
         elif 'gemma' in model_name:
-            model_id = f'google/{model_name}'  # e.g. gemma-7b-it
+            # blocks-execution (mn1025, 2026-08): google/gemma-{7b-it,2-9b-it,2-27b-it,3-27b-it}
+            # are gated (403, same situation as Llama-2/Llama-3) -- redirect to the `unsloth`
+            # mirror, which is ungated and byte-identical (weights re-uploaded verbatim for
+            # local-inference use). gemma-4-* is NOT gated on google's own repo, so it is loaded
+            # directly. Same redirect pattern as the NousResearch Llama mirrors above.
+            base = 'google' if model_name.lower().startswith('gemma-4') else 'unsloth'
+            model_id = f'{base}/{model_name}'  # e.g. gemma-7b-it
             self.tokenizer = AutoTokenizer.from_pretrained(
                 model_id, device_map='auto', token_type_ids=None,
                 clean_up_tokenization_spaces=False)
@@ -257,6 +315,17 @@ class HuggingfaceModel(BaseModel):
         self.model_name = model_name
         self.stop_sequences = stop_sequences + [self.tokenizer.eos_token]
         self.token_limit = 4096 if 'Llama-2' in model_name else 2048
+        # blocks-execution (mn1025, 2026-08): see StoppingCriteriaSub.tolerate_thinking above.
+        # Off (False) for every model not in this tuple -> byte-identical behavior.
+        self.tolerate_thinking_for_stop = model_name in _LEADING_WHITESPACE_MODELS
+        # blocks-execution (mn1025, 2026-08): with the think-tag-aware stop fix above, the
+        # model can now run through a full reasoning block uninterrupted -- this is just a
+        # safety ceiling on TOTAL generation length (reasoning + answer) so a pathological
+        # never-closes-</think> case can't run unbounded. Only these models get a larger
+        # budget -> self.max_new_tokens is untouched (default 50) for every other model.
+        # See _EXTRA_TOKEN_BUDGET_MODELS above.
+        if model_name in _EXTRA_TOKEN_BUDGET_MODELS:
+            self.max_new_tokens = _EXTRA_TOKEN_BUDGET_MODELS[model_name]
 
     
     def predict(self, input_data, temperature, return_full=False, return_latent=False):
@@ -278,7 +347,8 @@ class HuggingfaceModel(BaseModel):
             stopping_criteria = StoppingCriteriaList([StoppingCriteriaSub(
                 stops=self.stop_sequences,
                 initial_length=len(inputs['input_ids'][0]),
-                tokenizer=self.tokenizer)])
+                tokenizer=self.tokenizer,
+                tolerate_thinking=self.tolerate_thinking_for_stop)])
         else:
             stopping_criteria = None
 

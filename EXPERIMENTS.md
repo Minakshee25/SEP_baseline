@@ -2132,3 +2132,200 @@ picture the way E38/E39 are).
 **Artifacts.** `amortized_ue/mistral_trained_proxy_ood.py`, `amortized_ue/results/e42_mistral_trained_proxy_ood.json`,
 `amortized_ue/e42_mistral_proxy_ood.log`. One-line additive change to `procrustes_e27_rank_fusion.py`
 (`arm_preds` gains `ckpt_dir=None`, defaults preserve every existing caller).
+
+## E44
+
+**Goal:** extend the target-LLM roster from 4 to (eventually) 14 by adding two new families —
+Qwen (5 checkpoints spanning generations) and Gemma (5 checkpoints spanning generations) — as a
+breadth test of the cross-LLM transfer thesis across a much wider range of architectures/vendors
+than the existing Llama-2/Mistral/Llama-3/DeepSeek set.
+
+**Models chosen** (after several rounds of narrowing with the user): small tier (~7-9B, one from
+each of the two most recent generations per family) — `Qwen3-8B`, `Qwen3.5-9B`, `gemma-7b-it`,
+`gemma-2-9b-it`; big tier (~27-31B, one per generation) — `Qwen3.5-27B`, `Qwen3.6-27B`,
+`Qwen3.8-27B`, `gemma-2-27b-it`, `gemma-3-27b-it`, `gemma-4-31B-it`. Several of these
+(Qwen3.5/3.6/3.8, Gemma 4) were released within days-to-months of this session and postdate every
+existing conda env's `transformers` — required a new environment.
+
+**Infra work (all additive, no SE/probe logic touched):**
+- `qwen` load branch + `gemma` gated→`unsloth`-mirror redirect added to `huggingface_models.py`;
+  `init_model()` dispatch whitelist in `utils.py` widened to accept `qwen`/`gemma` (same pattern
+  already used for `deepseek`).
+- New env `se_probes_v5`: a plain **venv** (not conda), bootstrapped from `/data/sv/miniconda3`
+  directly to sidestep a bad NFS window that was hanging both `conda create --clone` and even
+  `pip freeze` on the existing NFS-hosted envs. `transformers==5.15.1`, `torch==2.13.0+cu130`,
+  covers every new architecture (`qwen3`, `qwen3_5`, `gemma`, `gemma2`, `gemma3`, `gemma4`).
+  `HF_HOME` and all Stage-1 output moved to `/data2` (non-NFS) for the same reason.
+- Considered relocating the whole repo to `/data2` for speed; **rejected** — Claude Code's
+  project/session/memory identity is keyed to the literal working-directory path (confirmed:
+  `~/.claude/projects/<slug-of-cwd>/`), and a symlink workaround was assessed as unsafe (evidence
+  Claude Code resolves realpath before slugging, which would silently fork history). Repo stays on
+  NFS; only the new env + HF cache + Stage-1 output moved.
+
+**Two model-scoped bugs found and fixed** (`Qwen3.8-27B` first, `Qwen3.5-9B` found later at n1000
+scale after its 3-question smoke test passed clean — **a 3-question smoke test is not enough to
+catch a ~5% failure rate**):
+1. Both models sometimes open completions with a blank line then a multi-line
+   `<think>...</think>` reasoning block; the pipeline's default "stop at first `\n`" rule fires on
+   the leading blank line, or (once a first fix skipped leading whitespace) on the first newline
+   *inside* the still-open think block — captured answer ends up empty or literally `"<think>"`.
+   **Two wrong turns before the real fix:** raising `model_max_new_tokens` alone does nothing (the
+   stop fires within the first few tokens regardless of budget — verified twice); and killing a
+   build partway through and reading `manifest.json` to check whether a fix worked is misleading,
+   because `write_manifest()` only runs once at the very end of the batch while individual `.pt`
+   files save incrementally — a stale manifest looked identical to "the fix failed" when the fix
+   had actually worked. **Real fix:** `StoppingCriteriaSub.tolerate_thinking` — suppress the stop
+   match entirely while more `<think>` than `</think>` have been seen so far, so generation runs
+   through the whole reasoning block uninterrupted and only stops at a newline *after* the tag
+   closes. Model-scoped via `_LEADING_WHITESPACE_MODELS`/`_EXTRA_TOKEN_BUDGET_MODELS` — off
+   (byte-identical) for every other model.
+2. `gemma-4-31B-it` — a much deeper problem, not fixed: degenerate output (echoes the last
+   few-shot example's answer verbatim, or produces repetitive gibberish) even on a clean
+   3-question smoke test. **Not attempted at n1000; needs real diagnosis in a future session.**
+
+**⚠️ Dual-GPU sharding is reproducibly broken for the Qwen3.5+ hybrid (Gated-DeltaNet + Gated-
+Attention) architecture.** `device_map='auto'` split across both GPUs crashes every time —
+`torch.multinomial`: "probability tensor contains inf/nan", CUDA device-side assert — fast,
+deterministic, reproduced 2/2 on real n1000 builds (`Qwen3.5-27B`, `Qwen3.6-27B`) and once more
+cheaply on `Qwen3.5-9B` forced into an artificial 2-GPU split via a tight `max_memory` cap.
+**Root cause diagnosed (not fixed):** the device map is clean at layer granularity (no layer's
+parameters split mid-way) — the crash is specifically at the boundary between a Gated-Attention
+layer on one GPU and a Gated-DeltaNet layer on the other. DeltaNet layers carry recurrent state
+across generation steps; `accelerate`'s generic multi-GPU dispatch hooks evidently don't re-sync
+that state correctly when a layer's input activation arrives from a different GPU than the
+layer's home device. Almost certainly an upstream `transformers`/`accelerate` bug (architecture
+is ~1 week old) — patching it for real means editing vendored modeling code, out of proportion to
+the payoff; **not attempted.** **Workaround:** single-GPU + CPU offload (proven reliable in every
+build, ~45-75s/record for a 27B model — slow but correct). One user-caught near-incident:
+investigating the crash via a small forced-split reproduction on `Qwen3.5-9B` briefly grabbed
+~1.6GB on the same GPU hosting the live `Qwen3.5-27B` build, which only had ~1.5GB truly free,
+and OOM-killed it. No data lost (Stage-1 builds are resumable, records save incrementally) but a
+reminder to check headroom more conservatively before touching a GPU with a live job on it.
+
+**Results at session end:**
+
+| Model | Status |
+|---|---|
+| Qwen3-8B, Qwen3.5-9B, gemma-7b-it, gemma-2-9b-it | ✅ done, 1000/1000 verified |
+| Qwen3.5-27B, Qwen3.6-27B | 🔄 running (single-GPU+offload, parallel across the 2 GPUs) |
+| Qwen3.8-27B, gemma-2-27b-it, gemma-3-27b-it | ⏳ queued |
+| gemma-4-31B-it | ❌ broken, excluded until diagnosed |
+
+**Caveats.** Big-tier builds were still in progress when this entry was written — verify final
+record counts before citing. The Qwen3.5-9B dataset has ~46/1000 records from its hardest
+question subset where the model doesn't converge on an answer within the 250-token budget even
+after the stop-logic fix — kept as-is per user decision (treated as legitimate "model didn't
+converge" signal, not corrupted data, since the fix already guarantees no more truncated-garbage
+records). Dual-GPU root cause is diagnosed but unverified against the actual `transformers`
+source (inferred from the device map + crash location, not from reading the modeling code
+directly) — treat as a strong hypothesis, not a confirmed upstream bug report.
+
+**Artifacts.** `amortized_ue/build_small_tier_n1000.sh` (done), `amortized_ue/build_big_tier_n1000.sh`
+(running at session end), shared id file `/data2/mn1025/stage1_meta/shared_n1000_ids.txt`, per-model
+logs under `amortized_ue/logs/`. Code changes in `semantic_uncertainty/uncertainty/models/huggingface_models.py`
+and `.../utils/utils.py` (both additive, see diff).
+
+## E45
+
+**Goal:** the sharpest cross-LLM-transfer test run so far. Score the existing DEPLOY proxy (frozen
+Llama-3.2-3B + LoRA, trained by pooling Llama-2/Mistral/Llama-3/DeepSeek's n2000 —
+`results/deploy_checkpoints/`, 3 seeds) **zero-shot** — no retraining, no calibration, no target
+labels, no target hidden states — on the 4 E44 small-tier targets (`Qwen3-8B`, `Qwen3.5-9B`,
+`gemma-7b-it`, `gemma-2-9b-it`). Unlike E20-23/E37-39's cross-LLM tests, which all swap among the
+Llama-2/Mistral/Llama-3/DeepSeek set (related lineage, overlapping training-data eras), Qwen and
+Gemma are genuinely different vendors/architectures the deploy proxy has never been near in any
+form — the closest thing to an out-of-family generalization test the project has run.
+
+**Method (additive, `e45_qwen_gemma_zeroshot.py`).** Only the text arms (`q_only`, `q_resp_only`)
+— no Procrustes alignment exists yet for Qwen/Gemma, so the z-pathway isn't reachable zero-shot;
+scoped out rather than faked. Scores each target's existing E44 `*_trivia_qa_n1000_full` (shared
+ids, verified **zero overlap** with the n2000 the deploy proxy trained on) against
+`canonical.accuracy` (correctness-eval convention, matches E31/E38/E39/E42): true 10-sample SE,
+`q_only`, `q_resp_only`, random control, plus paired bootstrap deltas (`q_resp_only` vs true SE,
+`q_resp_only` vs `q_only`).
+
+**Three infra/bugs hit and fixed en route (none touch SE/probe logic):**
+1. **NFS degraded window blocked the run entirely at first** — `amortized_stage2` (unlike
+   `se_probes_v5`) still lives on NFS, so every `import torch`/`transformers`/etc. during a
+   degraded window turned into a multi-minute stall (`state D`, `wchan: rpc_wait_bit_killable`,
+   confirmed via `/proc/<pid>/status`; a bare `ls` on `/vol/bitbucket` took 2.6-3.9s instead of
+   instant). **Fixed properly, not just waited out:** built `amortized_stage2_v5`, a `/data2`
+   venv mirroring `se_probes_v5`'s NFS-bypass pattern, with `transformers==4.52.4`/
+   `peft==0.19.1`/`accelerate==1.14.0` pinned exactly to the live NFS env's versions (read via a
+   background version-check once NFS un-stalled). **`torch` could not be held at the original
+   2.1.1** — `bitsandbytes` pulled a newer torch transitively even with `torch==2.1.1` installed
+   first; ended up on `torch==2.13.0+cu130` (same as `se_probes_v5`). Verified this doesn't break
+   checkpoint loading (`torch.load` compat check passed) before trusting any result. Also copied
+   `deploy_checkpoints/` (~1.5GB) to `/data2/mn1025/stage2_checkpoints/` so `torch.load` on the
+   ~100MB shards doesn't hit NFS either.
+2. **`arm_preds`'s checkpoint glob didn't match `deploy_checkpoints`' filenames** — it looks for
+   `{arm}_seed*.pt`, but deploy's files are `deploy_{arm}_seed*.pt` (a naming convention the E42
+   `ckpt_dir` param never needed to handle, since REF/E22 checkpoints have no prefix) → silent
+   `paths[0]` `IndexError` on an empty glob result. **Fix:** glob pattern widened to
+   `*{arm}_seed*.pt` (verified the leading wildcard can't false-match a *longer* arm name's file,
+   e.g. `z_q_seed` never matches the `z_seed` pattern).
+3. **`deploy_checkpoints` (also `exp2_run.py`-saved, same era as E39's `k`/`transform`-omission
+   bug) additionally omit `position`/`layer` in their meta** — `load_checkpoint` (the *generic*
+   loader `arm_preds` uses, distinct from `correctness_eval_ood.py`'s narrower `_load_exp2_ckpt`
+   compat shim) had no fallback for any of the four. **Fixed in the shared loader itself** (not
+   just one caller): `meta.get("k", cfg.k_soft_tokens)`, `meta.setdefault("position",
+   cfg.selected_position)`, `meta.setdefault("layer", cfg.selected_layer)`, and
+   `transform = TargetTransform(0.0, 1.0)` (identity) when `meta["transform"]` is absent —
+   AUROC/rank metrics are invariant to that identity fallback, only `.decode()`'s absolute scale
+   would differ, and this run never uses decoded values. Now every caller of `load_checkpoint`
+   (not just `arm_preds`) tolerates exp2-line checkpoints.
+4. **`Qwen3.5-9B`'s manifest was stale at 46/1000 records** (the exact write-once-at-batch-end
+   trap flagged in E44's own CLAUDE.md note, hit for real this time): a later resume run that only
+   rebuilt the ~46 hardest-tail stragglers called `write_manifest()` with just *its own* batch's
+   entries, overwriting the earlier complete-1000 manifest rather than merging into it — even
+   though all 1000 `.pt` files were genuinely present and undamaged on disk. **Fixed
+   mechanically, not guessed:** rebuilt `manifest.json` by loading all 1000 records directly
+   (`load_record`) and re-deriving entries via the pipeline's own `manifest_entry`/
+   `write_manifest`, after confirming zero corrupt files. No `.pt` data was touched.
+
+**Result (AUROC_incorrect, N=1000/target, deploy proxy zero-shot):**
+
+| target | true SE | q_only | q_resp_only | Δ(q_resp_only − true SE) |
+|---|---|---|---|---|
+| Qwen3-8B | 0.787 | 0.777 | **0.840** | **+0.053 [+0.030, +0.077]** — excludes 0, beats |
+| Qwen3.5-9B | 0.810 | 0.765 | 0.818 | +0.009 [−0.012, +0.031] — includes 0, on par |
+| gemma-7b-it | 0.771 | 0.753 | **0.848** | **+0.078 [+0.052, +0.104]** — excludes 0, beats |
+| gemma-2-9b-it | 0.769 | 0.704 | 0.722 | **−0.047 [−0.075, −0.020]** — excludes 0, loses |
+
+`q_resp_only` also beats `q_only` on every target (deltas +0.018 to +0.095, excludes 0 on 3/4) —
+the response text, not just the question, is where the signal is on every target, consistent with
+every OOD/cross-LLM result since E20.
+
+**Findings.**
+1. **The thesis extends to genuinely new vendors/architectures, but not uniformly.** 2/4 targets
+   (Qwen3-8B, gemma-7b-it) show the zero-shot proxy *significantly beating* true 10-sample
+   sampling-based SE — stronger than anything seen even for the proxy's own training families
+   (E38's best was "on par", never "beats"). 1/4 (Qwen3.5-9B) replicates the "on par" pattern.
+   1/4 (gemma-2-9b-it) is a **significant loss**, the first target anywhere in the project where
+   `q_resp_only` is clearly worse than true SE.
+2. **`q_resp_only` never drops below `q_only` on any target** — the model-agnostic text pathway
+   is never actively harmful, matching E20-23/E37-39's universal finding that response text
+   carries transferable signal.
+3. **gemma-2-9b-it is an outlier on its own stats, not just on the delta:** mean accuracy 0.684
+   and incorrect-rate 0.316, both far outside the other 3 targets' range (mean_acc 0.42-0.56,
+   incorrect-rate 0.44-0.58) — a model that's simply *better* at trivia_qa has fewer wrong answers
+   to detect, which could explain a weaker/noisier signal independent of any cross-family transfer
+   failure. **Flagged as a hypothesis, not established** — would need a matched-difficulty or
+   matched-base-rate re-analysis to confirm vs. a genuine family-transfer effect.
+
+**Caveats.** Single run per target (the 3-seed ensemble mean is baked into `arm_preds`, but there's
+no additional resampling across question subsets); z-arm not run (would need a label-free
+Procrustes fit per new target first — natural next step per the original E45 scoping conversation);
+`gemma-2-9b-it`'s negative result is reported as-is, not yet root-caused past the accuracy-outlier
+hypothesis above; the 3 infra bugs fixed here (glob pattern, checkpoint meta fallback, manifest
+rebuild) were all latent and could plausibly affect other not-yet-run E42-style
+`ckpt_dir`-override or exp2-line-checkpoint use cases — worth a quick audit if one comes up.
+
+**Artifacts.** `amortized_ue/e45_qwen_gemma_zeroshot.py`,
+`amortized_ue/results/e45_qwen_gemma_zeroshot.json`, `amortized_ue/logs/e45_qwen_gemma_zeroshot.log`.
+Additive fixes: `amortized_ue/procrustes_e27_rank_fusion.py` (`arm_preds` glob pattern + new
+`data_dir` param), `amortized_ue/stage2/checkpoint.py` (`load_checkpoint` meta fallbacks),
+`amortized_ue/stage2/config.py`/`stage2/data.py` (`stage1_output_dir` override plumbing). New env
+`amortized_stage2_v5` (`/data2/mn1025/conda_envs/amortized_stage2_v5`, NFS-free, versions pinned
+to match the live `amortized_stage2` conda env) + checkpoint copy at
+`/data2/mn1025/stage2_checkpoints/deploy_checkpoints/`.

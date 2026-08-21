@@ -274,10 +274,12 @@ def get_reference(example):
 
 def init_model(args):
     mn = args.model_name
-    if 'llama' in mn.lower() or 'falcon' in mn.lower() or 'mistral' in mn.lower() or 'phi' in mn.lower() or 'deepseek' in mn.lower():
+    if 'llama' in mn.lower() or 'falcon' in mn.lower() or 'mistral' in mn.lower() or 'phi' in mn.lower() or 'deepseek' in mn.lower() or 'qwen' in mn.lower() or 'gemma' in mn.lower():
         # blocks-execution (mn1025, 2026-08): dispatch whitelist gates which model_names reach
         # HuggingfaceModel. 'deepseek' added so the sanctioned deepseek-ai load branch in
-        # huggingface_models.py is reachable (4th cross-LLM target). No SE/probe logic touched.
+        # huggingface_models.py is reachable (4th cross-LLM target). 'qwen'/'gemma' added for
+        # the Qwen/Gemma cross-LLM targets (see huggingface_models.py load branches). No
+        # SE/probe logic touched -- this only decides which loading branch to reach.
         model = HuggingfaceModel(
             mn, stop_sequences='default',
             max_new_tokens=args.model_max_new_tokens)
