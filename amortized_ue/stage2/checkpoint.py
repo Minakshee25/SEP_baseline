@@ -58,9 +58,17 @@ def load_checkpoint(path: str, device: str | None = None, model: ProxyModel | No
     assert fmt == CKPT_FORMAT, f"unexpected checkpoint format {fmt!r} (want {CKPT_FORMAT!r})"
     meta = ckpt["meta"]
 
+    cfg = _cfg_from_meta(meta)
     if model is None:
-        model = ProxyModel(_cfg_from_meta(meta), h_in=meta["h_in"])
-    model.set_k(meta["k"])                 # projector at the trained k
+        model = ProxyModel(cfg, h_in=meta["h_in"])
+    # exp2_run.py checkpoints (incl. deploy_checkpoints) carry this format tag but omit
+    # `k` / `transform` / `position` / `layer` in their meta (E39 bug, fixed for future saves)
+    # -- fall back to the equivalent stored config fields for those. AUROC/rank metrics are
+    # invariant to the transform fallback since it's a fixed linear (identity) rescaling; only
+    # `transform.decode()`'s absolute SCALE is affected for exp2-line checkpoints.
+    model.set_k(meta.get("k", cfg.k_soft_tokens))
+    meta.setdefault("position", cfg.selected_position)
+    meta.setdefault("layer", cfg.selected_layer)
     model.to(device)
 
     own = dict(model.named_parameters())
@@ -71,5 +79,6 @@ def load_checkpoint(path: str, device: str | None = None, model: ProxyModel | No
         for n, t in ckpt["trainable"].items():
             own[n].copy_(t.to(own[n].device, own[n].dtype))
 
-    transform = TargetTransform(meta["transform"]["mean"], meta["transform"]["std"])
+    tr = meta.get("transform")
+    transform = TargetTransform(tr["mean"], tr["std"]) if tr else TargetTransform(0.0, 1.0)
     return model, meta, transform

@@ -157,7 +157,129 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (updated 2026-08-18)
+## Current state (updated 2026-08-21)
+
+**⭐ E45 (2026-08-21) — zero-shot flagship-proxy transfer to Qwen/Gemma: mixed but real.** Scored
+the DEPLOY proxy (trained by pooling Llama-2/Mistral/Llama-3/DeepSeek n2000, text arms only) on
+the 4 E44 small-tier targets with **zero retraining/calibration** — the sharpest generalization
+test run so far, since Qwen/Gemma are genuinely different vendors/architectures the proxy never
+saw. **AUROC_incorrect, `q_resp_only` vs true 10-sample SE:** Qwen3-8B **0.840 vs 0.787 (beats,
++0.053\*)**, gemma-7b-it **0.848 vs 0.771 (beats, +0.078\*)**, Qwen3.5-9B 0.818 vs 0.810 (on par),
+gemma-2-9b-it **0.722 vs 0.769 (loses, −0.047\*)**. `q_resp_only` never loses to `q_only` on any
+target. **2/4 beat true SE outright (stronger than any same-family result in E38), 1/4 on par,
+1/4 a genuine loss** — gemma-2-9b-it is also an accuracy/incorrect-rate outlier vs the other 3
+(0.684/0.316 vs 0.42-0.56/0.44-0.58), flagged as a hypothesis for the weaker signal, not
+confirmed. **Three latent bugs found+fixed en route** (all generalize beyond this run): (1)
+`arm_preds`'s checkpoint glob didn't match `deploy_checkpoints`' `deploy_`-prefixed filenames,
+silently `IndexError`'d; (2) `deploy_checkpoints` (exp2_run.py-saved, same era as E39's
+`k`/`transform` bug) also omit `position`/`layer` in meta — `load_checkpoint` itself (not just
+`correctness_eval_ood.py`'s narrower compat shim) now falls back to the stored config; (3)
+`Qwen3.5-9B`'s manifest was stale at 46/1000 (a resume run overwrote instead of merging) — all
+1000 `.pt` files were fine, manifest mechanically rebuilt from disk. **Also: `amortized_stage2`
+lives on NFS and a degraded window made it unusable (multi-minute import stalls, confirmed via
+`rpc_wait_bit_killable`)** — fixed properly with a new `/data2` venv `amortized_stage2_v5`
+(versions pinned to match live: transformers 4.52.4/peft 0.19.1/accelerate 1.14.0; **torch could
+NOT stay at 2.1.1** — `bitsandbytes` transitively pulls torch 2.13.0+cu130 regardless, verified
+checkpoint-load-compatible before trusting results) + `deploy_checkpoints` copied to `/data2`.
+z-arm not run (no Procrustes alignment fit for Qwen/Gemma yet — natural next step). Full arc:
+`EXPERIMENTS.md` E45. Artifacts: `e45_qwen_gemma_zeroshot.py`, `results/e45_qwen_gemma_zeroshot.json`.
+
+**⭐ E44 (2026-08-20/21) — Qwen + Gemma families added as new cross-LLM targets.** Extends the
+target-LLM set from 4 to (eventually) 14: 5 Qwen (`Qwen3-8B`, `Qwen3.5-9B`, `Qwen3.5-27B`,
+`Qwen3.6-27B`, `Qwen3.8-27B`) + 5 Gemma (`gemma-7b-it`, `gemma-2-9b-it`, `gemma-2-27b-it`,
+`gemma-3-27b-it`, `gemma-4-31B-it`). All released within the last ~7 months of this Aug-2026
+session (Qwen3.5/3.6/3.8 and Gemma 4 postdate every existing conda env's `transformers`).
+
+**Code changes (`huggingface_models.py`, `utils.py` — both blocks-execution, no SE/probe logic touched):**
+- New `qwen` load branch (`Qwen/{model_name}`, never gated) + `init_model()` dispatch whitelist
+  widened to `qwen`/`gemma` (exact same pattern as the existing `deepseek` entry).
+- `gemma` branch now redirects gated checkpoints (`gemma-7b-it`, `gemma-2-9b-it`,
+  `gemma-2-27b-it`, `gemma-3-27b-it`) to the ungated `unsloth` mirror; `gemma-4-*` loads
+  directly from `google/` (not gated).
+- **Two NEW model-scoped generation fixes**, both gated by exact model-name tuples/dicts near
+  the top of `huggingface_models.py` (`_LEADING_WHITESPACE_MODELS`,
+  `_EXTRA_TOKEN_BUDGET_MODELS`) — **off (byte-identical) for every model not explicitly listed**:
+  1. `StoppingCriteriaSub.tolerate_thinking`: Qwen3.5-9B/Qwen3.8-27B (reasoning models) open
+     completions with a blank line then often a multi-line `<think>...</think>` block; the
+     pipeline's default stop-on-`\n` rule fires on the leading blank line, or (once that's
+     skipped) on the first newline *inside* the still-open think block — captured "answer" ends
+     up empty or literally `"<think>"`. Fix: suppress the stop match entirely while a `<think>`
+     tag is open (more opens than closes seen so far), only resume normal stopping after
+     `</think>`. **Raising `model_max_new_tokens` alone does NOT fix this** — the stop fires
+     within the first few tokens regardless of budget; don't waste time on that lever again.
+  2. `model_max_new_tokens` override (250 vs default 50) for the same two models — a safety
+     ceiling so a long-but-finishing reasoning block has room to also emit the answer. With fix
+     #1 in place this is genuinely just a ceiling: for the *hardest* residual questions the
+     model still won't finish thinking even at 250 (see below) — that's accepted as legitimate
+     "model couldn't converge" signal, not corrupted data, since fix #1 already guarantees no
+     more truncated-empty/mid-think garbage.
+  - **Debugging trap hit twice: `write_manifest()` runs ONCE at the end of the whole batch**,
+    while `save_record()` writes each `.pt` incrementally. Killing a run partway through and then
+    reading `manifest.json` shows **stale** data even though the individual `.pt` files are
+    already correct — always let a build finish (or read `.pt` files directly) before judging
+    whether a fix worked.
+
+**Dataset builds (all on `--only_ids /data2/mn1025/stage1_meta/shared_n1000_ids.txt`, the SAME
+1000 ids as the existing Llama-2/Mistral/Llama-3/DeepSeek `*_n1000_full` datasets — every
+model's records line up question-for-question):**
+
+| Model | Status | Notes |
+|---|---|---|
+| Qwen3-8B | ✅ done, 1000/1000 verified | clean |
+| Qwen3.5-9B | ✅ done, 1000/1000 verified | needed both fixes above; 46 records are the hardest tail (some never finish thinking even at 250 tokens — kept as-is per user decision, "accept it") |
+| gemma-7b-it | ✅ done, 1000/1000 verified | clean, via unsloth mirror |
+| gemma-2-9b-it | ✅ done, 1000/1000 verified | clean, via unsloth mirror |
+| Qwen3.5-27B | 🔄 in progress at session end | needed both fixes; single-GPU+CPU-offload only (see dual-GPU bug below) |
+| Qwen3.6-27B | 🔄 in progress at session end | single-GPU+CPU-offload |
+| Qwen3.8-27B | ⏳ queued at session end | single-GPU+CPU-offload |
+| gemma-2-27b-it | ⏳ queued, will attempt dual-GPU | different arch than Qwen, untested at scale |
+| gemma-3-27b-it | ⏳ queued, will attempt dual-GPU | different arch than Qwen, untested at scale |
+| gemma-4-31B-it | ❌ **broken, not attempted at n1000** | degenerate output (echoes the last few-shot answer verbatim, or `"the la la la..."` gibberish) even in a clean 3-question smoke test — needs real diagnosis, not a quick fix. Do not build until this is understood. |
+
+Check current status: `ls /data2/mn1025/stage1_meta/`, record counts via
+`ls /data2/mn1025/stage1/<Model>_trivia_qa_n1000_full/records | wc -l`, and
+`amortized_ue/logs/<Model>_trivia_qa_n1000*.log` / `amortized_ue/build_big_tier_n1000.sh`'s
+driver output for what's still running. The two build scripts
+(`build_small_tier_n1000.sh` DONE, `build_big_tier_n1000.sh` still running at session end) are
+resumable — records save incrementally, `--overwrite` not passed means already-built records
+are skipped, so re-running a script (or a single model's command from inside it) after any crash
+just continues.
+
+**⚠️ Dual-GPU sharding is reproducibly BROKEN for the Qwen3.5+ hybrid (Gated-DeltaNet + Gated-
+Attention) architecture** — `device_map='auto'` across both GPUs crashes every time
+(`torch.multinomial`: "probability tensor contains inf/nan", CUDA device-side assert), fast and
+deterministic, reproduced on both Qwen3.5-9B (forced 2-GPU split via a tight `max_memory` cap)
+and the real Qwen3.5-27B/3.6-27B builds. **Root cause (diagnosed, not fixed):** the device map is
+clean at layer granularity (no single layer split mid-way) — the crash is specifically at the
+boundary between a Gated-Attention layer on one GPU and a Gated-DeltaNet layer on the other.
+DeltaNet layers carry recurrent state across generation steps; `accelerate`'s generic multi-GPU
+dispatch hooks evidently don't correctly re-sync that state when the layer's input activation
+arrives from a different GPU than the layer's home device. This is almost certainly an upstream
+`transformers`/`accelerate` bug (the architecture is ~1 week old at time of writing) — **not
+something to patch locally**; fixing it for real would mean patching vendored `transformers`
+modeling code, out of proportion to the payoff. **Workaround (in use): single-GPU + CPU offload**
+— proven reliable in every build, just slower (~45-75s/record vs a much faster from-GPU pace for
+the small models). Gemma models are a different, untested-at-scale architecture — worth trying
+dual-GPU for those specifically before assuming the same bug applies.
+
+**New env `se_probes_v5`** (`/data2/mn1025/conda_envs/se_probes_v5`) — a plain **`venv`, not a
+conda env** (bootstrapped via `/data/sv/miniconda3/bin/python3 -m venv`, entirely bypassing
+conda's NFS-hosted `pkgs_dirs`), `transformers==5.15.1`, `torch==2.13.0+cu130`. Built this way
+specifically because the NFS mount was in one of its documented degraded windows and even
+`pip freeze`/`conda create --clone` on the existing NFS-hosted envs were hanging — this venv's
+packages install fresh from PyPI (network-bound, not NFS-bound) and its own imports never touch
+`/vol/bitbucket`. Use it for all 10 new-family models (covers every architecture: `qwen3`,
+`qwen3_5`, `gemma`, `gemma2`, `gemma3`, `gemma4`). `HF_HOME=/data2/mn1025/hf_cache` (also off
+NFS). The shared question-id file lives at `/data2/mn1025/stage1_meta/shared_n1000_ids.txt`
+(1000 ids, extracted from the existing `Llama-2-7b-chat_trivia_qa_n1000_full` manifest — reuse
+this file for any future new-model build so everything stays id-aligned).
+
+**⚠️ `E43` (LOLO retrain, prior session) also completed successfully during this session** —
+all 4 folds done, checkpoints saved to `amortized_ue/results/exp2_lolo_full_ckpt.json` +
+`amortized_ue/stage2/runs/E37_LOLO_ckpt/checkpoints/`. Not yet written up as a formal
+EXPERIMENTS.md entry — do that before citing its numbers anywhere.
+
+## Current state (updated 2026-08-18) — pre-E44, still valid for the original 4 targets
 
 **Target LLMs (4):** Llama-2-7b-chat (reference), Mistral-7B-Instruct-v0.2, Meta-Llama-3-8B-Instruct,
 and **DeepSeek-LLM-7B-Chat (E28, NEW)**. Per-target z-layers **re-confirmed LEAK-FREE

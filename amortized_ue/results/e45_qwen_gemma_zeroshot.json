@@ -1,0 +1,270 @@
+{
+  "deploy_ckpt": "/data2/mn1025/stage2_checkpoints/deploy_checkpoints",
+  "data_dir": "/data2/mn1025/stage1",
+  "results": {
+    "Qwen3-8B": {
+      "target": "Qwen3-8B",
+      "n_test": 1000,
+      "mean_accuracy": 0.511,
+      "positive_rate_incorrect": 0.489,
+      "metrics": {
+        "true_semantic_entropy": {
+          "auroc_incorrect": 0.7872890478991832,
+          "auprc_incorrect": 0.7760755382829762,
+          "prr": 0.583187096783557,
+          "accuracy_coverage": {
+            "1.0": 0.511,
+            "0.9": 0.5611111111111111,
+            "0.75": 0.6413333333333333,
+            "0.5": 0.74
+          }
+        },
+        "random": {
+          "auroc_incorrect": 0.5238255315572737,
+          "auprc_incorrect": 0.5125468364327602,
+          "prr": 0.04756814738398034,
+          "accuracy_coverage": {
+            "1.0": 0.511,
+            "0.9": 0.5188888888888888,
+            "0.75": 0.52,
+            "0.5": 0.532
+          }
+        },
+        "q_only": {
+          "auroc_incorrect": 0.7770400874023027,
+          "auprc_incorrect": 0.7796980527972481,
+          "prr": 0.5898093603957888,
+          "accuracy_coverage": {
+            "1.0": 0.511,
+            "0.9": 0.56,
+            "0.75": 0.6226666666666667,
+            "0.5": 0.704
+          }
+        },
+        "q_resp_only": {
+          "auroc_incorrect": 0.8403827452487003,
+          "auprc_incorrect": 0.8505500459285958,
+          "prr": 0.7063911866387022,
+          "accuracy_coverage": {
+            "1.0": 0.511,
+            "0.9": 0.5633333333333334,
+            "0.75": 0.6533333333333333,
+            "0.5": 0.772
+          }
+        }
+      },
+      "bootstrap_deltas": {
+        "q_resp_only_minus_true_semantic_entropy": {
+          "mean": 0.05329924583265455,
+          "lo95": 0.029621194916450665,
+          "hi95": 0.07699510793105048,
+          "n_valid_resamples": 10000
+        },
+        "q_resp_only_minus_q_only": {
+          "mean": 0.06344308471538522,
+          "lo95": 0.045535450806952024,
+          "hi95": 0.08184381661287726,
+          "n_valid_resamples": 10000
+        }
+      }
+    },
+    "Qwen3.5-9B": {
+      "target": "Qwen3.5-9B",
+      "n_test": 1000,
+      "mean_accuracy": 0.56,
+      "positive_rate_incorrect": 0.44,
+      "metrics": {
+        "true_semantic_entropy": {
+          "auroc_incorrect": 0.8095332792207792,
+          "auprc_incorrect": 0.7748977540823445,
+          "prr": 0.6383524105174088,
+          "accuracy_coverage": {
+            "1.0": 0.56,
+            "0.9": 0.6111111111111112,
+            "0.75": 0.6906666666666667,
+            "0.5": 0.794
+          }
+        },
+        "random": {
+          "auroc_incorrect": 0.5097118506493507,
+          "auprc_incorrect": 0.45203159118016945,
+          "prr": 0.009510690961501696,
+          "accuracy_coverage": {
+            "1.0": 0.56,
+            "0.9": 0.5655555555555556,
+            "0.75": 0.5626666666666666,
+            "0.5": 0.564
+          }
+        },
+        "q_only": {
+          "auroc_incorrect": 0.7653652597402598,
+          "auprc_incorrect": 0.712062227748466,
+          "prr": 0.5828482699812731,
+          "accuracy_coverage": {
+            "1.0": 0.56,
+            "0.9": 0.6055555555555555,
+            "0.75": 0.664,
+            "0.5": 0.754
+          }
+        },
+        "q_resp_only": {
+          "auroc_incorrect": 0.8184618506493507,
+          "auprc_incorrect": 0.7843313658346573,
+          "prr": 0.676544179686379,
+          "accuracy_coverage": {
+            "1.0": 0.56,
+            "0.9": 0.6088888888888889,
+            "0.75": 0.6973333333333334,
+            "0.5": 0.784
+          }
+        }
+      },
+      "bootstrap_deltas": {
+        "q_resp_only_minus_true_semantic_entropy": {
+          "mean": 0.00901979450241031,
+          "lo95": -0.012082045413925848,
+          "hi95": 0.03063103581427627,
+          "n_valid_resamples": 10000
+        },
+        "q_resp_only_minus_q_only": {
+          "mean": 0.053179249256963705,
+          "lo95": 0.033728724662392066,
+          "hi95": 0.07291081977911615,
+          "n_valid_resamples": 10000
+        }
+      }
+    },
+    "gemma-7b-it": {
+      "target": "gemma-7b-it",
+      "n_test": 1000,
+      "mean_accuracy": 0.425,
+      "positive_rate_incorrect": 0.575,
+      "metrics": {
+        "true_semantic_entropy": {
+          "auroc_incorrect": 0.770537084398977,
+          "auprc_incorrect": 0.7928885448652878,
+          "prr": 0.5292138909614834,
+          "accuracy_coverage": {
+            "1.0": 0.425,
+            "0.9": 0.46,
+            "0.75": 0.5213333333333333,
+            "0.5": 0.638
+          }
+        },
+        "random": {
+          "auroc_incorrect": 0.5176838874680307,
+          "auprc_incorrect": 0.6057892482548058,
+          "prr": 0.0035464952992778904,
+          "accuracy_coverage": {
+            "1.0": 0.425,
+            "0.9": 0.43444444444444447,
+            "0.75": 0.43066666666666664,
+            "0.5": 0.442
+          }
+        },
+        "q_only": {
+          "auroc_incorrect": 0.7531007672634271,
+          "auprc_incorrect": 0.7970436469694042,
+          "prr": 0.5158741350469376,
+          "accuracy_coverage": {
+            "1.0": 0.425,
+            "0.9": 0.4622222222222222,
+            "0.75": 0.516,
+            "0.5": 0.616
+          }
+        },
+        "q_resp_only": {
+          "auroc_incorrect": 0.8482373401534528,
+          "auprc_incorrect": 0.8838285057844123,
+          "prr": 0.7216244950631762,
+          "accuracy_coverage": {
+            "1.0": 0.425,
+            "0.9": 0.4688888888888889,
+            "0.75": 0.548,
+            "0.5": 0.694
+          }
+        }
+      },
+      "bootstrap_deltas": {
+        "q_resp_only_minus_true_semantic_entropy": {
+          "mean": 0.07774061604822555,
+          "lo95": 0.051644125024304925,
+          "hi95": 0.10354986252116885,
+          "n_valid_resamples": 10000
+        },
+        "q_resp_only_minus_q_only": {
+          "mean": 0.09498332678286206,
+          "lo95": 0.0748844710960656,
+          "hi95": 0.11556780093441406,
+          "n_valid_resamples": 10000
+        }
+      }
+    },
+    "gemma-2-9b-it": {
+      "target": "gemma-2-9b-it",
+      "n_test": 1000,
+      "mean_accuracy": 0.684,
+      "positive_rate_incorrect": 0.316,
+      "metrics": {
+        "true_semantic_entropy": {
+          "auroc_incorrect": 0.7690174143163816,
+          "auprc_incorrect": 0.6387094623947049,
+          "prr": 0.5865370944709556,
+          "accuracy_coverage": {
+            "1.0": 0.684,
+            "0.9": 0.7433333333333333,
+            "0.75": 0.8013333333333333,
+            "0.5": 0.846
+          }
+        },
+        "random": {
+          "auroc_incorrect": 0.5240025168406248,
+          "auprc_incorrect": 0.3383806416318764,
+          "prr": 0.040427802238828435,
+          "accuracy_coverage": {
+            "1.0": 0.684,
+            "0.9": 0.6911111111111111,
+            "0.75": 0.6906666666666667,
+            "0.5": 0.696
+          }
+        },
+        "q_only": {
+          "auroc_incorrect": 0.7042411540454512,
+          "auprc_incorrect": 0.538788862323835,
+          "prr": 0.4920897095332,
+          "accuracy_coverage": {
+            "1.0": 0.684,
+            "0.9": 0.7244444444444444,
+            "0.75": 0.7573333333333333,
+            "0.5": 0.808
+          }
+        },
+        "q_resp_only": {
+          "auroc_incorrect": 0.7218891109630617,
+          "auprc_incorrect": 0.5728995001242774,
+          "prr": 0.5164120950776421,
+          "accuracy_coverage": {
+            "1.0": 0.684,
+            "0.9": 0.7311111111111112,
+            "0.75": 0.7733333333333333,
+            "0.5": 0.812
+          }
+        }
+      },
+      "bootstrap_deltas": {
+        "q_resp_only_minus_true_semantic_entropy": {
+          "mean": -0.047259241451365196,
+          "lo95": -0.07467501637233602,
+          "hi95": -0.019993953959304835,
+          "n_valid_resamples": 10000
+        },
+        "q_resp_only_minus_q_only": {
+          "mean": 0.017651549178908318,
+          "lo95": -0.0012176645199496678,
+          "hi95": 0.03691325555719409,
+          "n_valid_resamples": 10000
+        }
+      }
+    }
+  }
+}
