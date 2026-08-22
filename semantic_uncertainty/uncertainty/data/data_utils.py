@@ -10,7 +10,10 @@ def load_ds(dataset_name, seed, add_options=None):
     """Load dataset."""
     train_dataset, validation_dataset = None, None
     if dataset_name == "squad":
-        dataset = datasets.load_dataset("squad_v2")
+        # Fully-qualified repo id -- newer huggingface_hub (se_probes_v5) rejects the legacy
+        # unnamespaced "squad_v2" short form; verified byte-identical (130319 train examples)
+        # under both the pinned se_probes env and se_probes_v5 before this change.
+        dataset = datasets.load_dataset("rajpurkar/squad_v2")
         train_dataset = dataset["train"]
         validation_dataset = dataset["validation"]
 

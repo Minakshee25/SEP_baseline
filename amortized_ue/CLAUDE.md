@@ -157,7 +157,74 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (updated 2026-08-21)
+## Current state (updated 2026-08-22)
+
+**⭐ E49 (2026-08-22) — think-leak recheck: E45-E48's Qwen3.5-9B numbers need NO correction.**
+Precisely counted the "hardest tail" flagged in E44: **58/1000 (5.8%)** trivia_qa eval records
+have `canonical_response` literally `"<think>"`/`"<think>\n\n</think>"` (budget exhausted, no real
+answer). User asked directly whether E45-E48 needed to exclude these. Re-scored all 4 predictors
+(true SE, `q_only`, `q_resp_only`, frozen backbone) on all-1000 vs clean-942: **removing them makes
+EVERY number worse** (−0.02 to −0.04 uniformly), the opposite of the initial "confidently wrong"
+hypothesis — checked directly, these 58 rows have **mean true SE 2.00** (vs clean rows' 0.97), so
+they're the *easiest* wrong-answer cases (high uncertainty, clearly wrong), not inflators. **No
+correction needed to any E45-E48 result.** Likely mechanism: the entailment model can't judge two
+`"<think>"` fragments as equivalent, so they scatter into many small clusters (high entropy)
+instead of one (low entropy) as first guessed. Artifacts: `e49_qwen35_9b_think_leak_check.py`.
+
+**Infra fixed alongside E49 (found while investigating it):**
+- **Stale manifest metadata for `Qwen3.5-9B_trivia_qa_n1000_full`** (`meta.mean_accuracy` etc.
+  stuck at an old 46-record partial value from an earlier manifest rebuild) — fixed by
+  recomputing from the 1000 records already on disk; **no `.pt` data or any E45-E48 result was
+  ever wrong**, this was purely a stale summary-stat display bug.
+- **`squad_v2` dataset loading was broken under `se_probes_v5`** (newer `huggingface_hub` rejects
+  the legacy unnamespaced `"squad_v2"` short form) — fixed in
+  `semantic_uncertainty/uncertainty/data/data_utils.py` (`"squad_v2"` → `"rajpurkar/squad_v2"`,
+  verified byte-identical under both the old and new env before applying; stopped and asked first
+  per this repo's `semantic_uncertainty/uncertainty/` rule).
+- **Squad n1000 OOD test data now built for all 4 small-tier targets** (`Qwen3-8B`, `Qwen3.5-9B`,
+  `gemma-7b-it`, `gemma-2-9b-it`, all 1000/1000) — same recipe as the existing Llama-2/Mistral
+  squad sets (no `--only_ids`, default seed reproduces the identical question selection), built on
+  GPU0 in parallel with the big-tier n1000 queue on GPU1. Qwen3.5-9B's squad build took 9.2×
+  longer than its trivia_qa build (squad is harder on average, triggers its long-`<think>`
+  behavior far more often) — the other 3 targets were only 1.2-1.4× slower.
+- **Big-tier queue parallelized across both GPUs**: `gemma-2-27b-it`/`gemma-3-27b-it` pulled out
+  of the sequential GPU1 queue into an independent GPU0 lane
+  (`build_gemma_bigtier_gpu0.sh`, single-GPU — GPU1 is occupied so dual-GPU isn't available
+  right now anyway, also sidesteps that untested risk), starting the moment GPU0 frees up.
+  Roughly halves the big-tier queue's total wall time.
+
+**Data-generation status at session end (2026-08-22 ~08:00), for a fresh session to pick up:**
+small-tier trivia_qa n2000 (training data) and squad n1000 (OOD test data) are **both fully done**
+for all 4 small-tier targets. Big-tier n1000 (eval data): GPU1 running Qwen3.5-27B (~620/1000,
+then Qwen3.6-27B resume from 93/1000, then Qwen3.8-27B fresh); GPU0 finishing the last squad build
+then auto-starting `gemma-2-27b-it` → `gemma-3-27b-it`. `gemma-4-31B-it` still excluded (broken,
+undiagnosed). **⚠️ Nothing from E46-E49 or this infra work is committed to git yet** — check
+`git status` in `amortized_ue/` before assuming any of it is on `origin/main`.
+
+**⭐ E46-E48 (2026-08-21) — three follow-up checks on the E45 zero-shot result, all positive.**
+(1) **E46 — does `q_resp_only` distinguish CROSS-model disagreement**, not just within-model
+correctness (E45 never tested this)? All 6 pairs among the 4 Qwen/Gemma targets: SE-gap
+correlation +0.23 to +0.42 (all CIs exclude 0), pairwise accuracy on divergent rows **69-81%** —
+substantially stronger than E40's analogous test on the original 4 models (51.5%, not
+significant); no LOO-null correction needed here since none of the 4 new targets were in the
+deploy proxy's training set (every pair is symmetric). (2) **E47 — SE-FIDELITY (not correctness)**:
+Spearman rho(`q_resp_only`, true SE) = **0.67-0.75 on all 4 targets**, at or above the proxy's own
+training-family benchmark (E37: ~0.648). gemma-2-9b-it's SE-fidelity (0.674) is on par with
+gemma-7b-it's (0.670) despite gemma-2-9b-it being E45's one correctness-detection *loss* — direct
+target-specific confirmation of E31's SE-fidelity≠correctness finding. Root cause of the missing
+decode scale clarified (not just worked around): `exp2_run.py` intentionally saves an identity
+transform because targets are z-scored PER SOURCE MODEL before pooling — there is no single
+absolute SE scale for a pooled proxy to save, by design, not an oversight; **`position`/`layer`
+are still unfixed at the save site** though, a real open gap. (3) **E48 — does the LoRA training
+add anything beyond the frozen backbone's pretrained knowledge?** Built a p_true-style zero-shot
+baseline (same `meta-llama/Llama-3.2-3B`, NO training, few-shot True/False prompt). Untrained
+baseline is well above chance (AUROC 0.67-0.80) but the **trained proxy beats it on every target,
+every metric, no exceptions** (AUROC +0.05 to +0.08; **SE-fidelity rho +0.24 to +0.28, remarkably
+uniform across all 4 targets**) — training clearly adds a real, graded uncertainty-calibration
+skill beyond the backbone's coarse pretrained correctness sense, and that skill transfers to
+unseen model families. Full arc + all tables: `EXPERIMENTS.md` E46/E47/E48. Artifacts:
+`e46_qwen_gemma_pairwise_disagreement.py` (+`e46_examples.py`),
+`e47_qwen_gemma_se_fidelity.py` (+`e47_examples.py`), `e48_frozen_backbone_baseline.py`.
 
 **⭐ E45 (2026-08-21) — zero-shot flagship-proxy transfer to Qwen/Gemma: mixed but real.** Scored
 the DEPLOY proxy (trained by pooling Llama-2/Mistral/Llama-3/DeepSeek n2000, text arms only) on
