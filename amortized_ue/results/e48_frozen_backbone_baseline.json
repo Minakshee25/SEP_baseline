@@ -1,0 +1,26 @@
+{
+  "Qwen3-8B": {
+    "n": 1000,
+    "auroc_incorrect": 0.7598817827828669,
+    "se_fidelity_rho": 0.4773675895823585,
+    "mean_p_false": 0.29576995520293714
+  },
+  "Qwen3.5-9B": {
+    "n": 1000,
+    "auroc_incorrect": 0.7518810876623376,
+    "se_fidelity_rho": 0.5093250542279741,
+    "mean_p_false": 0.29483470274508
+  },
+  "gemma-7b-it": {
+    "n": 1000,
+    "auroc_incorrect": 0.7966322250639385,
+    "se_fidelity_rho": 0.4100444423456206,
+    "mean_p_false": 0.3096870712451637
+  },
+  "gemma-2-9b-it": {
+    "n": 1000,
+    "auroc_incorrect": 0.6668609815678436,
+    "se_fidelity_rho": 0.3899285369528789,
+    "mean_p_false": 0.2775784801989794
+  }
+}

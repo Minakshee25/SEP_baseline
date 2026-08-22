@@ -2329,3 +2329,280 @@ Additive fixes: `amortized_ue/procrustes_e27_rank_fusion.py` (`arm_preds` glob p
 `amortized_stage2_v5` (`/data2/mn1025/conda_envs/amortized_stage2_v5`, NFS-free, versions pinned
 to match the live `amortized_stage2` conda env) + checkpoint copy at
 `/data2/mn1025/stage2_checkpoints/deploy_checkpoints/`.
+
+## E46
+
+**Goal:** E45 scored each of the 4 new Qwen/Gemma targets against its OWN correctness labels, in
+isolation — strong AUROCs there are consistent with the proxy just reading question difficulty +
+each model's own answer-text tells, without ever checking whether it can tell "model A is
+uncertain here but model B isn't" on the SAME question. This asks that directly: does
+`q_resp_only` distinguish genuine CROSS-MODEL disagreement, not just within-model correctness?
+
+**Method (additive, `e46_qwen_gemma_pairwise_disagreement.py`), following E40's design but
+simpler.** For every one of the 6 pairs among the 4 targets, on the shared 1000 question ids:
+`dY = SE_A − SE_B` (or `incorrect_A − incorrect_B` for the correctness framing), `dP = q_resp_only(A)
+− q_resp_only(B)`, then `rho(dP, dY)` (paired bootstrap CI) and pairwise accuracy
+(`sign(dP)==sign(dY)`) on rows where the two targets' correctness genuinely diverges. **Crucially,
+E40's negative-null correction does NOT apply here** — that correction existed because E40's
+pooled ridge was trained via leave-one-out (asymmetric: 3 models in training, 1 held out), so a
+predictor with zero real signal was provably anti-correlated with the true gap by construction.
+Here, the deploy proxy was trained ONLY on Llama-2/Mistral/Llama-3/DeepSeek — **none** of the 4
+new targets were in its training set, so every pair is symmetric (both members equally unseen);
+the null really is 0, no correction needed. `q_only`'s `dP` is included only as a determinism
+sanity check (identical input across models ⇒ should be exactly 0), not a statistical null.
+
+**Result (all 6 pairs, `q_resp_only`):**
+
+| pair | SE-gap corr (95% CI) | pairwise accuracy on divergent rows | n |
+|---|---|---|---|
+| Qwen3-8B vs Qwen3.5-9B | +0.259 [+0.198,+0.321] | 69.1% | 191 |
+| Qwen3-8B vs gemma-7b-it | **+0.417** [+0.357,+0.474] | **80.5%** | 262 |
+| Qwen3-8B vs gemma-2-9b-it | +0.268 [+0.198,+0.337] | 74.3% | 249 |
+| Qwen3.5-9B vs gemma-7b-it | +0.325 [+0.265,+0.384] | 78.5% | 275 |
+| Qwen3.5-9B vs gemma-2-9b-it | +0.225 [+0.160,+0.290] | 75.5% | 200 |
+| gemma-7b-it vs gemma-2-9b-it | +0.323 [+0.260,+0.385] | 79.7% | 305 |
+
+`q_only`'s `dP` was identically 0 for every question on every pair, exactly as predicted (sanity
+check passed).
+
+**Findings.**
+1. **Every pair is significant and clearly above chance** — no cherry-picking, this is all 6 of
+   6 possible pairs among the 4 targets, not a selected subset.
+2. **Substantially stronger than the closest prior test.** E40 ran the analogous check on the
+   *original* 4 models using the aligned hidden-state pathway and found only 51.5% pairwise
+   accuracy — not statistically significant, barely above chance. Here: 69–81%, clean and
+   consistent. Two likely reasons: (a) this uses the *response text* pathway, which E40 itself
+   flagged as "far more model-specific than the aligned hidden state" (+0.237 vs +0.090); (b) no
+   LOO asymmetry to correct for here (see Method).
+3. **No family clustering** — Qwen-vs-Qwen (0.259) is *weaker* than several cross-vendor pairs
+   (e.g. Qwen3-8B vs gemma-7b-it at 0.417), consistent with E30/E40's "alignability tracks CKA,
+   not family" pattern, though CKA itself hasn't been computed for Qwen/Gemma yet.
+4. **Concrete examples pulled** (`e46_examples.py`, Qwen3-8B vs gemma-7b-it, the strongest pair):
+   211/262 divergent rows called correctly (matches the aggregate 80.5% exactly, a useful internal
+   consistency check). Illustrative misses are almost all off-topic or made-up-sounding answers
+   ("the jem and the holograms" for a ThunderCats question; "luna" for a locomotive) correctly
+   flagged as the more-uncertain side.
+
+**Caveats.** 6 pairs from only 4 targets are not independent draws (each target appears in 3
+pairs), so treat the 6-pair table as one coherent picture, not 6 independent replications; no
+z-arm (no alignment fit for Qwen/Gemma yet); bootstrap CIs are per-pair, no multiple-comparison
+correction applied (unnecessary here — every CI is far from 0, correction would not change any
+conclusion).
+
+**Artifacts.** `amortized_ue/e46_qwen_gemma_pairwise_disagreement.py`,
+`amortized_ue/e46_examples.py`, `amortized_ue/results/e46_qwen_gemma_pairwise.json`,
+`amortized_ue/results/e46_examples.json`.
+
+## E47
+
+**Goal:** E45/E46 both measure *ranking* quality (AUROC, pairwise accuracy) — neither directly
+answers "how well does the proxy's raw score track the actual continuous SE value," the project's
+primary SE-fidelity metric used throughout E12–E37. Per E31, SE-fidelity and correctness are
+established to be different things, not two views of the same number — so this needed its own
+check, not an inference from E45/E46.
+
+**Method (additive, `e47_qwen_gemma_se_fidelity.py`).** Spearman `rho(q_resp_only, true_SE)` per
+target (bootstrap CI), plus `q_only` for comparison, on the same 4 targets/1000-id records as
+E45/E46.
+
+**Result:**
+
+| target | `q_only` rho | `q_resp_only` rho (95% CI) |
+|---|---|---|
+| Qwen3-8B | 0.601 | **0.719** [0.684,0.750] |
+| Qwen3.5-9B | 0.662 | **0.749** [0.721,0.774] |
+| gemma-7b-it | 0.537 | **0.670** [0.632,0.705] |
+| gemma-2-9b-it | 0.628 | **0.674** [0.638,0.707] |
+
+**Findings.**
+1. **SE-fidelity is strong on all 4 new targets (0.67–0.75) — at or above the proxy's own
+   training-family benchmark.** E37 reported `q_resp_only` Spearman ≈0.648 (mean, leave-one-out)
+   on the 4 *training* models. Zero-shot on brand-new families, the proxy matches or beats its own
+   in-training-distribution number.
+2. **gemma-2-9b-it's SE-fidelity (0.674) is essentially on par with gemma-7b-it's (0.670)** —
+   despite gemma-2-9b-it being the one target where E45 found a significant correctness-detection
+   *loss* (0.722 vs true SE's 0.769). This is direct, target-specific evidence for E31's finding
+   that SE-fidelity ≠ correctness: the proxy reads gemma-2-9b-it's uncertainty pattern just as well
+   as the others; the weaker link is specifically between gemma-2-9b-it's own SE and its own
+   correctness (plausibly related to it being the accuracy outlier — mean_acc 0.684 vs 0.42–0.56
+   for the other 3), not a proxy failure.
+3. **Concrete examples** (`e47_examples.py`, Qwen3-8B vs gemma-7b-it, top-10 by |true SE gap|):
+   9/10 correct direction (matches E46's 80.5% pairwise accuracy within noise). The one miss is
+   diagnostic: Qwen3-8B answered "Last Tango in Paris" director as "francis ford coppola" —
+   **wrong but confidently/consistently so (true SE=0.00)** — while gemma-7b-it answered correctly
+   but with high sample-to-sample variance (true SE=2.16). The proxy predicted the reverse
+   (Qwen higher, gemma lower) — it read Qwen's answer as *wrong-sounding* and inferred high
+   uncertainty, missing that the model was actually confident. This is the proxy's structural
+   blind spot: it sees one response, never the 10 samples that define true SE, so it cannot
+   observe resampling consistency directly — only infer a correlate from single-answer plausibility.
+4. **Scale caveat, not a finding:** decoded "predicted SE" values shown in the examples are
+   rescaled onto each target's own true-SE mean/std for readability only (the deploy checkpoint's
+   original decode stats are genuinely unrecoverable — see E45 finding #2's root cause, clarified
+   further below) — rank and relative gaps are the trustworthy part; absolute numbers are
+   illustrative.
+
+**Root cause of the missing decode scale (clarified, not just worked around).** Checked
+`exp2_run.py`'s current (already-partially-fixed-post-E39) checkpoint-save code directly: it
+explicitly writes `"transform": {"mean": 0.0, "std": 1.0}` — an *intentional* identity placeholder,
+not an oversight. The comment explains why: targets are z-scored **per source model** before
+pooling into one training set (so DeepSeek's naturally-higher SE scale doesn't dominate the
+shared proxy, the [[pooling-per-model-normalization]] lesson from E35). There is no single
+absolute SE scale for a pooled multi-source proxy to save — the identity transform is described in
+the code itself as "the honest record" of that fact. **Also newly noticed: the same fixed code
+still omits `position`/`layer` in meta** — any *future* exp2-line checkpoint would hit the exact
+crash `load_checkpoint`'s E45 fallback now silently absorbs; not yet fixed at the source.
+
+**Caveats.** No ceiling computed for these 4 targets (the ~0.90 label-noise ceiling from prior
+work is target-specific and hasn't been re-derived here, so "% of ceiling recovered" can't be
+stated, only the raw rho); single run, no seed variance beyond the 3-seed ensemble baked into
+`arm_preds`; the rescaling used for readable examples uses eval-time target statistics the proxy
+itself never has access to — do not read it as evidence of proxy calibration.
+
+**Artifacts.** `amortized_ue/e47_qwen_gemma_se_fidelity.py`, `amortized_ue/e47_examples.py`,
+`amortized_ue/results/e47_qwen_gemma_se_fidelity.json`, `amortized_ue/results/e47_examples.json`.
+
+## E48
+
+**Goal:** a sharp methodological worry raised mid-session: is the LoRA fine-tuning on our
+SE-labeled data actually contributing anything on Qwen/Gemma, or is the strong zero-shot
+performance mostly just Llama-3.2-3B's own pretrained factual knowledge leaking through — a
+fact-checker the backbone already had before any SE-specific training, with our training adding
+little? The existing TF-IDF-vs-3B control (E12/E13) tests a *different* axis (is the 3B smarter
+than keyword-matching); nothing in the project isolates whether the LoRA training itself, on OUR
+SE labels, is doing real work.
+
+**Method (additive, `e48_frozen_backbone_baseline.py`).** Skip the trained proxy. Load the SAME
+frozen backbone (`meta-llama/Llama-3.2-3B`) with **no LoRA, no projector, no head, no training at
+all** — just the raw pretrained model. Score it with a standard few-shot "Is this answer True or
+False" prompt (the classic `p_true` self-verification format already used in the SEP baseline —
+`semantic_uncertainty/uncertainty/uncertainty_measures/p_true.py`, reused as a template only,
+adapted here as a cross-model judge rather than self-verification). Few-shot examples drawn from
+Llama-2's own records (disjoint from every evaluated target). Read `P(token=" B" i.e. "False")`
+from the next-token logits after "Answer:" as the predicted-incorrectness score — no generation,
+one forward pass per question, no training whatsoever. Scored with the exact same
+AUROC_incorrect/SE-fidelity-rho metrics as E45/E47 for direct comparison.
+
+**Result:**
+
+| target | untrained AUROC | **trained AUROC** (Δ) | untrained SE-rho | **trained SE-rho** (Δ) |
+|---|---|---|---|---|
+| Qwen3-8B | 0.760 | **0.840** (+0.080) | 0.477 | **0.719** (+0.242) |
+| Qwen3.5-9B | 0.752 | **0.818** (+0.066) | 0.509 | **0.749** (+0.240) |
+| gemma-7b-it | 0.797 | **0.848** (+0.051) | 0.410 | **0.670** (+0.260) |
+| gemma-2-9b-it | 0.667 | **0.722** (+0.055) | 0.390 | **0.674** (+0.284) |
+
+**Findings.**
+1. **Training clearly adds real, substantial signal — the worry does not hold as stated.** The
+   trained proxy beats the untrained backbone on every target, on both metrics, with **zero
+   exceptions**.
+2. **But the worry wasn't baseless either — the untrained backbone alone is well above chance**
+   (0.67–0.80 AUROC vs 0.50 chance), confirming pretrained knowledge *does* carry real,
+   independent signal. Training is additive on top of a real baseline, not manufacturing signal
+   from nothing.
+3. **The SE-fidelity gap (+0.24 to +0.28) is far larger and much more uniform across targets than
+   the AUROC gap (+0.05 to +0.08).** Interpretation: the untrained backbone gives a coarse,
+   roughly binary "does this look right" signal; the SE-labeled training data teaches something
+   *graded* on top — translating "looks wrong" into a properly scaled *degree* of uncertainty that
+   tracks the continuous entropy structure. That graded skill is what shows up as the large,
+   consistent rho gap, and it transfers to models never seen in training.
+4. **gemma-2-9b-it is the weakest target for BOTH the untrained baseline (0.667/0.390, both the
+   lowest of the 4) and, per E45, the trained proxy's correctness edge over true SE** — consistent
+   with gemma-2-9b-it being a genuinely harder-to-judge target in general (its own higher accuracy
+   / lower incorrect-rate, per E45's finding #3), not a training-specific weakness.
+
+**Caveats.** `p_true`-style prompting of a *base* (non-instruct) 3B model is a coarse instrument —
+few-shot format-following from a non-chat model is noisier than an instruction-tuned judge would
+be, so the untrained baseline's numbers are plausibly a slight underestimate of "best achievable
+from pretrained knowledge alone" (a stronger untrained baseline would only shrink the measured
+gap, not reverse the conclusion given its current size). Single run, 4-example few-shot prompt not
+tuned/ablated. This is a different information setting than the classic `p_true` (which also reads
+the brainstormed high-temperature samples, not just one answer) — deliberately restricted to one
+answer here to match `q_resp_only`'s own input exactly, for a fair comparison.
+
+**Artifacts.** `amortized_ue/e48_frozen_backbone_baseline.py`,
+`amortized_ue/results/e48_frozen_backbone_baseline.json`.
+
+## E49
+
+**Goal:** while sanity-checking the squad build's slow pace for Qwen3.5-9B (9.2× slower than its
+own trivia_qa build, see infra note below), found that the trivia_qa eval set used throughout
+E45-E48 has 58/1000 (5.8%) records where `canonical_response` is literally `"<think>"` or
+`"<think>\n\n</think>"` — the model exhausted its 250-token thinking budget without producing a
+real answer (the documented "hardest tail," now precisely counted; the earlier "~46" figure was an
+estimate). User asked directly: do E45-E48's Qwen3.5-9B numbers need to be redone excluding these?
+
+**Method (additive, `e49_qwen35_9b_think_leak_check.py`).** Re-scored all 4 predictors used across
+E45/E47/E48 (true SE, `q_only`, `q_resp_only`, frozen-backbone `p_false`) on the full 1000 rows AND
+on the clean 942 (excluding the 58), side by side — AUROC_incorrect and SE-fidelity rho both ways.
+
+**Result:**
+
+| predictor | AUROC (all 1000) | AUROC (clean 942) | Δ | rho (all) | rho (clean) | Δ |
+|---|---|---|---|---|---|---|
+| true SE | 0.810 | 0.787 | −0.022 | 1.000 | 1.000 | — |
+| `q_only` | 0.765 | 0.746 | −0.020 | 0.662 | 0.633 | −0.030 |
+| `q_resp_only` | 0.818 | 0.797 | −0.021 | 0.749 | 0.724 | −0.025 |
+| frozen backbone | 0.752 | 0.729 | −0.023 | 0.509 | 0.468 | −0.041 |
+
+**Findings.**
+1. **Removing the 58 rows makes every number WORSE, not better — the opposite of the initial
+   hypothesis.** Before running this, the working theory (by analogy to E47's "Last Tango in
+   Paris" confidently-wrong example) was that these degenerate rows would be "confidently wrong"
+   (low SE, inflating everyone's apparent skill). Checked directly: **mean true SE for the 58 bad
+   rows is 2.00, more than double the clean rows' 0.97** — the opposite of confidently wrong.
+   Likely cause: the entailment model can't cleanly judge two `"<think>"` fragments as
+   semantically equivalent (there's no real claim to entail), so instead of clustering into one
+   low-entropy group, they scatter into many small clusters — high, not low, computed entropy.
+2. **These rows are the easiest wrong-answer cases in the dataset, not the hardest.** High SE +
+   accuracy=0 (all 58) is a trivial case for every predictor. Removing them leaves a harder
+   remaining pool, so every metric drops by a small, remarkably uniform ~0.02-0.04 — consistent
+   with removing "free points" rather than removing noise.
+3. **E45-E48's original Qwen3.5-9B numbers (on all 1000) stand as reported — no correction
+   needed.** The relative ordering between predictors is essentially unchanged either way (the
+   drop is uniform across all four), so no headline claim from E45-E48 is affected.
+
+**Caveats.** Single target only (Qwen3.5-9B — the one target with this failure mode at meaningful
+scale); doesn't rule out a *different* mechanism at play for a hypothetical model with truly
+"confidently wrong" degenerate outputs (that would need its own check, not assumed from this one).
+
+**Infra fixed alongside this (not part of the experiment, but discovered while investigating it):**
+1. **Stale manifest metadata for `Qwen3.5-9B_trivia_qa_n1000_full`, found and fixed.** The
+   manifest's nested `meta.mean_accuracy`/`meta.mean_cluster_assignment_entropy`/`meta.n_records`
+   still reported `0.0217`/`2.053`/`46` — leftover from an earlier manifest rebuild (fixing the
+   documented [[stage1-manifest-write-once-trap]]) where the 1000 individual record *entries* were
+   correctly rebuilt from disk, but the summary-stats fields in `meta` were carelessly copied
+   verbatim from the old 46-record partial manifest instead of being recomputed. **The actual
+   per-record data was never wrong** — all of E45-E48 read per-record fields directly, never this
+   summary, so no result was affected — but the summary now correctly reads `mean_accuracy=0.56`
+   (matching E45's own live log at the time), `n_records=1000`. Fixed by recomputing from the 1000
+   records already on disk, no `.pt` files touched.
+2. **`squad_v2` dataset loading broke under `se_probes_v5`'s newer `huggingface_hub`.**
+   `semantic_uncertainty/uncertainty/data/data_utils.py:13` called
+   `datasets.load_dataset("squad_v2")` (legacy unnamespaced short form) — the newer
+   `huggingface_hub` in `se_probes_v5` rejects it (`HfUriError`), which is why the squad-for-new-
+   models attempt failed immediately, 4/4, on first try. **Fixed** (stopped and asked first, per
+   this repo's rule for anything under `semantic_uncertainty/uncertainty/`): changed to the
+   fully-qualified `datasets.load_dataset("rajpurkar/squad_v2")`. Verified byte-identical
+   (130,319 train examples) under BOTH the old pinned `se_probes` env and the new `se_probes_v5`
+   before applying, so this doesn't risk the existing Llama-2/Mistral squad reproducibility.
+3. **Built squad n1000 OOD test data for all 4 small-tier Qwen/Gemma targets** (same recipe as the
+   existing Llama-2/Mistral squad sets — no `--only_ids`, default `random_seed=10` reproduces the
+   identical squad question selection) — `Qwen3-8B`, `Qwen3.5-9B`, `gemma-7b-it`, `gemma-2-9b-it`,
+   all 1000/1000, on GPU0 in parallel with the big-tier n1000 queue on GPU1 (zero contention, GPU0
+   was otherwise idle). Qwen3.5-9B's squad build took 9.2× longer than its own trivia_qa build
+   (188.7 vs 20.6 min) — squad questions are harder on average (lower base accuracy across every
+   model tested so far), which triggers Qwen3.5-9B's long-`<think>` behavior far more often; the
+   other 3 targets were only 1.2-1.4× slower, in line with squad's generally longer contexts.
+4. **Big-tier queue parallelized across both GPUs.** `gemma-2-27b-it`/`gemma-3-27b-it` pulled out
+   of the sequential GPU1 queue (`build_big_tier_n1000.sh`, still running Qwen3.5-27B →
+   Qwen3.6-27B → Qwen3.8-27B unmodified) into a new independent lane
+   (`build_gemma_bigtier_gpu0.sh`) that starts the moment GPU0 frees up, running single-GPU (not
+   the originally-planned dual-GPU attempt — GPU1 is fully occupied by the Qwen queue so dual-GPU
+   isn't available as an option right now regardless, and this sidesteps that untested risk for a
+   new architecture). Roughly halves the big-tier queue's total wall time.
+
+**Artifacts.** `amortized_ue/e49_qwen35_9b_think_leak_check.py`,
+`amortized_ue/results/e49_qwen35_9b_think_leak_check.json`,
+`amortized_ue/build_small_tier_squad_n1000.sh`, `amortized_ue/build_gemma_bigtier_gpu0.sh`. One-line
+dependency-fix change to `semantic_uncertainty/uncertainty/data/data_utils.py` (dataset repo id
+only, no SE/probe logic touched).

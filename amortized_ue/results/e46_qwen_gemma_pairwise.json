@@ -1,0 +1,242 @@
+[
+  {
+    "pair": "Qwen3-8B vs Qwen3.5-9B",
+    "n_common": 1000,
+    "q_only": {
+      "se_gap_corr": 0.0,
+      "se_gap_corr_ci": {
+        "mean": 0.0,
+        "lo95": 0.0,
+        "hi95": 0.0
+      },
+      "se_gap_corr_top_quartile": 0.0,
+      "n_divergent_correctness": 191,
+      "pair_accuracy_on_divergent": 0.0,
+      "pair_accuracy_ci": {
+        "mean": 0.0,
+        "lo95": 0.0,
+        "hi95": 0.0
+      },
+      "dP_std": 0.0,
+      "dP_near_zero_frac": 1.0
+    },
+    "q_resp_only": {
+      "se_gap_corr": 0.2593603924236798,
+      "se_gap_corr_ci": {
+        "mean": 0.25887046322974344,
+        "lo95": 0.19795770376078142,
+        "hi95": 0.32138745214856135
+      },
+      "se_gap_corr_top_quartile": 0.32401955114590886,
+      "n_divergent_correctness": 191,
+      "pair_accuracy_on_divergent": 0.6910994764397905,
+      "pair_accuracy_ci": {
+        "mean": 0.6905492146596858,
+        "lo95": 0.6230366492146597,
+        "hi95": 0.7539267015706806
+      },
+      "dP_std": 0.38894473695480086,
+      "dP_near_zero_frac": 0.21
+    }
+  },
+  {
+    "pair": "Qwen3-8B vs gemma-7b-it",
+    "n_common": 1000,
+    "q_only": {
+      "se_gap_corr": 0.0,
+      "se_gap_corr_ci": {
+        "mean": 0.0,
+        "lo95": 0.0,
+        "hi95": 0.0
+      },
+      "se_gap_corr_top_quartile": 0.0,
+      "n_divergent_correctness": 262,
+      "pair_accuracy_on_divergent": 0.0,
+      "pair_accuracy_ci": {
+        "mean": 0.0,
+        "lo95": 0.0,
+        "hi95": 0.0
+      },
+      "dP_std": 0.0,
+      "dP_near_zero_frac": 1.0
+    },
+    "q_resp_only": {
+      "se_gap_corr": 0.4173180409271953,
+      "se_gap_corr_ci": {
+        "mean": 0.41658621707959737,
+        "lo95": 0.3565761845264633,
+        "hi95": 0.47399821988468
+      },
+      "se_gap_corr_top_quartile": 0.5469501892046019,
+      "n_divergent_correctness": 262,
+      "pair_accuracy_on_divergent": 0.8053435114503816,
+      "pair_accuracy_ci": {
+        "mean": 0.8050713740458015,
+        "lo95": 0.7557251908396947,
+        "hi95": 0.851145038167939
+      },
+      "dP_std": 0.4726289120153713,
+      "dP_near_zero_frac": 0.097
+    }
+  },
+  {
+    "pair": "Qwen3-8B vs gemma-2-9b-it",
+    "n_common": 1000,
+    "q_only": {
+      "se_gap_corr": 0.0,
+      "se_gap_corr_ci": {
+        "mean": 0.0,
+        "lo95": 0.0,
+        "hi95": 0.0
+      },
+      "se_gap_corr_top_quartile": 0.0,
+      "n_divergent_correctness": 249,
+      "pair_accuracy_on_divergent": 0.0,
+      "pair_accuracy_ci": {
+        "mean": 0.0,
+        "lo95": 0.0,
+        "hi95": 0.0
+      },
+      "dP_std": 0.0,
+      "dP_near_zero_frac": 1.0
+    },
+    "q_resp_only": {
+      "se_gap_corr": 0.26798549855214465,
+      "se_gap_corr_ci": {
+        "mean": 0.2677520171459799,
+        "lo95": 0.19830344571201777,
+        "hi95": 0.3371130949996268
+      },
+      "se_gap_corr_top_quartile": 0.463845734147182,
+      "n_divergent_correctness": 249,
+      "pair_accuracy_on_divergent": 0.7429718875502008,
+      "pair_accuracy_ci": {
+        "mean": 0.74245421686747,
+        "lo95": 0.6867469879518072,
+        "hi95": 0.7951807228915663
+      },
+      "dP_std": 0.38636540172435097,
+      "dP_near_zero_frac": 0.338
+    }
+  },
+  {
+    "pair": "Qwen3.5-9B vs gemma-7b-it",
+    "n_common": 1000,
+    "q_only": {
+      "se_gap_corr": 0.0,
+      "se_gap_corr_ci": {
+        "mean": 0.0,
+        "lo95": 0.0,
+        "hi95": 0.0
+      },
+      "se_gap_corr_top_quartile": 0.0,
+      "n_divergent_correctness": 275,
+      "pair_accuracy_on_divergent": 0.0,
+      "pair_accuracy_ci": {
+        "mean": 0.0,
+        "lo95": 0.0,
+        "hi95": 0.0
+      },
+      "dP_std": 0.0,
+      "dP_near_zero_frac": 1.0
+    },
+    "q_resp_only": {
+      "se_gap_corr": 0.3251200671174126,
+      "se_gap_corr_ci": {
+        "mean": 0.3248742312708893,
+        "lo95": 0.2647094541325358,
+        "hi95": 0.38430564554035507
+      },
+      "se_gap_corr_top_quartile": 0.4192051845805468,
+      "n_divergent_correctness": 275,
+      "pair_accuracy_on_divergent": 0.7854545454545454,
+      "pair_accuracy_ci": {
+        "mean": 0.7851229090909091,
+        "lo95": 0.7345454545454545,
+        "hi95": 0.8327272727272728
+      },
+      "dP_std": 0.4700735386759294,
+      "dP_near_zero_frac": 0.069
+    }
+  },
+  {
+    "pair": "Qwen3.5-9B vs gemma-2-9b-it",
+    "n_common": 1000,
+    "q_only": {
+      "se_gap_corr": 0.0,
+      "se_gap_corr_ci": {
+        "mean": 0.0,
+        "lo95": 0.0,
+        "hi95": 0.0
+      },
+      "se_gap_corr_top_quartile": 0.0,
+      "n_divergent_correctness": 200,
+      "pair_accuracy_on_divergent": 0.0,
+      "pair_accuracy_ci": {
+        "mean": 0.0,
+        "lo95": 0.0,
+        "hi95": 0.0
+      },
+      "dP_std": 0.0,
+      "dP_near_zero_frac": 1.0
+    },
+    "q_resp_only": {
+      "se_gap_corr": 0.22526425553403137,
+      "se_gap_corr_ci": {
+        "mean": 0.225147761886111,
+        "lo95": 0.15997592021832935,
+        "hi95": 0.2904228940570862
+      },
+      "se_gap_corr_top_quartile": 0.23050866683830917,
+      "n_divergent_correctness": 200,
+      "pair_accuracy_on_divergent": 0.755,
+      "pair_accuracy_ci": {
+        "mean": 0.7550135,
+        "lo95": 0.695,
+        "hi95": 0.815
+      },
+      "dP_std": 0.34873383416549625,
+      "dP_near_zero_frac": 0.188
+    }
+  },
+  {
+    "pair": "gemma-7b-it vs gemma-2-9b-it",
+    "n_common": 1000,
+    "q_only": {
+      "se_gap_corr": 0.0,
+      "se_gap_corr_ci": {
+        "mean": 0.0,
+        "lo95": 0.0,
+        "hi95": 0.0
+      },
+      "se_gap_corr_top_quartile": 0.0,
+      "n_divergent_correctness": 305,
+      "pair_accuracy_on_divergent": 0.0,
+      "pair_accuracy_ci": {
+        "mean": 0.0,
+        "lo95": 0.0,
+        "hi95": 0.0
+      },
+      "dP_std": 0.0,
+      "dP_near_zero_frac": 1.0
+    },
+    "q_resp_only": {
+      "se_gap_corr": 0.323146462994291,
+      "se_gap_corr_ci": {
+        "mean": 0.32322801922006,
+        "lo95": 0.26039571055504596,
+        "hi95": 0.3848327156008979
+      },
+      "se_gap_corr_top_quartile": 0.3351601972117106,
+      "n_divergent_correctness": 305,
+      "pair_accuracy_on_divergent": 0.7967213114754098,
+      "pair_accuracy_ci": {
+        "mean": 0.7970186885245902,
+        "lo95": 0.7508196721311475,
+        "hi95": 0.839344262295082
+      },
+      "dP_std": 0.404195650422288,
+      "dP_near_zero_frac": 0.119
+    }
+  }
+]
