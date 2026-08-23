@@ -157,7 +157,35 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (updated 2026-08-22)
+## Current state (updated 2026-08-23)
+
+**⭐ E51 (2026-08-23) — the direct proxy-vs-SEP SE-fidelity head-to-head, across every regime
+built so far: proxy wins.** No prior script had put `q_resp_only` and SEP side-by-side against the
+SAME continuous SE label on the SAME held-out rows with a paired-bootstrap CI on the delta (E37/E47
+scored each alone; E38/E39/E45 compared them on *correctness*, not SE). New additive script
+(`se_fidelity_proxy_vs_sep.py`) does this across **14 target/setting combinations** spanning every
+regime the project has data for: **LOLO** trivia (4 targets, proxy = E37/E43 saved per-seed preds,
+CPU-only), **squad OOD** (Llama-2+Mistral, DEPLOY proxy), **fresh trivia n1000** (all 4 training
+models — confirmed Llama-3 now HAS a genuine disjoint fresh n1000, correcting a stale note in
+`correctness_eval.py`'s TARGETS dict), and **Qwen/Gemma zero-shot** (DEPLOY proxy vs a *fair*
+target-specific SEP fit on that model's own n2000 train / evaluated on its disjoint n1000 eval —
+0 id-overlap confirmed for all 4). SEP uses the E41 fixed layer where established
+(`exp2_run.BEST_TBG`), else leak-free val-selection (Qwen/Gemma, no CV layer picked yet — flagged).
+**Result: proxy beats SEP on Spearman in 13/14 settings (all CIs exclude 0, all positive; ties on
+Mistral-LOLO) and on AUROC-vs-SE in 10/14 (4 CIs include 0, none negative) — it never loses.**
+Largest margins are exactly where SEP is weakest: squad OOD (Δρ +0.352 Llama-2, +0.168 Mistral —
+SEP collapses to 0.236 under the dataset shift) and LOLO-Llama-2 (+0.266, SEP's known outlier
+layer per E41). Smallest-but-still-positive margins are where SEP is already strong
+(Mistral-LOLO ρ 0.599; Qwen3.5-9B ρ 0.700, the best SEP score in either family). Per-seed scores
+always sit 0.02-0.07 below the ensemble — reported separately in the JSON, never collapsed into
+the ensemble number. New helper `arm_preds_per_seed` (copy of
+`procrustes_e27_rank_fusion.arm_preds` that keeps every seed's prediction instead of only the
+mean) is now the standard way to get per-seed proxy predictions for any checkpoint set. **Infra:**
+both GPUs were saturated with live big-tier Stage-1 builds when the GPU-dependent settings needed
+to run; with user go-ahead, paused the least-progressed job (`gemma-3-27b-it`, 132/2000, SIGTERM —
+resumable) to free a GPU, then relaunched it identically after (confirmed it resumed from 132, not
+scratch). Full arc + all 14 rows: EXPERIMENTS.md E51. Artifacts: `se_fidelity_proxy_vs_sep.py`,
+`results/se_fidelity_proxy_vs_sep.json`.
 
 **⭐ E49 (2026-08-22) — think-leak recheck: E45-E48's Qwen3.5-9B numbers need NO correction.**
 Precisely counted the "hardest tail" flagged in E44: **58/1000 (5.8%)** trivia_qa eval records

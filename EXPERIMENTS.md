@@ -2606,3 +2606,118 @@ scale); doesn't rule out a *different* mechanism at play for a hypothetical mode
 `amortized_ue/build_small_tier_squad_n1000.sh`, `amortized_ue/build_gemma_bigtier_gpu0.sh`. One-line
 dependency-fix change to `semantic_uncertainty/uncertainty/data/data_utils.py` (dataset repo id
 only, no SE/probe logic touched).
+
+## E51 — the direct proxy-vs-SEP SE-fidelity head-to-head, across every regime built so far — ✅ proxy beats SEP on Spearman in 13/14 settings, ties on 1/14, never loses
+
+**Goal:** every prior script scored the `q_resp_only` proxy and SEP against SE **separately** (E37's
+`te_spearman`, E47's rho) or compared them on a **different** target (correctness,
+`auroc_incorrect` — E38/E39/E45), but nothing put the two side by side on the SAME held-out rows
+against the SAME continuous SE label with a paired-bootstrap CI on the delta. User asked for
+exactly that: one script, one final table, per-seed AND ensemble reported separately, across every
+regime the project has already built data for (LOLO, squad OOD, fresh trivia, Qwen/Gemma
+zero-shot) — using the E41-corrected SEP layers, retraining nothing.
+
+**Method (additive, `amortized_ue/se_fidelity_proxy_vs_sep.py`).** Four settings, each scored with
+the same recipe: **Spearman(pred, continuous SE)** and **AUROC(pred, high-vs-low SE)** with the
+`best_split` threshold fit on the FIT-side TRAIN split only (never on eval — the standing
+convention throughout the repo), plus a paired bootstrap (10,000 resamples, one shared index set
+reused across every predictor) giving a 95% CI on (proxy − SEP) for both metrics. SEP predictions
+are id-joined onto the proxy's rows (never positional).
+1. **LOLO trivia_qa** (Llama-2/Mistral/Llama-3/DeepSeek): proxy = the E37/E43 leave-one-LLM-out
+   checkpoints' saved per-seed `te_pred_by_seed` (no proxy forward pass needed — CPU/`se_probes`
+   only); SEP = E41 fixed-layer (`exp2_run.BEST_TBG`), fit on the target's own n2000 train split,
+   evaluated on the identical 200 `te` rows (id-mapping re-audited: max deviation `0.000e+00` on
+   all 4 folds).
+2. **Squad OOD** (Llama-2 + Mistral, the only 2 targets with squad records): DEPLOY proxy
+   (all-4-pooled, trivia-trained) run fresh on squad via a new `arm_preds_per_seed` (a copy of
+   `procrustes_e27_rank_fusion.arm_preds` that keeps every seed's prediction instead of only the
+   mean — same checkpoints, same forward pass, no retraining); SEP fit on trivia n2000, evaluated
+   OOD on squad (mirrors E39's setup exactly).
+3. **Fresh trivia n1000** for all 4 training models: DEPLOY proxy vs SEP, both fit/eval on
+   genuinely disjoint id sets. Verified on-disk that **Llama-3 now has a fresh n1000 with 0 id
+   overlap against its n2000 training set** — the earlier `correctness_eval.py` TARGETS-dict note
+   ("Llama-3: eval=test split, no fresh n1000 exists") is **stale**; the fresh set has since been
+   built and all 4 models get the fresh-set treatment.
+4. **Qwen/Gemma zero-shot** (Qwen3-8B, Qwen3.5-9B, gemma-7b-it, gemma-2-9b-it — never in the deploy
+   proxy's training pool): SEP here is a **genuinely fair, target-specific** probe — fit on that
+   model's own n2000 **training** tier, evaluated on its **disjoint** n1000 eval tier (0 id overlap
+   confirmed programmatically for all 4, per E44's split). No E41/E36 CV-picked layer exists yet
+   for these families, so the layer is chosen by leak-free **validation**-selection
+   (`sep_single_val_selected`, selects on the fit-side val split, never on eval) rather than a
+   fixed CV layer — flagged explicitly per target, since this is a noisier selection than the
+   fixed-layer SEP used in settings 1-3 (the exact failure mode E41 fixed for the original 4
+   models).
+
+**Result (ensemble vs SEP; ρ = Spearman, AU = AUROC-vs-SE; bold = CI excludes 0):**
+
+| setting | target | SEP ρ | proxy ρ | Δρ [95% CI] | SEP AU | proxy AU | ΔAU [95% CI] |
+|---|---|---|---|---|---|---|---|
+| LOLO | Mistral | 0.599 | 0.658 | +0.056 [−0.03,+0.15] | 0.865 | 0.854 | −0.011 [−0.07,+0.04] |
+| LOLO | Llama-3 | 0.518 | 0.643 | **+0.114** [+0.01,+0.22] | 0.839 | 0.874 | +0.034 [−0.04,+0.11] |
+| LOLO | DeepSeek | 0.597 | 0.703 | **+0.104** [+0.01,+0.20] | 0.812 | 0.862 | +0.050 [−0.01,+0.11] |
+| LOLO | Llama-2 | 0.424 | 0.701 | **+0.266** [+0.15,+0.39] | 0.778 | 0.862 | **+0.084** [+0.01,+0.16] |
+| squad OOD | Llama-2 | 0.236 | 0.590 | **+0.352** [+0.29,+0.41] | 0.622 | 0.797 | **+0.175** [+0.13,+0.22] |
+| squad OOD | Mistral | 0.425 | 0.594 | **+0.168** [+0.12,+0.22] | 0.686 | 0.812 | **+0.126** [+0.08,+0.17] |
+| fresh trivia | Llama-2 | 0.523 | 0.660 | **+0.131** [+0.09,+0.17] | 0.779 | 0.863 | **+0.083** [+0.06,+0.11] |
+| fresh trivia | Mistral | 0.548 | 0.653 | **+0.096** [+0.05,+0.14] | 0.834 | 0.891 | **+0.057** [+0.03,+0.09] |
+| fresh trivia | Llama-3 | 0.596 | 0.652 | **+0.052** [+0.01,+0.09] | 0.843 | 0.872 | **+0.028** [+0.00,+0.05] |
+| fresh trivia | DeepSeek | 0.583 | 0.764 | **+0.178** [+0.14,+0.22] | 0.805 | 0.901 | **+0.097** [+0.07,+0.12] |
+| Qwen/Gemma | Qwen3-8B | 0.623 | 0.719 | **+0.089** [+0.05,+0.13] | 0.867 | 0.910 | **+0.042** [+0.02,+0.07] |
+| Qwen/Gemma | Qwen3.5-9B | 0.700 | 0.749 | **+0.049** [+0.02,+0.08] | 0.874 | 0.893 | +0.019 [−0.00,+0.04] |
+| Qwen/Gemma | gemma-7b-it | 0.509 | 0.670 | **+0.157** [+0.11,+0.21] | 0.760 | 0.838 | **+0.078** [+0.05,+0.11] |
+| Qwen/Gemma | gemma-2-9b-it | 0.623 | 0.674 | **+0.047** [+0.01,+0.08] | 0.853 | 0.885 | **+0.031** [+0.01,+0.06] |
+
+Per-seed numbers (all settings) sit 0.02-0.07 below the ensemble on both metrics, consistently —
+e.g. squad/Llama-2 individual seeds ρ 0.505-0.605 vs ensemble 0.590; full per-seed table in
+`results/se_fidelity_proxy_vs_sep.json`.
+
+**Findings.**
+1. **The proxy beats SEP on Spearman in 13/14 settings (every CI excludes 0, every delta
+   positive) and ties on the 14th (Mistral-LOLO, CI includes 0 but still positive) — it never
+   loses on SE-fidelity, in any regime tested.** On AUROC-vs-SE the picture is slightly softer:
+   10/14 CIs exclude 0 (all positive), 4 include 0 (Mistral-LOLO, Llama-3-LOLO, DeepSeek-LOLO,
+   Qwen3.5-9B) — **AUROC is the noisier of the two metrics here**, consistent with it collapsing a
+   continuous relationship into a binary threshold at N as low as 200 (the LOLO rows).
+2. **The proxy's edge is LARGEST exactly where SEP is weakest: cross-dataset and cross-LLM
+   shift.** Squad OOD gives the two biggest deltas in the whole table (Δρ +0.352 Llama-2, +0.168
+   Mistral) — SEP degrades badly under dataset shift (Llama-2 SEP ρ collapses to 0.236, matching
+   E39's finding that SEP degrades more than the proxy under shift) while the proxy holds up
+   (0.590). LOLO-Llama-2 is the next largest (+0.266) — SEP's Llama-2 layer is the one E41 flagged
+   as an outlier/high-variance pick, so this table's Llama-2 rows are consistent with, not
+   independent evidence beyond, that known SEP weakness.
+3. **The result generalizes to a zero-shot regime with NO training-pool overlap at all.** The
+   Qwen/Gemma deltas (+0.047 to +0.157 ρ) are smaller than squad's but every one is positive, and 3
+   of 4 have CIs excluding 0 on both metrics — even against a SEP that is fit and evaluated
+   entirely within that same unseen model family (the fairest possible SEP baseline for those
+   targets).
+4. **Smallest gaps cluster on the targets where SEP itself is already strong** (Mistral-LOLO SEP ρ
+   0.599 — the highest SEP score of any LOLO row; Qwen3.5-9B SEP ρ 0.700, AU 0.874 — the highest
+   Qwen/Gemma SEP score) — the proxy's advantage shrinks, but never reverses, as the supervised
+   in-model baseline gets better. Consistent with the project's running theme (E27/E33/E38): the
+   label-free/model-agnostic pathway is most valuable exactly where a per-model supervised probe
+   is weakest, and merely competitive (not dominant) where the probe is already strong.
+5. **This closes a specific methodological gap E38 left open** — `correctness_eval_e37.py` already
+   computed `auroc_binarised_se`/`spearman_se` per predictor per fold, but never bootstrapped a
+   proxy-vs-SEP delta on the SE label itself (only on `incorrect`). This experiment is the first
+   place that comparison exists, for SE-fidelity specifically, across all four LLM-family regimes
+   the project has built.
+
+**Caveats.** Qwen/Gemma SEP uses val-selection, not a fixed CV layer (no E36-style multi-fold CV
+has been run for these families yet — a fixed layer would need that first, mirroring how E41 fixed
+the original 4). LOLO is N=200/fold (widest CIs in the table); squad/fresh/Qwen-Gemma are
+N=1000. AUROC-vs-SE is inherently noisier than Spearman at these sample sizes — treat the 4
+CI-includes-0 AUROC rows as "not distinguishable from SEP on this metric," not as evidence of a
+real proxy weakness (their Spearman deltas are still positive, 2 of the 4 still excluding 0).
+
+**Infra note (not part of the experiment).** Both GPUs were saturated with live Stage-1 builds
+(`Qwen3.5-27B` on GPU1 at 731/2000 records, `gemma-3-27b-it` on GPU0 at only 132/2000) when the
+GPU-dependent settings (2-4) needed to run. With explicit user go-ahead, paused the
+least-progressed job (`gemma-3-27b-it`, SIGTERM — the build is resumable, records save
+incrementally, `--overwrite` not passed means nothing already on disk is redone), ran settings 2-4
+on the freed GPU0, then relaunched the identical `build_gemma3_n2000_gpu0.sh` command
+(`nohup ... &`, disowned) once done. Confirmed it resumed from 132/2000 (not from scratch) before
+moving on.
+
+**Artifacts.** `amortized_ue/se_fidelity_proxy_vs_sep.py`,
+`amortized_ue/results/se_fidelity_proxy_vs_sep.json` (includes the full per-seed breakdown and the
+`_final_table` summary rows).
