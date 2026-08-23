@@ -160,3 +160,11 @@ scratch_xllm/
 # Exp-2 deploy checkpoints (large; pushed to W&B, not git)
 amortized_ue/results/deploy_checkpoints/
 amortized_ue/results/deploy_ckpt_smoke/
+
+# calibration-tuning baseline: vendored official repo (not ours), converted data,
+# training logs/checkpoints (all regenerable from Stage-1 records) -- only our
+# glue scripts under calibration_tuning_baseline/scripts/ are tracked.
+calibration_tuning_baseline/calibration-tuning/
+calibration_tuning_baseline/data/
+calibration_tuning_baseline/logs/
+calibration_tuning_baseline/checkpoints/

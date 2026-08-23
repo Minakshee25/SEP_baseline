@@ -233,27 +233,29 @@ def build_aligned_z(sh, rh, r_y, tr, va, eval_sh, eval_rows, tbg=REF_TBG, slt=RE
 
 # ---- one target --------------------------------------------------------------------------------
 def evaluate_target(target, fit_n, eval_n, is_reference, dataset="trivia_qa",
-                    bootstrap=10000, out=None):
+                    bootstrap=10000, out=None, data_dir=None, calibration_tuning_log_dir=None):
     print("\n" + "#" * 90)
     print(f"# CORRECTNESS EVAL — target {target}  (fit n{fit_n}, "
           f"eval {'fresh n%d' % eval_n if eval_n else 'test split'})")
     print("#" * 90)
 
+    stage1_extra = {"output_dir": data_dir} if data_dir else {}
+
     # ---- fit set (source + Llama-2 ref, shared ids) ----
-    sh, s_y, s_ids = load_matrix(Stage1Config(model_name=target, dataset=dataset, num_samples=fit_n), ["TBG", "SLT"])
-    rh, r_y, r_ids = load_matrix(Stage1Config(model_name=REF, dataset=dataset, num_samples=fit_n), ["TBG", "SLT"])
+    sh, s_y, s_ids = load_matrix(Stage1Config(model_name=target, dataset=dataset, num_samples=fit_n, **stage1_extra), ["TBG", "SLT"])
+    rh, r_y, r_ids = load_matrix(Stage1Config(model_name=REF, dataset=dataset, num_samples=fit_n, **stage1_extra), ["TBG", "SLT"])
     assert s_ids == r_ids, "fit source/ref ids differ -- not the same questions"
     tr, va, te = splits(len(s_ids))
 
     # ---- eval set (fresh disjoint n OR the fit test split) ----
     if eval_n:
-        esh, ey, eval_ids = load_matrix(Stage1Config(model_name=target, dataset=dataset, num_samples=eval_n), ["TBG", "SLT"])
+        esh, ey, eval_ids = load_matrix(Stage1Config(model_name=target, dataset=dataset, num_samples=eval_n, **stage1_extra), ["TBG", "SLT"])
         eval_rows = np.arange(len(eval_ids))
-        acc_cfg = Stage1Config(model_name=target, dataset=dataset, num_samples=eval_n)
+        acc_cfg = Stage1Config(model_name=target, dataset=dataset, num_samples=eval_n, **stage1_extra)
     else:
         esh, ey, eval_rows = sh, s_y, te
         eval_ids = [s_ids[i] for i in te]
-        acc_cfg = Stage1Config(model_name=target, dataset=dataset, num_samples=fit_n)
+        acc_cfg = Stage1Config(model_name=target, dataset=dataset, num_samples=fit_n, **stage1_extra)
 
     # ---- accuracy / correctness label, id-matched to the prediction rows ----
     acc_map = load_accuracy(acc_cfg)
@@ -321,6 +323,38 @@ def evaluate_target(target, fit_n, eval_n, is_reference, dataset="trivia_qa",
         have_text = False
         print(f"  [WARN] q_resp_only / rank_fusion SKIPPED — proxy forward pass unavailable: "
               f"{type(e).__name__}: {e}")
+
+    # calibration-tuning (activatedgeek/calibration-tuning, LoRA+Prompt) — external baseline,
+    # OPTIONAL: only added when `calibration_tuning_log_dir` is passed AND the eval artifact
+    # exists (produced by their own experiments/evaluate.py --mode=query on our offline CSV
+    # test split -- see calibration_tuning_baseline/scripts/). Its test split was built from
+    # THIS SAME eval_ids set (sorted(records.keys()), the same call load_matrix makes), so no
+    # id file is needed -- but we still hard-verify against acc_map below rather than trust order.
+    if calibration_tuning_log_dir:
+        try:
+            import torch as _torch
+            ct_name = f"sep-{target}"
+            ct_path = (f"{calibration_tuning_log_dir}/eval_{ct_name}/metrics/offline:{ct_name}/test/query_data.bin")
+            ct_data = _torch.load(ct_path, map_location="cpu")
+            q_logits, q_labels = ct_data["q_logits"], ct_data["q_labels"]
+            assert q_logits.shape[0] == len(eval_ids), (
+                f"calibration_tuning row count {q_logits.shape[0]} != eval_ids {len(eval_ids)}")
+            ct_incorrect = 1 - q_labels.numpy().astype(int)
+            # cross-check: query_label was built as (accuracy>=THRESH) by our own converter, on
+            # the SAME eval_ids order -- this must exactly match load_accuracy's binarisation.
+            ref_incorrect = 1 - (np.array([acc_map[i] for i in eval_ids]) >= THRESH).astype(int)
+            assert np.array_equal(ct_incorrect, ref_incorrect), (
+                "calibration_tuning query_label disagrees with load_accuracy binarisation "
+                "-- id ordering likely mismatched, do not trust this row")
+            p_correct = q_logits.softmax(dim=-1)[:, 1].numpy()
+            preds["calibration_tuning"] = 1.0 - p_correct           # uncertainty = 1 - P(correct)
+            label_free["calibration_tuning"] = False                 # needed LoRA-tuning on this target
+            needs_target_llm["calibration_tuning"] = True
+            print(f"  calibration_tuning loaded from {ct_path} ({q_logits.shape[0]} rows, verified vs acc_map)")
+        except FileNotFoundError:
+            print(f"  [WARN] calibration_tuning SKIPPED — no eval artifact at {ct_path}")
+        except Exception as e:
+            print(f"  [WARN] calibration_tuning SKIPPED — {type(e).__name__}: {e}")
 
     # random control
     preds["random_control"] = np.random.default_rng(0).random(len(eval_ids))
@@ -393,13 +427,19 @@ def main():
     p.add_argument("--targets", nargs="+", default=list(TARGETS), choices=list(TARGETS))
     p.add_argument("--dataset", default="trivia_qa")
     p.add_argument("--bootstrap", type=int, default=10000)
+    p.add_argument("--data_dir", default=None, help="Stage1Config.output_dir override, e.g. /data2/mn1025/stage1")
+    p.add_argument("--calibration_tuning_log_dir", default=None,
+                    help="log-dir passed to the calibration-tuning repo's experiments/evaluate.py "
+                         "(adds a 'calibration_tuning' row if <dir>/metrics/offline:sep-<target>/test/query_data.bin exists)")
     args = p.parse_args()
 
     master = {}
     for t in args.targets:
         fit_n, eval_n, is_ref = TARGETS[t]
         try:
-            master[t] = evaluate_target(t, fit_n, eval_n, is_ref, args.dataset, args.bootstrap)
+            master[t] = evaluate_target(t, fit_n, eval_n, is_ref, args.dataset, args.bootstrap,
+                                         data_dir=args.data_dir,
+                                         calibration_tuning_log_dir=args.calibration_tuning_log_dir)
         except Exception as e:
             print(f"\n[ERROR] target {t} failed: {type(e).__name__}: {e}")
             master[t] = {"error": f"{type(e).__name__}: {e}"}
