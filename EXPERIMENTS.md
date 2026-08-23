@@ -2720,4 +2720,6 @@ moving on.
 
 **Artifacts.** `amortized_ue/se_fidelity_proxy_vs_sep.py`,
 `amortized_ue/results/se_fidelity_proxy_vs_sep.json` (includes the full per-seed breakdown and the
-`_final_table` summary rows).
+`_final_table` summary rows). Summary metrics logged to W&B (`amortized_ue/log_e51_wandb.py`,
+project `amortized_ue_stage2`, run `E51_proxy_vs_sep_se_fidelity` — no new dataset/checkpoint, this
+run only carries the comparison table + per-setting deltas for tracking).
