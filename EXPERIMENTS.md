@@ -2723,3 +2723,224 @@ moving on.
 `_final_table` summary rows). Summary metrics logged to W&B (`amortized_ue/log_e51_wandb.py`,
 project `amortized_ue_stage2`, run `E51_proxy_vs_sep_se_fidelity` — no new dataset/checkpoint, this
 run only carries the comparison table + per-setting deltas for tracking).
+
+## E52 — the LOLO proxy (never saw this target's data at all) tested on squad OOD — fills the one combination E51 left untested; ✅ proxy still beats SEP under the hardest combined shift yet
+
+**Why.** E51's table has a `lolo` setting (LOLO proxy, but only ever eval'd on trivia_qa, same
+dataset it was trained on across the other 3 models) and a `squad` setting (squad OOD, but with the
+DEPLOY proxy, which pools ALL 4 models including the target — so squad is the only shift). Nobody
+had run the LOLO proxy — trained on the *other* 3 targets, zero exposure to this target's data in
+any form — **and** evaluated it on squad, a dataset it also never saw. User asked directly whether
+this combination had been tested; it had not. This is the single hardest transfer regime available
+in the project: simultaneously cross-LLM (never this target) and cross-dataset (never this
+distribution), with no fitting/calibration on either axis.
+
+**Method (additive, extends `se_fidelity_proxy_vs_sep.py` with a new `lolo_squad` setting).** Reuses
+every piece of existing infrastructure — nothing retrained. For each of the 2 targets with squad
+records (Llama-2, Mistral — the only ones with squad n1000 built): load that target's E37/E43 LOLO
+fold checkpoints (`q_resp_only` arm, 3 seeds, trained on the other 3 models' trivia_qa only, saved at
+`amortized_ue/stage2/runs/E37_LOLO_ckpt/checkpoints/`) and run a fresh forward pass on the target's
+squad n1000; score against the same E41 fixed-layer SEP used throughout E51 (fit on the target's own
+trivia n2000, evaluated OOD on squad — identical SEP recipe to E51's `squad` setting, so the SEP
+column is directly comparable across settings). New helper `arm_preds_per_seed_prefixed` — the LOLO
+checkpoint directory holds all 4 folds' files together (`<HeldOutTarget>_<arm>_seed<N>.pt`), so
+`arm_preds_per_seed`'s glob (`*{arm}_seed*.pt`) would silently pull in all 4 targets' checkpoints;
+the new helper filters the glob to `{target_prefix}_{arm}_seed*.pt` first. Same scoring
+(`score_block`, paired bootstrap, 10,000 resamples) as every other E51 setting.
+
+**Infra.** Both GPUs were saturated with live big-tier Stage-1 builds when this needed a GPU
+(`gemma-3-27b-it` on GPU0 at 1089/2000, only ~3.3GB free; `Qwen3.6-27B` on GPU1 at 498/2000, ~8.4GB
+free — the thinner-margin GPU1 job was also the less-progressed one). Asked the user first; with
+explicit go-ahead, paused `Qwen3.6-27B` (SIGTERM on both the python process and its bash driver, to
+stop the queue from auto-advancing to the next queued model) to free GPU1's full 46GB, ran the eval
+(~2 min), then relaunched a scoped resume script
+(`build_bigtier_n2000_gpu1_resume_qwen36.sh`, same queue minus the already-completed Qwen3.5-27B)
+and confirmed via a monitored record count that it resumed from 498 (499 observed shortly after
+relaunch), not from scratch.
+
+**Result (ensemble vs SEP; N=1000 squad questions per target):**
+
+| target | SEP ρ | proxy ρ | Δρ [95% CI] | SEP AU | proxy AU | ΔAU [95% CI] |
+|---|---|---|---|---|---|---|
+| Llama-2 | 0.236 | 0.616 | **+0.378** [+0.32,+0.44] | 0.622 | 0.808 | **+0.186** [+0.14,+0.23] |
+| Mistral | 0.425 | 0.548 | **+0.123** [+0.07,+0.18] | 0.686 | 0.779 | **+0.093** [+0.05,+0.14] |
+
+Per-seed (ensemble in bold for reference): Llama-2 ρ 0.551/0.603/0.583 (**ens 0.616**), AU
+0.777/0.806/0.789 (**ens 0.808**); Mistral ρ 0.462/0.566/0.456 (**ens 0.548**), AU
+0.734/0.801/0.727 (**ens 0.779**).
+
+**Findings.**
+1. **The proxy beats SEP on both metrics for both targets, every CI excludes 0** — the LOLO proxy
+   holds up even under the hardest combined shift tested anywhere in the project (never saw this
+   target's hidden states/text/labels in training, never saw this data distribution either).
+2. **Llama-2's Δρ (+0.378) is the largest single delta recorded across every E51/E52 setting**,
+   nominally edging out even the DEPLOY-proxy squad row (E51: +0.352) — consistent with SEP's
+   already-known weak/high-variance Llama-2 layer (E41) collapsing further under dataset shift
+   (0.236, same SEP number as E51's `squad` row, since it's the identical SEP recipe) while the
+   LOLO proxy (0.616) actually reads slightly *higher* than the DEPLOY proxy did on the same squad
+   data (E51: 0.590) — despite having strictly less information (no Llama-2 training data at all
+   vs DEPLOY's full inclusion). Read this as noise on a single N=1000 draw, not as "excluding the
+   target's own data helps" — nothing in the design supports that claim.
+3. **Mistral's margin (+0.123) is smaller than the DEPLOY-proxy squad row (E51: +0.168)** — in the
+   direction E42 would predict (having *any* trivia data from the target model, or even related
+   models, in the pool narrows the dataset-shift penalty), though this is one comparison, not a
+   controlled ablation of "in-pool vs LOLO" holding everything else fixed.
+4. **Per-seed spread is the widest seen in the project** (individual seeds trail the ensemble by up
+   to 0.09 on Mistral ρ) — expected, since this is the least-informed regime (3-source LOLO
+   checkpoint, zero target signal, cross-dataset on top).
+5. **Closes the one setting/target combination E51's table left untested** — LOLO trivia (E51),
+   squad OOD via DEPLOY (E51), and now LOLO×squad (E52) together cover the full cross-product of
+   {model-seen, model-unseen} × {trivia, squad} for the 2 targets with squad data; the proxy has
+   not lost to SEP in any cell.
+
+**Caveats.** Only 2 targets have squad records (Llama-2, Mistral) — DeepSeek/Llama-3 LOLO×squad
+remains untestable without a new squad build for those. N=1000 (tighter CIs than the N=200 `lolo`
+rows, comparable to the other N=1000 settings). The LOLO checkpoints' saved transform is an identity
+fallback (per-model z-scoring happens before pooling at train time, so there's no single absolute SE
+scale to decode to) — irrelevant here since both metrics (Spearman, AUROC) are rank-based and
+invariant to a fixed linear rescaling.
+
+**Artifacts.** `amortized_ue/se_fidelity_proxy_vs_sep.py` (new `lolo_squad` setting +
+`arm_preds_per_seed_prefixed` helper), `amortized_ue/results/se_fidelity_proxy_vs_sep.json` (new
+`lolo_squad` key + updated `_final_table`), `amortized_ue/logs/lolo_squad_eval.log`,
+`amortized_ue/build_bigtier_n2000_gpu1_resume_qwen36.sh`.
+
+---
+
+## E53 — reverse-E45: a proxy trained ONLY on the 4 Qwen/Gemma small-tier models, zero-shot on Llama-2/Mistral — ✅ beats SEP on both metrics, ties true SE on correctness, never saw either target
+
+**Goal.** E45 trained on Llama-2/Mistral/Llama-3/DeepSeek and tested zero-shot on the 4 new
+Qwen/Gemma small-tier targets (mixed result: 2/4 beat true SE, 1/4 on par, 1/4 lost). This is the
+reverse direction: pool `q_resp_only` (question+response text, no hidden states, no alignment)
+from **Qwen3-8B / Qwen3.5-9B / gemma-7b-it / gemma-2-9b-it**'s n2000 trivia_qa train/val splits
+(deploy-style, no held-out — matches `exp2_run.build_deploy`'s convention minus the z/alignment
+machinery, which `q_resp_only` never needs), train ONE proxy, and score it **zero-shot on
+Llama-2 and Mistral** — the proxy never sees either target's hidden states, labels, or text in
+any form during training.
+
+**⚠️ OOM at the established batch_size=32 recipe — root-caused, not just worked around.**
+Every prior `q_resp_only` deploy run (E37/E45) used batch_size=32 without incident because the
+original 4 models' trivia_qa answers are short. Qwen3.5-9B leaves `<think>...</think>` reasoning
+traces in `canonical.response` (E44/E49) that can run to hundreds of characters — a single batch
+containing one such row hits the full `max_seq_len=256` token cap, and a batch=32 forward pass at
+T=256 needs far more activation memory than any batch this arm had ever actually been asked to
+process before. Confirmed via bisection (a hand-copied inline replica of `train_arm`'s exact logic
+succeeded at low memory; the real function call failed identically every time) that the crash was
+genuinely about batch content, not a bug — `torch.cuda.memory_summary()` at the point of failure
+showed ~390GB of *cumulative* allocation activity for what should be one forward pass, consistent
+with the true worst-case (32, 256) tensor shape, confirmed by an isolated single-call test scaling
+linearly from a (32, 53) baseline.
+
+**Fix: gradient accumulation, not "hope a smaller batch is just as good."** Lowering `batch_size`
+alone to fit memory would silently change the training recipe with unknown effect on quality (a
+correction to an earlier claim in this session's own code comment: batch_size was NEVER one of the
+knobs E16/E17 swept — those tested `weight_decay` and projector width/type — so "confirmed inert"
+was an overclaim). Instead, added grad-accum support to `exp2_run.train_arm` (reads
+`cfg.grad_accum`, additive — byte-identical at the default grad_accum=1, verified by inspection of
+the zero_grad/backward/clip/step ordering). This project's `ProxyModel` has no batchnorm anywhere
+(only LayerNorm), so K micro-batches of size B, each loss divided by K before `backward()` and
+accumulated across K steps before one `opt.step()`, is **mathematically exact**, not approximate,
+for reproducing one true batch=B·K step. **Verified numerically** on a toy linear model + MSELoss:
+gradients and post-step weights matched a true batch=32 step to float32 precision (~1e-7/1e-8, pure
+summation-order noise). Ran with `batch_size=8, grad_accum=4` (effective batch=32, the established
+recipe, exactly). `Stage2Config.grad_accum` already existed as an unused field; now it does
+something and is captured in checkpoint provenance for free via the existing `cfg.as_dict()`.
+
+**⚠️ Separate incident: a co-tenant raced into a resumable GPU0 build mid-load (user-caught,
+root-caused, fixed).** While training was queued, `build_bigtier_n2000_gpu0_resume.sh` (a bare
+"poll for ≥40GB free, then launch" loop, no fencing) saw GPU0 clear and started loading
+`Qwen3.5-27B`; another user (`sh2419`, `router-tuning.py`, unrelated to this project) started a job
+on the same GPU during the ~44s load window and grabbed memory concurrently, OOM'ing our load 44s
+in before a single new record was written — a classic check-then-act race, **not** anyone stopping
+our process. **This project already built the fix for exactly this failure mode** after an earlier
+Llama-3 incident (`amortized_ue/gpu_reserve.py`, used by `build_n2000_waiter.sh`) but the GPU0
+resume script never adopted it. Patched `build_bigtier_n2000_gpu0_resume.sh` to fence with
+`gpu_reserve.py` before each model launch (same holder pattern: grab `free − budget − safety` MiB
+immediately after the free-memory check clears, before the real job starts loading), and restored
+`Qwen3.5-27B` to the front of its queue (the old unfenced loop had silently dropped it — moved on
+to the next model rather than retrying after the OOM). Separately, `gpu_reserve.py` was also used
+live to fence GPU1 for the E53 training run itself (holding the slack free memory, parented to the
+training process so it self-releases the instant training exits — confirmed working: the fence
+vanished on its own within seconds of training completing, no manual cleanup needed).
+
+**Training result.** 3 seeds, effective batch=32, ~24 min total on one GPU (fenced). In-distribution
+sanity Spearman (val pool, same 4 training models — NOT the real zero-shot result, just a pipeline
+check): **[0.703, 0.702, 0.693], mean 0.699**, tight across seeds. Checkpoints (3×87MB) + full
+per-step/per-epoch training curves saved — the earlier draft of this script had forgotten to
+persist `train_arm`'s returned curves at all (would have repeated the exact "missing `json.dump`"
+mistake that lost E37's per-seed data, [[persist-results-before-done]]); caught and fixed before
+the real run, not after.
+
+**Zero-shot eval on Llama-2 and Mistral (fresh n1000 each, disjoint from any training data) — the
+actual result:**
+
+| target | true SE AUROC_inc | proxy AUROC_inc | Δ(proxy−true SE) | proxy Spearman-vs-SE | SEP Spearman | SEP AUROC_inc |
+|---|---|---|---|---|---|---|
+| Llama-2-7b-chat | 0.760 | 0.748 | −0.013 [−0.041,+0.016] (incl. 0 — **on par**) | **0.632** | 0.523 | 0.681 |
+| Mistral-7B-Instruct-v0.2 | 0.747 | 0.746 | −0.000 [−0.029,+0.028] (incl. 0 — **on par**) | **0.634** | 0.548 | 0.714 |
+
+Both targets: proxy vs random excludes 0 by a wide margin (Δ +0.234/+0.248, clearly non-chance).
+**The proxy beats SEP on both metrics, both targets** (SE-fidelity Spearman +0.109/+0.086;
+correctness AUROC_inc +0.067/+0.032) — same direction/magnitude as every one of E51's 14 settings
+(proxy beat SEP on Spearman 13/14) — and is **statistically on par with true 10-sample SE on
+correctness** on both targets (a stronger result than E45's original direction, where 1/4 targets
+lost to true SE). This proxy has **zero exposure** to either target in any form.
+
+**Ridge context (CONTEXT ONLY, not a fair opponent — needs full target access, so cannot run
+zero-shot by construction; see the conversation, ridge structurally cannot be evaluated without
+being fit on the target's own hidden states):**
+
+| target | ridge, same layer as SEP | ridge, TBG+SLT ceiling | proxy (zero access) |
+|---|---|---|---|
+| Llama-2-7b-chat | 0.596 | 0.585 | **0.632 — beats both** |
+| Mistral-7B-Instruct-v0.2 | 0.632 | 0.647 | 0.634 — ties same-layer, ~on par with ceiling |
+
+**Striking, precisely-scoped finding:** on Llama-2, the zero-access proxy's Spearman (0.632)
+exceeds even ridge's in-distribution ceiling (0.585) — the best possible *linear* read of Llama-2's
+own hidden states, with full access. This does **not** mean the proxy beats ridge in general (E8-E10
+already established ridge beats even this project's own 3B proxy when both have full target
+access) — it means the access-vs-no-access gap is smaller than expected, small enough that a
+text-only proxy trained on four unrelated models closes it entirely on one target and nearly closes
+it on the other. Llama-2's ridge ceiling (0.585, the established `TBG:22+SLT:15` reference combo)
+came in *below* its own single-layer number (0.596, `TBG:30`) — the older reference layer combo
+isn't necessarily optimal against E36's later leak-free layer pick; reported as-is, not re-tuned for
+a maximally favorable ridge number.
+
+**⭐ Also built (user-requested, after the SEP-Spearman numbers were initially — and correctly —
+challenged as looking too low): a canonical, non-scattered reference for these baselines.**
+`build_sep_reference.py` extracts (programmatically, not hand-typed) EVERY SEP Spearman/AUROC_se
+value ever computed in this project (8 targets × 3 settings) from `se_fidelity_proxy_vs_sep.json`
+into `results/sep_reference_values.json` — one file any future script reads instead of
+hand-copying numbers into a local dict (which an earlier draft of `e53_eval_on_llama2_mistral.py`
+had done). **The "too low" concern resolved to a metric mismatch, not a bug**: SEP is a
+single-layer LOGISTIC classifier (AUROC-native; fit to separate binarized SE at one threshold), so
+its Spearman is a repurposed use of a classifier probability against a full continuous-scale
+ranking question it was never optimized for — mechanically why it reads lower than `ridge`
+(a proper regressor for the same task, hence the higher, ~0.6, numbers). SEP and ridge are
+deliberately separate, differently-named baselines in this project since E8 specifically to
+prevent this exact conflation (which caused the E6 retraction). Independently re-verified the
+Llama-2/Mistral fresh-trivia SEP numbers from scratch (`compute_sep`, CPU-only) — matched the
+`se_fidelity_proxy_vs_sep.json` values to 4 dp, so not stale/buggy.
+
+`e53_full_comparison.py` **consolidates everything into ONE output file** (true SE / SEP / ridge
+context / proxy, both metrics, both targets) — folds in what were briefly three separate scripts
+(proxy eval, an ad-hoc SEP-correctness recompute, and a standalone ridge-context script) after the
+user asked for the numbers to be saved properly in one place rather than scattered; the standalone
+ridge script was deleted once its logic was merged in, not left as a redundant duplicate.
+
+**Caveats.** No paired-bootstrap CI computed for proxy-vs-SEP or proxy-vs-ridge specifically (only
+proxy-vs-true-SE and proxy-vs-random are rigorously bootstrapped, via the original eval run) —
+would need a GPU pass to save per-row proxy predictions and could be added later; the point-estimate
+gaps are clean (not borderline) and consistent with E51's already-significant pattern across 14
+settings. Only 2 targets (Llama-2, Mistral — the only ones with existing fresh n1000 builds
+available without new Stage-1 generation). Ridge's "reference ceiling" layers were not re-tuned for
+this specific comparison (reported as the established config, not a maximized one).
+
+**Artifacts.** `amortized_ue/e53_train_qwengemma_deploy.py`, `amortized_ue/e53_eval_on_llama2_mistral.py`,
+`amortized_ue/e53_full_comparison.py`, `amortized_ue/build_sep_reference.py`,
+`amortized_ue/results/{e53_qwengemma_deploy_train_curves,e53_qwengemma_deploy_qresp_on_llama2_mistral,
+e53_full_comparison,sep_reference_values}.json`,
+`amortized_ue/stage2/runs/E53_qwengemma_deploy_qresp/checkpoints/` (3 seeds). Additive edit to
+`amortized_ue/exp2_run.py` (`train_arm` gains grad-accum support via `cfg.grad_accum`, byte-identical
+at the default). Patched `amortized_ue/build_bigtier_n2000_gpu0_resume.sh` (adds `gpu_reserve.py`
+fencing + restores the dropped `Qwen3.5-27B`).

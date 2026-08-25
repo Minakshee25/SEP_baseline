@@ -60,6 +60,8 @@ DEPLOY_CKPT_QG = "/data2/mn1025/stage2_checkpoints/deploy_checkpoints"
 QG_DATA_DIR = "/data2/mn1025/stage1"
 QG_TARGETS = ["Qwen3-8B", "Qwen3.5-9B", "gemma-7b-it", "gemma-2-9b-it"]
 LOLO_JSON = "amortized_ue/results/exp2_lolo_full.json"
+LOLO_CKPT_DIR = "amortized_ue/stage2/runs/E37_LOLO_ckpt/checkpoints"
+LOLO_SQUAD_TARGETS = ["Llama-2-7b-chat", "Mistral-7B-Instruct-v0.2"]   # only 2 targets have squad records
 LONG = {v: k for k, v in E2.SHORT.items()}
 
 
@@ -113,6 +115,44 @@ def arm_preds_per_seed(arm, model_name, dataset, num_samples, ckpt_dir, data_dir
     paths = sorted(glob.glob(os.path.join(ckpt_dir, f"*{arm}_seed*.pt")))
     if not paths:
         raise FileNotFoundError(f"no '{arm}' checkpoints under {ckpt_dir}")
+    cfg = dataclasses.replace(
+        _cfg_from_meta(read_meta(paths[0])), stage1_model_name=model_name,
+        stage1_dataset=dataset, stage1_num_samples=num_samples, ood_dataset=None, smoke=False,
+        **({"stage1_output_dir": data_dir} if data_dir else {}))
+    data = Stage2Data(cfg)
+    rows = data.split_indices("all")
+    ids = [data.ids[r] for r in rows]
+    model, trainer = None, None
+    per_seed = []
+    for p in paths:
+        model, meta, transform = load_checkpoint(p, model=model)
+        if trainer is None:
+            trainer = Trainer(cfg, data, model=model)
+        trainer.data = data
+        trainer.model.eval()
+        preds = []
+        with torch.no_grad():
+            for i in range(0, len(rows), cfg.batch_size):
+                r = rows[i:i + cfg.batch_size]
+                preds.append(trainer._forward_batch(r, meta["position"], meta["layer"], arm, data=data).float().cpu())
+        per_seed.append(transform.decode(torch.cat(preds)).numpy())
+    return ids, np.stack(per_seed)          # [n_seeds, N], aligned with `ids`
+
+
+def arm_preds_per_seed_prefixed(arm, ckpt_prefix, model_name, dataset, num_samples, ckpt_dir, data_dir=None):
+    """Same as arm_preds_per_seed, but for a checkpoint directory holding MULTIPLE targets'
+    checkpoints together (e.g. the LOLO dir: `<HeldOutTarget>_<arm>_seed<N>.pt` for all 4 folds
+    in one folder) -- filters the glob to `ckpt_prefix` so only the intended fold's checkpoints
+    are loaded. `model_name`/`dataset`/`num_samples` select the EVAL data (may differ from the
+    fold's held-out target's training-time dataset -- that's the whole point of an OOD test)."""
+    import torch
+    from amortized_ue.stage2.data import Stage2Data
+    from amortized_ue.stage2.train import Trainer
+    from amortized_ue.stage2.checkpoint import read_meta, _cfg_from_meta, load_checkpoint
+
+    paths = sorted(glob.glob(os.path.join(ckpt_dir, f"{ckpt_prefix}_{arm}_seed*.pt")))
+    if not paths:
+        raise FileNotFoundError(f"no '{ckpt_prefix}_{arm}_seed*' checkpoints under {ckpt_dir}")
     cfg = dataclasses.replace(
         _cfg_from_meta(read_meta(paths[0])), stage1_model_name=model_name,
         stage1_dataset=dataset, stage1_num_samples=num_samples, ood_dataset=None, smoke=False,
@@ -310,6 +350,31 @@ def run_squad(bootstrap, trivia_data_dir):
 
 
 # ==================================================================================================
+# SETTING 2b — LOLO proxy (trained on the OTHER 3 targets, never this one) on squad OOD.
+# Llama-2 + Mistral only (the only 2 targets with squad records). Needs GPU.
+# Cross-LLM (never saw this target) AND cross-dataset (never saw squad) simultaneously.
+# ==================================================================================================
+def run_lolo_squad(bootstrap, trivia_data_dir):
+    print(f"\n{'#' * 92}\n# SETTING 2b: LOLO proxy on squad OOD (Llama-2 + Mistral) -- "
+          f"never saw this target OR squad\n{'#' * 92}")
+    out = {}
+    for target in LOLO_SQUAD_TARGETS:
+        short = E2.SHORT[target]
+        layer = E2.BEST_TBG[target] if target != E2.ANCHOR else 30
+        sep = compute_sep(target, eval_dataset="squad", eval_num_samples=1000, data_dir=trivia_data_dir,
+                          eval_data_dir=None, fit_num_samples=2000, use_test_split_as_eval=False, layer=layer)
+        ids, P = arm_preds_per_seed_prefixed("q_resp_only", short, target, "squad", 1000,
+                                             ckpt_dir=LOLO_CKPT_DIR)
+        block = score_block(sep, ids, P, bootstrap=bootstrap, tag=f"lolo_squad/{short}")
+        block["target"] = short
+        block["proxy_provenance"] = ("E37/E43 LOLO q_resp_only (trained on the OTHER 3 models' trivia_qa, "
+                                     "never this target's data OR squad) -> squad OOD")
+        out[short] = block
+        print_block(f"LOLO squad OOD -- held out {short} (proxy trained on the other 3, trivia only)", block)
+    return out
+
+
+# ==================================================================================================
 # SETTING 3 — deploy proxy on fresh trivia_qa n1000, all 4 training models. Needs GPU.
 # ==================================================================================================
 def run_fresh(bootstrap, data_dir):
@@ -408,7 +473,7 @@ def print_final_table(all_out):
            f"{'SEP auc':>9s}{'ens auc':>9s}{'Δauc':>8s}{'ci':>10s}{'verdict':>10s}")
     print(hdr)
     rows = []
-    for setting in ["lolo", "squad", "fresh", "qwengemma"]:
+    for setting in ["lolo", "squad", "lolo_squad", "fresh", "qwengemma"]:
         if setting not in all_out:
             continue
         for target, b in all_out[setting].items():
@@ -443,7 +508,7 @@ def print_final_table(all_out):
 def main():
     p = argparse.ArgumentParser(description="Proxy (q_resp_only) vs SEP: SE-fidelity head-to-head.")
     p.add_argument("--only", nargs="+", default=["lolo", "squad", "fresh", "qwengemma"],
-                   choices=["lolo", "squad", "fresh", "qwengemma", "summary"])
+                   choices=["lolo", "squad", "lolo_squad", "fresh", "qwengemma", "summary"])
     p.add_argument("--data_dir", default=None, help="Stage1Config.output_dir override for the 4 main models (e.g. /data2/mn1025/stage1)")
     p.add_argument("--bootstrap", type=int, default=10000)
     p.add_argument("--out", default=OUT)
@@ -457,6 +522,9 @@ def main():
     if "squad" in args.only:
         all_out["squad"] = run_squad(args.bootstrap, args.data_dir)
         save_out(all_out)
+    if "lolo_squad" in args.only:
+        all_out["lolo_squad"] = run_lolo_squad(args.bootstrap, args.data_dir)
+        save_out(all_out)
     if "fresh" in args.only:
         all_out["fresh"] = run_fresh(args.bootstrap, args.data_dir)
         save_out(all_out)
@@ -464,7 +532,7 @@ def main():
         all_out["qwengemma"] = run_qwengemma(args.bootstrap)
         save_out(all_out)
 
-    if set(args.only) & {"lolo", "squad", "fresh", "qwengemma", "summary"}:
+    if set(args.only) & {"lolo", "squad", "lolo_squad", "fresh", "qwengemma", "summary"}:
         rows = print_final_table(all_out)
         all_out["_final_table"] = rows
         save_out(all_out)

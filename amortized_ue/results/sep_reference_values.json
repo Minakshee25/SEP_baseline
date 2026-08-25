@@ -1,0 +1,158 @@
+{
+  "_meta": {
+    "description": "Canonical SEP-vs-true-SE reference (Spearman primary, AUROC_se secondary), extracted from results/se_fidelity_proxy_vs_sep.json.",
+    "primary_metric": "spearman = Spearman(SEP prediction, continuous SE label)",
+    "secondary_metric": "auroc_se = AUROC of SEP prediction vs SE binarized at a train-fit best_split threshold (easier metric, reads higher)",
+    "source": "se_fidelity_proxy_vs_sep.json",
+    "generated_by": "amortized_ue/build_sep_reference.py",
+    "regenerate": "python -m amortized_ue.build_sep_reference",
+    "verified": "Llama-2/Mistral trivia_qa_fresh_n1000 independently recomputed from scratch via compute_sep() on 2026-08-25, matched to 4 dp.",
+    "not_covered": "AUROC-vs-incorrect (correctness) SEP numbers -- see correctness_eval_e41_fixedlayer.json / correctness_eval_ood.json."
+  },
+  "targets": {
+    "Llama-2-7b-chat": {
+      "settings": {
+        "trivia_qa_fresh_n1000": {
+          "position": "TBG",
+          "layer": 30,
+          "selection": "E41 fixed TBG:30",
+          "n": 1000,
+          "spearman": 0.5231100960697028,
+          "auroc_se": 0.7794958923912276
+        },
+        "trivia_qa_lolo_n200": {
+          "position": "TBG",
+          "layer": 30,
+          "selection": "E41 fixed TBG:30",
+          "n": 200,
+          "spearman": 0.4243435989397704,
+          "auroc_se": 0.7784926470588234
+        },
+        "squad_ood_n1000": {
+          "position": "TBG",
+          "layer": 30,
+          "selection": "E41 fixed TBG:30",
+          "n": 1000,
+          "spearman": 0.2364007197666684,
+          "auroc_se": 0.62164356054942
+        }
+      }
+    },
+    "Mistral-7B-Instruct-v0.2": {
+      "settings": {
+        "trivia_qa_fresh_n1000": {
+          "position": "TBG",
+          "layer": 31,
+          "selection": "E41 fixed TBG:31",
+          "n": 1000,
+          "spearman": 0.548499439048831,
+          "auroc_se": 0.8341291013202385
+        },
+        "trivia_qa_lolo_n200": {
+          "position": "TBG",
+          "layer": 31,
+          "selection": "E41 fixed TBG:31",
+          "n": 200,
+          "spearman": 0.5987467779550847,
+          "auroc_se": 0.8653333333333334
+        },
+        "squad_ood_n1000": {
+          "position": "TBG",
+          "layer": 31,
+          "selection": "E41 fixed TBG:31",
+          "n": 1000,
+          "spearman": 0.42542961644973404,
+          "auroc_se": 0.6860010041193086
+        }
+      }
+    },
+    "Meta-Llama-3-8B-Instruct": {
+      "settings": {
+        "trivia_qa_fresh_n1000": {
+          "position": "TBG",
+          "layer": 31,
+          "selection": "E41 fixed TBG:31",
+          "n": 1000,
+          "spearman": 0.5962280409147271,
+          "auroc_se": 0.843328259766616
+        },
+        "trivia_qa_lolo_n200": {
+          "position": "TBG",
+          "layer": 31,
+          "selection": "E41 fixed TBG:31",
+          "n": 200,
+          "spearman": 0.5175425501587398,
+          "auroc_se": 0.8394377618597108
+        }
+      }
+    },
+    "deepseek-llm-7b-chat": {
+      "settings": {
+        "trivia_qa_fresh_n1000": {
+          "position": "TBG",
+          "layer": 28,
+          "selection": "E41 fixed TBG:28",
+          "n": 1000,
+          "spearman": 0.582731554090542,
+          "auroc_se": 0.8046294626018793
+        },
+        "trivia_qa_lolo_n200": {
+          "position": "TBG",
+          "layer": 28,
+          "selection": "E41 fixed TBG:28",
+          "n": 200,
+          "spearman": 0.5968478118396342,
+          "auroc_se": 0.8124806919987643
+        }
+      }
+    },
+    "Qwen3-8B": {
+      "settings": {
+        "trivia_qa_fresh_n1000": {
+          "position": "SLT",
+          "layer": 22,
+          "selection": "leak-free val-selected (no established CV layer for this target)",
+          "n": 1000,
+          "spearman": 0.6227875062725329,
+          "auroc_se": 0.8674178439803439
+        }
+      }
+    },
+    "Qwen3.5-9B": {
+      "settings": {
+        "trivia_qa_fresh_n1000": {
+          "position": "TBG",
+          "layer": 31,
+          "selection": "leak-free val-selected (no established CV layer for this target)",
+          "n": 1000,
+          "spearman": 0.7002887015784578,
+          "auroc_se": 0.8739924423036378
+        }
+      }
+    },
+    "gemma-7b-it": {
+      "settings": {
+        "trivia_qa_fresh_n1000": {
+          "position": "SLT",
+          "layer": 17,
+          "selection": "leak-free val-selected (no established CV layer for this target)",
+          "n": 1000,
+          "spearman": 0.5092440910987884,
+          "auroc_se": 0.7600646433384916
+        }
+      }
+    },
+    "gemma-2-9b-it": {
+      "settings": {
+        "trivia_qa_fresh_n1000": {
+          "position": "TBG",
+          "layer": 39,
+          "selection": "leak-free val-selected (no established CV layer for this target)",
+          "n": 1000,
+          "spearman": 0.6228337024601583,
+          "auroc_se": 0.8531704781704782
+        }
+      }
+    }
+  }
+}

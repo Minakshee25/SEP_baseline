@@ -1,0 +1,106 @@
+{
+  "Llama-2-7b-chat": {
+    "n": 1000,
+    "spearman_vs_se": {
+      "true_se": 1.0,
+      "sep": 0.5231100960697028,
+      "ridge_same_as_sep_CONTEXT_ONLY": 0.5956268551858268,
+      "ridge_reference_ceiling_CONTEXT_ONLY": 0.584915598378553,
+      "proxy": 0.6320151705040068
+    },
+    "auroc_vs_incorrect": {
+      "true_se": 0.7603362184453992,
+      "sep": 0.6808654496281271,
+      "proxy": 0.7476303864874285
+    },
+    "sep_detail": {
+      "position": "TBG",
+      "layer": 30,
+      "selection": "E41 fixed TBG:30",
+      "n": 1000,
+      "incorrect_rate": 0.391,
+      "spearman_vs_se": 0.5231100960697028,
+      "auroc_vs_se": 0.7794958923912276,
+      "auroc_vs_incorrect": 0.6808654496281271
+    },
+    "ridge_detail_CONTEXT_ONLY": {
+      "same_as_sep": {
+        "spearman": 0.5956268551858268,
+        "alpha": 10000.0,
+        "val_spearman": 0.6099345293619975,
+        "layer": [
+          "TBG",
+          30
+        ]
+      },
+      "reference_ceiling": {
+        "spearman": 0.584915598378553,
+        "alpha": 10000.0,
+        "val_spearman": 0.6327542324690217,
+        "layers": [
+          [
+            "TBG",
+            22
+          ],
+          [
+            "SLT",
+            15
+          ]
+        ]
+      }
+    },
+    "note": "ridge fields need FULL target access (fit on the target's own hidden states) -- CONTEXT ONLY, not a fair opponent for the zero-access proxy."
+  },
+  "Mistral-7B-Instruct-v0.2": {
+    "n": 1000,
+    "spearman_vs_se": {
+      "true_se": 1.0,
+      "sep": 0.548499439048831,
+      "ridge_same_as_sep_CONTEXT_ONLY": 0.6322504818552885,
+      "ridge_reference_ceiling_CONTEXT_ONLY": 0.6466505460766916,
+      "proxy": 0.6336413218340419
+    },
+    "auroc_vs_incorrect": {
+      "true_se": 0.7466121449172297,
+      "sep": 0.713550103380612,
+      "proxy": 0.7463465599058818
+    },
+    "sep_detail": {
+      "position": "TBG",
+      "layer": 31,
+      "selection": "E41 fixed TBG:31",
+      "n": 1000,
+      "incorrect_rate": 0.351,
+      "spearman_vs_se": 0.548499439048831,
+      "auroc_vs_se": 0.8341291013202385,
+      "auroc_vs_incorrect": 0.713550103380612
+    },
+    "ridge_detail_CONTEXT_ONLY": {
+      "same_as_sep": {
+        "spearman": 0.6322504818552885,
+        "alpha": 10000.0,
+        "val_spearman": 0.6441458920787324,
+        "layer": [
+          "TBG",
+          31
+        ]
+      },
+      "reference_ceiling": {
+        "spearman": 0.6466505460766916,
+        "alpha": 10000.0,
+        "val_spearman": 0.65202413665893,
+        "layers": [
+          [
+            "TBG",
+            31
+          ],
+          [
+            "SLT",
+            20
+          ]
+        ]
+      }
+    },
+    "note": "ridge fields need FULL target access (fit on the target's own hidden states) -- CONTEXT ONLY, not a fair opponent for the zero-access proxy."
+  }
+}

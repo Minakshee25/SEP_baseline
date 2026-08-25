@@ -529,6 +529,48 @@
       "verdict": "proxy>SEP"
     },
     {
+      "setting": "lolo_squad",
+      "target": "Llama-2",
+      "sep_rho": 0.2364007197666684,
+      "ens_rho": 0.6157913850964287,
+      "delta_rho": 0.3784920418596418,
+      "rho_ci": [
+        0.3177908397908399,
+        0.44058099528099526
+      ],
+      "rho_ci_excludes_zero": true,
+      "sep_auc": 0.62164356054942,
+      "ens_auc": 0.8076246626649293,
+      "delta_auc": 0.1860710516077486,
+      "auc_ci": [
+        0.13890068834270777,
+        0.232933898137812
+      ],
+      "auc_ci_excludes_zero": true,
+      "verdict": "proxy>SEP"
+    },
+    {
+      "setting": "lolo_squad",
+      "target": "Mistral",
+      "sep_rho": 0.42542961644973404,
+      "ens_rho": 0.5481278720257704,
+      "delta_rho": 0.12270883000843,
+      "rho_ci": [
+        0.06935447255447251,
+        0.1755416283416283
+      ],
+      "rho_ci_excludes_zero": true,
+      "sep_auc": 0.6860010041193086,
+      "ens_auc": 0.7787792086813978,
+      "delta_auc": 0.09327766439026272,
+      "auc_ci": [
+        0.050096931087043314,
+        0.13712820422561217
+      ],
+      "auc_ci_excludes_zero": true,
+      "verdict": "proxy>SEP"
+    },
+    {
       "setting": "fresh",
       "target": "Llama-2",
       "sep_rho": 0.5231100960697028,
@@ -1701,6 +1743,208 @@
       "bootstrap_resamples": 10000,
       "target": "gemma-2-9b-it",
       "proxy_provenance": "DEPLOY proxy (all-4-pooled, Llama-2/Mistral/Llama-3/DeepSeek only) -> zero-shot Qwen/Gemma"
+    }
+  },
+  "lolo_squad": {
+    "Llama-2": {
+      "n": 1000,
+      "n_valid_se_binary": 1000,
+      "sep_choice": [
+        "TBG",
+        30
+      ],
+      "sep_selection": "E41 fixed TBG:30",
+      "metrics": {
+        "sep": {
+          "spearman": 0.2364007197666684,
+          "auroc_se": 0.62164356054942
+        },
+        "proxy_ensemble": {
+          "spearman": 0.6157913850964287,
+          "auroc_se": 0.8076246626649293
+        },
+        "proxy_seed0": {
+          "spearman": 0.5508867898550662,
+          "auroc_se": 0.7771701592862383
+        },
+        "proxy_seed1": {
+          "spearman": 0.6031066954603433,
+          "auroc_se": 0.8064426548181061
+        },
+        "proxy_seed2": {
+          "spearman": 0.5826023483401959,
+          "auroc_se": 0.7892323357471928
+        }
+      },
+      "bootstrap_vs_sep": {
+        "proxy_ensemble": {
+          "spearman_delta": {
+            "mean": 0.3784920418596418,
+            "lo95": 0.3177908397908399,
+            "hi95": 0.44058099528099526,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          },
+          "auroc_se_delta": {
+            "mean": 0.1860710516077486,
+            "lo95": 0.13890068834270777,
+            "hi95": 0.232933898137812,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          }
+        },
+        "proxy_seed0": {
+          "spearman_delta": {
+            "mean": 0.31373112390072394,
+            "lo95": 0.25180293490293487,
+            "hi95": 0.37717690357690353,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          },
+          "auroc_se_delta": {
+            "mean": 0.15563643691045592,
+            "lo95": 0.10605008437006129,
+            "hi95": 0.2049677052386313,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          }
+        },
+        "proxy_seed1": {
+          "spearman_delta": {
+            "mean": 0.36580801243321237,
+            "lo95": 0.3032808161808162,
+            "hi95": 0.4303476898476898,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          },
+          "auroc_se_delta": {
+            "mean": 0.18485619706032572,
+            "lo95": 0.13668291985359318,
+            "hi95": 0.23277692117793822,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          }
+        },
+        "proxy_seed2": {
+          "spearman_delta": {
+            "mean": 0.34538895520455515,
+            "lo95": 0.281917496017496,
+            "hi95": 0.4090446652446652,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          },
+          "auroc_se_delta": {
+            "mean": 0.16770362162474836,
+            "lo95": 0.11822509150174752,
+            "hi95": 0.21710115718105963,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          }
+        }
+      },
+      "bootstrap_resamples": 10000,
+      "target": "Llama-2",
+      "proxy_provenance": "E37/E43 LOLO q_resp_only (trained on the OTHER 3 models' trivia_qa, never this target's data OR squad) -> squad OOD"
+    },
+    "Mistral": {
+      "n": 1000,
+      "n_valid_se_binary": 1000,
+      "sep_choice": [
+        "TBG",
+        31
+      ],
+      "sep_selection": "E41 fixed TBG:31",
+      "metrics": {
+        "sep": {
+          "spearman": 0.42542961644973404,
+          "auroc_se": 0.6860010041193086
+        },
+        "proxy_ensemble": {
+          "spearman": 0.5481278720257704,
+          "auroc_se": 0.7787792086813978
+        },
+        "proxy_seed0": {
+          "spearman": 0.4621871817516676,
+          "auroc_se": 0.7335393995850447
+        },
+        "proxy_seed1": {
+          "spearman": 0.5659084968962514,
+          "auroc_se": 0.800845637827473
+        },
+        "proxy_seed2": {
+          "spearman": 0.45642990446881204,
+          "auroc_se": 0.7273271674762126
+        }
+      },
+      "bootstrap_vs_sep": {
+        "proxy_ensemble": {
+          "spearman_delta": {
+            "mean": 0.12270883000843,
+            "lo95": 0.06935447255447251,
+            "hi95": 0.1755416283416283,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          },
+          "auroc_se_delta": {
+            "mean": 0.09327766439026272,
+            "lo95": 0.050096931087043314,
+            "hi95": 0.13712820422561217,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          }
+        },
+        "proxy_seed0": {
+          "spearman_delta": {
+            "mean": 0.03707728887088887,
+            "lo95": -0.022849861549861593,
+            "hi95": 0.09618417588417591,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": false
+          },
+          "auroc_se_delta": {
+            "mean": 0.048078126252512454,
+            "lo95": 0.0014045944223042548,
+            "hi95": 0.0958253825405435,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          }
+        },
+        "proxy_seed1": {
+          "spearman_delta": {
+            "mean": 0.14044662460182458,
+            "lo95": 0.08647709737709738,
+            "hi95": 0.19398971388971392,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          },
+          "auroc_se_delta": {
+            "mean": 0.1152571863264764,
+            "lo95": 0.07214407667313069,
+            "hi95": 0.15786728644662532,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": true
+          }
+        },
+        "proxy_seed2": {
+          "spearman_delta": {
+            "mean": 0.031242444451644452,
+            "lo95": -0.02582082422082421,
+            "hi95": 0.08817813417813418,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": false
+          },
+          "auroc_se_delta": {
+            "mean": 0.04181212623091267,
+            "lo95": -0.0026493198131998766,
+            "hi95": 0.08719891310268313,
+            "n_valid_resamples": 10000,
+            "ci_excludes_zero": false
+          }
+        }
+      },
+      "bootstrap_resamples": 10000,
+      "target": "Mistral",
+      "proxy_provenance": "E37/E43 LOLO q_resp_only (trained on the OTHER 3 models' trivia_qa, never this target's data OR squad) -> squad OOD"
     }
   }
 }

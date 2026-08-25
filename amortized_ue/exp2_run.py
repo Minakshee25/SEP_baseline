@@ -169,8 +169,20 @@ def ridge_on_z(train, val, tgt):
 # ---- proxy training (arms) ----------------------------------------------------
 def train_arm(train, val, tgt, arm, seeds, cfg, model, torch, nn, sched_fn,
               tokenize, uses_z, ckpt_dir=None, tag=""):
-    """Train ProxyModel on one arm; return {'te_pred_by_seed': [...], 'te_spearman': [...]}."""
+    """Train ProxyModel on one arm; return {'te_pred_by_seed': [...], 'te_spearman': [...]}.
+
+    Reads `cfg.grad_accum` (default 1, Stage2Config's own default) to accumulate gradients
+    over that many `cfg.batch_size` micro-batches before each optimizer step -- lets a memory-
+    constrained micro-batch reproduce a larger EFFECTIVE batch's gradient exactly (no batchnorm
+    anywhere in ProxyModel, only LayerNorm, so the equivalence is exact, not approximate). At
+    the default grad_accum=1 every micro-batch IS an optimizer step, byte-identical to the
+    pre-grad-accum code path (verified: same zero_grad/backward/clip/step order per batch).
+    Automatically captured in checkpoint provenance via the existing `cfg.as_dict()` -- no new
+    plumbing needed. steps_log is logged at OPTIMIZER-step granularity (one entry per gradient
+    update, so lr/grad_norm are meaningful at that point), matching pre-existing semantics.
+    """
     dev = next(model.parameters()).device
+    grad_accum = max(1, int(getattr(cfg, "grad_accum", 1)))
 
     def zt(d):
         return torch.from_numpy(d["z"]).float().unsqueeze(1)          # [n,1,H]
@@ -203,7 +215,8 @@ def train_arm(train, val, tgt, arm, seeds, cfg, model, torch, nn, sched_fn,
         model.reinit_trainable()
         params = [p for p in model.parameters() if p.requires_grad]
         opt = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.weight_decay)
-        spe = max(1, int(np.ceil(len(ytr) / cfg.batch_size)))
+        eff_batch = cfg.batch_size * grad_accum
+        spe = max(1, int(np.ceil(len(ytr) / eff_batch)))       # scheduler counted in OPTIMIZER steps
         sched = sched_fn(opt, int(cfg.warmup_ratio * spe * cfg.epochs), spe * cfg.epochs)
         loss_fn = nn.MSELoss()
         best_val, best_state, best_epoch, patience = float("inf"), None, 0, 0
@@ -216,16 +229,21 @@ def train_arm(train, val, tgt, arm, seeds, cfg, model, torch, nn, sched_fn,
             model.train()
             order = rng.permutation(len(ytr))
             ep_losses = []
+            opt.zero_grad()
+            n_micro = 0
             for i in range(0, len(order), cfg.batch_size):
                 rows = order[i:i + cfg.batch_size].tolist()
                 pred = batch_forward(rows, train, ztr)
                 loss = loss_fn(pred, ytr[rows].to(dev))
-                opt.zero_grad(); loss.backward()
-                gn = torch.nn.utils.clip_grad_norm_(params, cfg.grad_clip)   # returns pre-clip total norm
-                opt.step(); sched.step()
-                lr = float(sched.get_last_lr()[0])
-                steps_log.append({"step": gstep, "loss": float(loss.item()), "lr": lr, "grad_norm": float(gn)})
-                ep_losses.append(float(loss.item())); gstep += 1
+                (loss / grad_accum).backward()                 # scale so accumulated grad == eff_batch's
+                ep_losses.append(float(loss.item())); n_micro += 1
+                at_boundary = (n_micro % grad_accum == 0) or (i + cfg.batch_size >= len(order))
+                if at_boundary:
+                    gn = torch.nn.utils.clip_grad_norm_(params, cfg.grad_clip)   # returns pre-clip total norm
+                    opt.step(); sched.step(); opt.zero_grad()
+                    lr = float(sched.get_last_lr()[0])
+                    steps_log.append({"step": gstep, "loss": float(loss.item()), "lr": lr, "grad_norm": float(gn)})
+                    gstep += 1
             val_pred = predict(val, zva)                       # reused for both val_mse and val_spearman
             vm = float(((val_pred - yva) ** 2).mean())
             vsp = rho(val_pred.numpy(), val["y"])

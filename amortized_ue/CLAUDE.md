@@ -157,7 +157,62 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (updated 2026-08-23)
+## Current state (updated 2026-08-25)
+
+**⭐ E53 (2026-08-25) — reverse-E45: a proxy trained ONLY on the 4 Qwen/Gemma small-tier models,
+zero-shot on Llama-2/Mistral — beats SEP on both metrics, ties true SE on correctness, never saw
+either target.** E45 went original-4 → Qwen/Gemma; this is the reverse direction. Pooled
+`q_resp_only` (text only, deploy-style, no held-out) from Qwen3-8B/Qwen3.5-9B/gemma-7b-it/
+gemma-2-9b-it's n2000 train/val, trained ONE proxy, scored zero-shot on Llama-2 + Mistral's fresh
+n1000 (zero exposure to either target in any form). **Result:** proxy beats SEP on SE-fidelity
+(Spearman 0.632/0.634 vs SEP 0.523/0.548) and correctness (AUROC_inc 0.748/0.746 vs SEP
+0.681/0.714) on both targets, and is **statistically on par with true 10-sample SE on correctness**
+on both (Δ vs true SE: −0.013/−0.000, both CIs include 0) — stronger than E45's own direction (1/4
+targets there lost to true SE). **Ridge context (full-access ceiling, NOT a fair opponent — cannot
+run zero-shot by construction):** the zero-access proxy's Spearman (0.632) actually **exceeds**
+Llama-2's own ridge ceiling (0.585) and ties Mistral's (0.634 vs 0.632/0.647) — the access-vs-no-
+access gap is smaller than expected, not proof the proxy beats ridge in general (E8-E10's "ridge >
+3B proxy given full access" stands). **Two infra fixes along the way, both real:** (1) batch_size=32
+(the established recipe) OOM'd — Qwen3.5-9B's `<think>` traces occasionally hit the full
+`max_seq_len=256`, and a T=256, B=32 forward pass needs far more memory than any prior `q_resp_only`
+run ever actually processed. Fixed with **gradient accumulation** (added to `exp2_run.train_arm` via
+`cfg.grad_accum`, additive, byte-identical at the default) rather than just training at a smaller
+batch and hoping it's equivalent — mathematically exact reproduction of the batch=32 recipe (no
+batchnorm in `ProxyModel`), verified on a toy model to float32 precision. (2) A co-tenant raced into
+`build_bigtier_n2000_gpu0_resume.sh`'s unfenced "poll-then-launch" loop mid-load and OOM'd it —
+patched with `gpu_reserve.py` fencing (a tool this project already built after an earlier, identical
+failure mode, but this script had never adopted it) + restored the dropped `Qwen3.5-27B` to the
+queue. **Also built (after the SEP-Spearman numbers were correctly challenged as looking low): a
+canonical, non-hand-typed SEP reference** — `build_sep_reference.py` → `results/sep_reference_values.json`
+(8 targets × 3 settings, extracted from `se_fidelity_proxy_vs_sep.json`). The "too low" concern
+resolved to a metric mismatch, not a bug: SEP is a single-layer LOGISTIC classifier (AUROC-native);
+its Spearman is a repurposed use of a classifier probability against a full continuous-ranking
+question it was never optimized for — mechanically why it reads lower than `ridge` (a proper
+regressor for the same task). Independently re-verified from scratch (CPU-only `compute_sep`),
+matched to 4 dp. `e53_full_comparison.py` consolidates true SE / SEP / ridge-context / proxy (both
+metrics, both targets) into ONE file, replacing what were briefly three separate scripts/outputs.
+Full arc: EXPERIMENTS.md E53. Artifacts: `e53_{train_qwengemma_deploy,eval_on_llama2_mistral,
+full_comparison}.py`, `build_sep_reference.py`, `results/{e53_*,sep_reference_values}.json`,
+`stage2/runs/E53_qwengemma_deploy_qresp/checkpoints/`.
+
+**E52 (2026-08-24) — the LOLO proxy (zero exposure to this target) tested on squad OOD, closing
+the one setting/target combination E51 left untested.** E51 had `lolo` (LOLO proxy, but only ever
+on trivia_qa) and `squad` (squad OOD, but with the DEPLOY proxy, which includes the target in its
+training pool). Never combined: LOLO proxy × squad — simultaneously cross-LLM (never this target)
+and cross-dataset (never squad), the hardest transfer regime available. New `lolo_squad` setting in
+`se_fidelity_proxy_vs_sep.py` (+ `arm_preds_per_seed_prefixed` helper, needed because the LOLO
+checkpoint dir holds all 4 folds' files together and the existing glob would silently mix targets).
+Llama-2 + Mistral only (the 2 targets with squad records), reusing the E37/E43 LOLO checkpoints and
+the E41 fixed-layer SEP recipe, no retraining. **Result: proxy beats SEP on both metrics, both
+targets, every CI excludes 0** — Llama-2 Δρ **+0.378** [+0.32,+0.44] (the largest single delta
+recorded anywhere in E51/E52), Mistral Δρ **+0.123** [+0.07,+0.18] (smaller than DEPLOY's squad row,
++0.168, consistent with E42's "in-pool data narrows the shift penalty" but not a controlled
+ablation of that). Per-seed spread is the widest seen in the project (least-informed regime).
+Paused/resumed a live GPU1 Stage-1 build (`Qwen3.6-27B`, SIGTERM+relaunch, confirmed resumed from
+498→499 records) to get GPU access, with explicit user go-ahead — same pattern as E51's infra note.
+Full arc: EXPERIMENTS.md E52. Artifacts: `se_fidelity_proxy_vs_sep.py` (`lolo_squad` setting),
+`results/se_fidelity_proxy_vs_sep.json`, `logs/lolo_squad_eval.log`,
+`build_bigtier_n2000_gpu1_resume_qwen36.sh`.
 
 **⭐ E51 (2026-08-23) — the direct proxy-vs-SEP SE-fidelity head-to-head, across every regime
 built so far: proxy wins.** No prior script had put `q_resp_only` and SEP side-by-side against the

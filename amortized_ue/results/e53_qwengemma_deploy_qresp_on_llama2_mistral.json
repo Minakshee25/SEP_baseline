@@ -1,0 +1,133 @@
+{
+  "ckpt_dir": "/vol/bitbucket/mn1025/individual_project/semantic-entropy-probes/amortized_ue/stage2/runs/E53_qwengemma_deploy_qresp/checkpoints",
+  "data_dir": "/data2/mn1025/stage1",
+  "train_models": [
+    "Qwen3-8B",
+    "Qwen3.5-9B",
+    "gemma-7b-it",
+    "gemma-2-9b-it"
+  ],
+  "arm": "q_resp_only",
+  "results": {
+    "Llama-2-7b-chat": {
+      "target": "Llama-2-7b-chat",
+      "n_test": 1000,
+      "mean_accuracy": 0.609,
+      "positive_rate_incorrect": 0.391,
+      "spearman_proxy_vs_true_se": 0.6320151705040068,
+      "metrics": {
+        "true_semantic_entropy": {
+          "auroc_incorrect": 0.7603362184453992,
+          "auprc_incorrect": 0.6752983651713168,
+          "prr": 0.5177939650152936,
+          "accuracy_coverage": {
+            "1.0": 0.609,
+            "0.9": 0.6611111111111111,
+            "0.75": 0.728,
+            "0.5": 0.79
+          }
+        },
+        "proxy_q_resp_only": {
+          "auroc_incorrect": 0.7476303864874285,
+          "auprc_incorrect": 0.6571950787001566,
+          "prr": 0.5429794595202047,
+          "accuracy_coverage": {
+            "1.0": 0.609,
+            "0.9": 0.6533333333333333,
+            "0.75": 0.7066666666666667,
+            "0.5": 0.796
+          }
+        },
+        "random": {
+          "auroc_incorrect": 0.5133273699284812,
+          "auprc_incorrect": 0.4018621364938649,
+          "prr": -0.03682838226736973,
+          "accuracy_coverage": {
+            "1.0": 0.609,
+            "0.9": 0.6111111111111112,
+            "0.75": 0.608,
+            "0.5": 0.626
+          }
+        }
+      },
+      "bootstrap_deltas": {
+        "proxy_minus_true_semantic_entropy": {
+          "mean": -0.012507524083726872,
+          "lo95": -0.04055725342716699,
+          "hi95": 0.015500045756415101,
+          "n_valid_resamples": 10000
+        },
+        "proxy_minus_random": {
+          "mean": 0.2342595290200663,
+          "lo95": 0.18713535100100612,
+          "hi95": 0.2810474888651317,
+          "n_valid_resamples": 10000
+        }
+      },
+      "frozen_sep_fresh_trivia_e51": {
+        "spearman": 0.5231100960697028,
+        "auroc_se": 0.7794958923912276
+      }
+    },
+    "Mistral-7B-Instruct-v0.2": {
+      "target": "Mistral-7B-Instruct-v0.2",
+      "n_test": 1000,
+      "mean_accuracy": 0.649,
+      "positive_rate_incorrect": 0.351,
+      "spearman_proxy_vs_true_se": 0.6336413218340419,
+      "metrics": {
+        "true_semantic_entropy": {
+          "auroc_incorrect": 0.7466121449172297,
+          "auprc_incorrect": 0.6501887165652097,
+          "prr": 0.5295885925024788,
+          "accuracy_coverage": {
+            "1.0": 0.649,
+            "0.9": 0.7066666666666667,
+            "0.75": 0.764,
+            "0.5": 0.816
+          }
+        },
+        "proxy_q_resp_only": {
+          "auroc_incorrect": 0.7463465599058818,
+          "auprc_incorrect": 0.6466122223575088,
+          "prr": 0.5291542904244525,
+          "accuracy_coverage": {
+            "1.0": 0.649,
+            "0.9": 0.6966666666666667,
+            "0.75": 0.7506666666666667,
+            "0.5": 0.814
+          }
+        },
+        "random": {
+          "auroc_incorrect": 0.49816724392995576,
+          "auprc_incorrect": 0.35502680076714765,
+          "prr": -0.03213734924696033,
+          "accuracy_coverage": {
+            "1.0": 0.649,
+            "0.9": 0.6522222222222223,
+            "0.75": 0.6493333333333333,
+            "0.5": 0.64
+          }
+        }
+      },
+      "bootstrap_deltas": {
+        "proxy_minus_true_semantic_entropy": {
+          "mean": -4.5869510607766095e-05,
+          "lo95": -0.028512701453182857,
+          "hi95": 0.02793581640928006,
+          "n_valid_resamples": 10000
+        },
+        "proxy_minus_random": {
+          "mean": 0.24835061934511474,
+          "lo95": 0.19942325807668948,
+          "hi95": 0.2973544088651809,
+          "n_valid_resamples": 10000
+        }
+      },
+      "frozen_sep_fresh_trivia_e51": {
+        "spearman": 0.548499439048831,
+        "auroc_se": 0.8341291013202385
+      }
+    }
+  }
+}
