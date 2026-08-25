@@ -2944,3 +2944,109 @@ e53_full_comparison,sep_reference_values}.json`,
 `amortized_ue/exp2_run.py` (`train_arm` gains grad-accum support via `cfg.grad_accum`, byte-identical
 at the default). Patched `amortized_ue/build_bigtier_n2000_gpu0_resume.sh` (adds `gpu_reserve.py`
 fencing + restores the dropped `Qwen3.5-27B`).
+
+---
+
+## E54 — the TRUE LOLO proxy's correctness (not just SE-fidelity) on squad OOD, the last gap in the {model-seen/unseen} × {trivia/squad} × {SE-fidelity/correctness} cube — ✅ still beats SEP and ridge, real (not "on par") gap to true SE
+
+**Why.** Two prior experiments each covered half of this cell. **E39** ran the squad *correctness*
+eval (`incorrect`, not SE) but had to substitute the **DEPLOY** proxy (all-4-pooled, target's own
+trivia data WAS in its training pool) because at the time E37's leave-one-LLM-out run had saved no
+checkpoints. **E52** later scored the **TRUE LOLO** proxy (checkpoints now exist:
+`stage2/runs/E37_LOLO_ckpt/checkpoints/`, trained on the *other* 3 targets, zero exposure to this
+target's data OR to squad) on squad — but only against the continuous SE label, never against
+actual wrong answers. User asked directly for the missing combination: true LOLO proxy, scored on
+squad, against correctness. Only Llama-2 and Mistral have squad records, so this is a 2-target study
+(same limitation as E39/E52).
+
+**Method (additive, new script `amortized_ue/correctness_eval_lolo_squad.py`).** Trains nothing;
+reuses `se_fidelity_proxy_vs_sep.{compute_sep, arm_preds_per_seed_prefixed}` for the SEP fit (E41
+fixed layer) and the LOLO `q_resp_only` forward pass (3 seeds, `E37_LOLO_ckpt` checkpoints), and
+`correctness_eval.{load_accuracy, accuracy_coverage, prediction_rejection_ratio,
+paired_bootstrap_auc, ci}` for the correctness scoring — the same recipe `correctness_eval_ood.py`
+already used for the DEPLOY/REFERENCE proxies, applied here to the true LOLO one. SEP + true SE +
+LOLO predictions are id-joined (never positional) onto the same squad n1000 rows; paired bootstrap
+(10,000 resamples, shared indices) gives a 95% CI on (LOLO − SEP) and (LOLO − true SE).
+
+**⚠️ Infra: got stuck on NFS twice while launching this, both traced and fixed.**
+1. First launch forgot `--trivia_dir /data2/mn1025/stage1` (a rule already in memory from
+   [[use-data2-not-nfs]]) — the process sat in kernel disk-wait (`STAT=D`,
+   `wchan=folio_wait_bit_common`) reading Mistral's n2000 trivia hidden states off NFS for 5+
+   minutes before being caught (Llama-2's block had already finished and saved correctly by then).
+   Killed and relaunched with the flag.
+2. Second launch (with `--trivia_dir` correctly passed) stalled the **same way** on **squad**
+   records instead — squad had never been staged on `/data2` at all (trivia-only, a known
+   limitation — see [[use-data2-not-nfs]]). Verified NFS was genuinely in one of its documented
+   degraded windows at the time (a plain `cat` of the squad `.pt` files itself timed out at 30s).
+   **Fix, at the user's explicit request to "make the copy fast, keep it parallel":** parallel
+   per-file copy (`find ... -print0 | xargs -0 -P 32 -I{} cp -n {} ...`, both models' 1000-record
+   squad dirs copied concurrently) — completed in **under 15 seconds**, because NFS's bulk-read
+   stall is a latency problem for large sequential reads, not a bandwidth ceiling; many small
+   parallel requests route around it. `squad_n1000_full` for Llama-2 and Mistral now permanently
+   live on `/data2/mn1025/stage1/` alongside trivia — **this closes the trivia-only limitation
+   [[use-data2-not-nfs]] flagged**, at least for these two models. The script itself was updated to
+   route `eval_data_dir`/`load_accuracy`'s `output_dir`/`arm_preds_per_seed_prefixed`'s `data_dir`
+   through the same `--trivia_dir` override for squad too, not just trivia. Re-ran cleanly end to
+   end afterward (whole 2-target run <2 min). **Memory updated** ([[use-data2-not-nfs]]) with a
+   mandatory pre-launch habit (grep the script for a data-dir flag and pass it every time; check
+   `ps -o stat,wchan` within 30-60s of a silent launch) so this specific mistake doesn't recur.
+
+**Audit before trusting the numbers:** the rerun's SE-fidelity side (`auroc_binarised_se`/
+`spearman_se`, computed as a byproduct of scoring the same LOLO predictions) reproduces E52's saved
+values **exactly** — Llama-2 ρ 0.616 / AUROC_SE 0.808, Mistral ρ 0.548 / AUROC_SE 0.779 — confirming
+the forward pass, id-join, and SEP fit are unchanged from the already-verified E52 pipeline; only the
+scoring target (`incorrect` vs SE) is new.
+
+**Result (AUROC_incorrect, N=1000 squad questions per target):**
+
+| target | true SE | SEP (E41 fixed layer) | ridge_z† | **LOLO `q_resp_only`** | DEPLOY `q_resp_only`† |
+|---|---|---|---|---|---|
+| Llama-2 | 0.784 | 0.621 | 0.641 | **0.729** | 0.716 |
+| Mistral | 0.774 | 0.669 | 0.703 | **0.735** | 0.763 |
+
+† ridge_z and DEPLOY are reported for context from the existing E39/E41-corrected results (not
+recomputed here) — DEPLOY's target model WAS in its training pool, so it is not a true LOLO
+comparison; ridge is a full-access baseline, also not label-free/LOLO on the target.
+
+**Paired bootstrap, Δ AUROC_incorrect (B=10000):**
+
+| target | LOLO vs SEP | LOLO vs true SE |
+|---|---|---|
+| Llama-2 | **+0.108** [+0.061, +0.154] (excludes 0) | **−0.055** [−0.087, −0.022] (excludes 0) |
+| Mistral | **+0.066** [+0.026, +0.108] (excludes 0) | −0.039 [−0.077, −0.002] (excludes 0, barely) |
+
+Per-seed LOLO AUROC_incorrect: Llama-2 [0.713, 0.719, 0.713] (tight); Mistral [0.703, 0.749, 0.688]
+(wider spread — only 1 of 3 individual seeds beats SEP significantly, though the 3-seed ensemble
+does).
+
+**Findings.**
+1. **The true LOLO proxy beats both SEP and ridge at catching wrong answers on both targets, under
+   the hardest combined shift tested anywhere in the project** (never saw this target's hidden
+   states/text/labels in training, never saw squad either) — extending E52's SE-fidelity result to
+   the correctness target, closing the last open cell of the {model-seen, model-unseen} ×
+   {trivia, squad} × {SE-fidelity, correctness} cube for the 2 targets with squad data.
+2. **Unlike E38's in-distribution result, the gap to true 10-sample SE here is REAL, not "on par."**
+   Both CIs exclude 0 (Llama-2 comfortably, Mistral by a hair) — this matches E39's general OOD
+   finding that amortization degrades under dataset shift while sampling stays robust, now confirmed
+   for the true LOLO proxy specifically rather than only the DEPLOY/REFERENCE stand-ins E39 had to
+   use.
+3. **Llama-2's LOLO number (0.729) nominally edges out DEPLOY's (0.716)** despite having strictly
+   less information (zero Llama-2 data anywhere in training) — the same noise pattern E52 flagged
+   for the SE-fidelity metric on this exact target/setting. **Not evidence that excluding the
+   target's data helps**; read as noise on one N=1000 draw, consistent with E52's caveat.
+4. **Mistral's LOLO number (0.735) sits below DEPLOY's (0.763)**, in the direction E42/E52 would
+   predict (in-pool data narrows the dataset-shift penalty) — again one comparison, not a controlled
+   ablation.
+
+**Caveats.** Only 2 targets have squad records (Llama-2, Mistral) — DeepSeek/Llama-3 remain
+untestable here without a new squad build. N=1000 (same power as E39/E51/E52's squad rows). No
+`sep_single_best_layer`/`sep_5layer_concat`/`ridge_z` bootstrap computed fresh in this script (only
+`sep_single_e36_layer` and `true_semantic_entropy` — the two established bases); the ridge_z/DEPLOY
+columns in the table above are read from the existing E41-corrected results, not recomputed, so no
+CI is reported for LOLO-vs-ridge or LOLO-vs-DEPLOY specifically.
+
+**Artifacts.** `amortized_ue/correctness_eval_lolo_squad.py`,
+`amortized_ue/results/correctness_eval_lolo_squad.json`,
+`amortized_ue/logs/correctness_eval_lolo_squad.log`. `/data2/mn1025/stage1/{Llama-2-7b-chat,
+Mistral-7B-Instruct-v0.2}_squad_n1000_full/` (new local copies, 1000/1000 records + manifest each,
+verified against the NFS originals by record count).

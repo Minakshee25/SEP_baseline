@@ -159,6 +159,26 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 
 ## Current state (updated 2026-08-25)
 
+**E54 (2026-08-25) — the TRUE LOLO proxy's CORRECTNESS (not just SE-fidelity) on squad OOD, the
+last open cell of {model-seen/unseen} × {trivia/squad} × {SE-fidelity/correctness} for the 2
+targets with squad data.** E39 ran squad correctness but had to substitute the DEPLOY proxy
+(target's own trivia data WAS in its pool) since E37's LOLO run had no checkpoints yet; E52 later
+scored the true LOLO proxy (checkpoints now exist) on squad but only against SE, never
+`incorrect`. New additive script `correctness_eval_lolo_squad.py` closes it: same LOLO
+`q_resp_only` checkpoints (trained on the OTHER 3 targets, zero exposure to this target OR squad),
+scored against actual wrong answers. **Result: LOLO still beats SEP and ridge on both targets**
+(AUROC_incorrect Llama-2 0.729 vs SEP 0.621/ridge 0.641, Δ vs SEP +0.108\*; Mistral 0.735 vs SEP
+0.669/ridge 0.703, Δ vs SEP +0.066\*) — but unlike E38's in-distribution result, **the gap to true
+10-sample SE here is real, not "on par"** (Δ −0.055\*/−0.039\*, both CIs exclude 0), matching E39's
+general OOD finding now confirmed for the true LOLO proxy specifically. **Infra: hit the same NFS
+stall twice while launching** (once from forgetting `--trivia_dir`, once because squad itself had
+never been staged off NFS) — fixed by parallel-copying both targets' squad n1000 records to
+`/data2` (`find | xargs -P32 cp`, <15s, vs a bulk read that itself timed out at 30s on the then-
+degraded NFS) at the user's explicit request; squad now has a local copy for these 2 models,
+closing part of [[use-data2-not-nfs]]'s trivia-only limitation. Full arc: EXPERIMENTS.md E54.
+Artifacts: `correctness_eval_lolo_squad.py`, `results/correctness_eval_lolo_squad.json`,
+`/data2/mn1025/stage1/{Llama-2-7b-chat,Mistral-7B-Instruct-v0.2}_squad_n1000_full/`.
+
 **⭐ E53 (2026-08-25) — reverse-E45: a proxy trained ONLY on the 4 Qwen/Gemma small-tier models,
 zero-shot on Llama-2/Mistral — beats SEP on both metrics, ties true SE on correctness, never saw
 either target.** E45 went original-4 → Qwen/Gemma; this is the reverse direction. Pooled
