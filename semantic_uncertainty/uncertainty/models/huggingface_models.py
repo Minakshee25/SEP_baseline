@@ -33,6 +33,24 @@ _LEADING_WHITESPACE_MODELS = ('Qwen3.8-27B', 'Qwen3.5-9B')
 # Stage1Config/CLI default (50) untouched -> byte-identical behavior.
 _EXTRA_TOKEN_BUDGET_MODELS = {'Qwen3.8-27B': 250, 'Qwen3.5-9B': 250}
 
+# blocks-execution (mn1025, 2026-08): every Qwen3(.5+) target is a hybrid reasoning model
+# that free-generates long, sometimes multi-paragraph <think> content even under the raw
+# few-shot completion prompting the SEP baseline uses (this pipeline never calls
+# apply_chat_template for any model, so Qwen's official enable_thinking=False switch --
+# which requires the chat template -- was never reached; the leading-whitespace/
+# tolerate_thinking fix above only cleans the STORED answer for the 2 models it covers,
+# it doesn't stop generation time being spent thinking, and doesn't cover Qwen3.5-27B/
+# Qwen3.6-27B/Qwen3-8B at all). Confirmed on Qwen3.8-27B: stalled at 65/1000 records over
+# >40h (amortized_ue/logs/Qwen3.8-27B_trivia_qa_n1000_resumeq35first.log). For models in
+# this tuple, predict() wraps input_data as a single chat turn via apply_chat_template(...,
+# enable_thinking=False), which prefixes the assistant turn with a pre-closed
+# '<think>\n\n</think>\n\n' so no reasoning tokens are generated at all. Off for every
+# other model (incl. every Gemma target, which has no chat-template think mechanism at
+# all -- checked offline against all 4 Gemma tokenizers before this change) ->
+# byte-identical behavior. Verified offline against each of these 5 tokenizers that
+# apply_chat_template accepts enable_thinking and its output differs from the default.
+_DISABLE_THINKING_MODELS = ('Qwen3-8B', 'Qwen3.5-9B', 'Qwen3.5-27B', 'Qwen3.6-27B', 'Qwen3.8-27B')
+
 
 class StoppingCriteriaSub(StoppingCriteria):
     """Stop generations when they match a particular text or token."""
@@ -318,6 +336,8 @@ class HuggingfaceModel(BaseModel):
         # blocks-execution (mn1025, 2026-08): see StoppingCriteriaSub.tolerate_thinking above.
         # Off (False) for every model not in this tuple -> byte-identical behavior.
         self.tolerate_thinking_for_stop = model_name in _LEADING_WHITESPACE_MODELS
+        # blocks-execution (mn1025, 2026-08): see _DISABLE_THINKING_MODELS above.
+        self.disable_thinking_via_chat_template = model_name in _DISABLE_THINKING_MODELS
         # blocks-execution (mn1025, 2026-08): with the think-tag-aware stop fix above, the
         # model can now run through a full reasoning block uninterrupted -- this is just a
         # safety ceiling on TOTAL generation length (reasoning + answer) so a pathological
@@ -333,6 +353,18 @@ class HuggingfaceModel(BaseModel):
         if isinstance(input_data, tuple):
             logging.WARNING("INPUT IS A TUPLE.")
             input_data = input_data[0]
+
+        if self.disable_thinking_via_chat_template:
+            # blocks-execution (mn1025, 2026-08): see _DISABLE_THINKING_MODELS above.
+            # Wraps the SEP baseline's few-shot text prompt as a single user turn so the
+            # tokenizer's enable_thinking=False switch actually applies; everything
+            # downstream keys off `input_data`, so reassigning it here is sufficient (the
+            # full_answer.startswith(input_data) check below already falls back to the
+            # token-boundary path for tokenizers that don't round-trip verbatim, same as
+            # Llama-3).
+            input_data = self.tokenizer.apply_chat_template(
+                [{'role': 'user', 'content': input_data}],
+                tokenize=False, add_generation_prompt=True, enable_thinking=False)
 
         inputs = self.tokenizer(input_data, return_tensors="pt").to("cuda")
 
@@ -371,8 +403,19 @@ class HuggingfaceModel(BaseModel):
                 'Generation exceeding token limit %d > %d',
                 len(outputs.sequences[0]), self.token_limit)
 
+        # blocks-execution (mn1025, 2026-08): for the _DISABLE_THINKING_MODELS chat-template
+        # path, input_data contains literal special-token text ('<|im_start|>' etc, since
+        # apply_chat_template(tokenize=False) returns a plain string). Decoding with the
+        # default skip_special_tokens=True strips those from full_answer but NOT from
+        # input_data, breaking every downstream token-count assumption below (full_answer no
+        # longer starts with input_data, and re-tokenizing a skip_special_tokens=True substring
+        # undercounts vs n_input_token by the number of special tokens in the prompt, which can
+        # drive n_generated negative -> hidden[n_generated-1] IndexError, confirmed live on
+        # Qwen3.5-9B/Qwen3.6-27B). Fix: decode with skip_special_tokens=False for exactly these
+        # models, verified offline to round-trip input_data exactly and keep re-tokenization
+        # counts consistent. Off (skip_special_tokens=True, unchanged) for every other model.
         full_answer = self.tokenizer.decode(
-            outputs.sequences[0], skip_special_tokens=True)
+            outputs.sequences[0], skip_special_tokens=not self.disable_thinking_via_chat_template)
 
         if return_full:
             return full_answer

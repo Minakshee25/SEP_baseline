@@ -3050,3 +3050,95 @@ CI is reported for LOLO-vs-ridge or LOLO-vs-DEPLOY specifically.
 `amortized_ue/logs/correctness_eval_lolo_squad.log`. `/data2/mn1025/stage1/{Llama-2-7b-chat,
 Mistral-7B-Instruct-v0.2}_squad_n1000_full/` (new local copies, 1000/1000 records + manifest each,
 verified against the NFS originals by record count).
+
+## E55 — data-generation status: DeepSeek/Llama-3 squad builds (done) + Qwen "nothink" regeneration across all 5 Qwen targets (🔄 in progress) — no experiment run yet, this is a data-readiness snapshot
+
+**Goal:** two data gaps opened by earlier sessions. (1) E39/E52/E54's squad correctness studies were
+stuck at 2 targets (Llama-2, Mistral) because DeepSeek and Llama-3 had never had a squad build at
+all. (2) Qwen3.8-27B was known to stall on `<think>` generation (E44: 65/1000 records over >40h) and
+Qwen3.5-9B's manifest history separately showed a ~5-6% "never finishes thinking" tail even after
+E44's `tolerate_thinking` stop-logic fix — both point at needing to disable thinking mode outright
+rather than just tolerating it.
+
+**Fix 1 — squad coverage.** `build_deepseek_llama3_squad_n1000.sh` ran `deepseek-llm-7b-chat` and
+`Meta-Llama-3-8B-Instruct` on squad, N=1000, no `--only_ids` (default `random_seed=10,
+num_few_shot=5` reproduces the exact question selection already used for the Llama-2/Mistral squad
+sets, so all 4 original targets now share the same squad questions). **Both done, 1000/1000
+records**, written straight to `/data2` (not staged via NFS copy, unlike E54's Llama-2/Mistral
+fix). Squad coverage is now: all 4 original targets (Llama-2, Mistral, DeepSeek, Llama-3) + the 4
+Qwen/Gemma small-tier models (Qwen3-8B, Qwen3.5-9B, gemma-7b-it, gemma-2-9b-it, built earlier under
+E44/E49) = **8 of 14 targets have squad_n1000**. Big-tier Qwen (27B) and gemma-2/3-27b remain
+trivia-only by design (matches E44's original scope, not extended here).
+
+**Fix 2 — disable Qwen thinking mode entirely.** New `_DISABLE_THINKING_MODELS` tuple in
+`huggingface_models.py` (`Qwen3-8B`, `Qwen3.5-9B`, `Qwen3.5-27B`, `Qwen3.6-27B`, `Qwen3.8-27B` — all
+5 Qwen targets; confirmed offline that no Gemma tokenizer has an equivalent switch, so Gemma is
+untouched). For these models only, `predict()` now wraps the raw few-shot prompt as a single chat
+turn via `apply_chat_template(..., enable_thinking=False)` before tokenizing — this pipeline never
+called `apply_chat_template` before, so Qwen's official thinking-disable switch had never actually
+been reached by E44's fix. A second bug surfaced immediately: the chat-template path returns a
+string containing literal special-token text, and decoding the *output* with the default
+`skip_special_tokens=True` (while `input_data` still has them) desyncs the token-count bookkeeping
+used to slice the generated continuation, driving `n_generated` negative → `IndexError` on
+`hidden[n_generated-1]` (confirmed live on Qwen3.5-9B and Qwen3.6-27B). Fixed by decoding with
+`skip_special_tokens=False` for exactly this model set. Both changes are additive and model-scoped
+— every other model's code path (including the `tolerate_thinking`/`_LEADING_WHITESPACE_MODELS`
+machinery from E44) is untouched.
+
+**Writes to NEW `_nothink`-suffixed run names** — none of E44-E49's existing `_full` dirs were
+touched or overwritten, so every already-published result (E44-E54) stays reproducible against
+what's still on disk under the old names.
+
+**Infra: dual-lane GPU0/GPU1 build with a shared work-stealing queue + a live fencing bug caught and
+fixed.** 12 builds total (5 Qwen models × up to 3 dataset variants each, small tier gets all 3 —
+trivia n1000/n2000 + squad n1000 — big tier gets the 2 trivia sizes only, matching E44's scope).
+Small-tier (Qwen3-8B, Qwen3.5-9B) run one per lane in parallel; the 6 big-tier 27B jobs
+(Qwen3.5/3.6/3.8-27B × {n1000,n2000}) live in one shared file that both lanes race to claim via
+atomic `mkdir` (exactly one caller wins per line), so whichever lane finishes small-tier first
+naturally absorbs more of the shared backlog instead of sitting idle. **Live bug (user-caught):**
+the first version of each lane script computed its GPU memory fence (`gpu_reserve.py` hold) *once*,
+before the small-tier phase even started; when free memory at that instant happened to be below the
+big-tier budget (as it was on GPU0 right after the squad job exited), the hold went negative and the
+`if HOLD > 512` guard silently skipped fencing for the **entire lane** — 20GB+ of genuinely free
+memory sat completely unprotected through all of small-tier. Fixed with per-phase dynamic
+re-fencing (`refence()`, resized whenever the job size changes small→big) in both lane scripts.
+`watchdog_lanes.sh` supervises both lanes across crashes (e.g. a neighbouring OOM), releasing a
+crashed job's `mkdir` claim (never auto-released on failure) from the lane's own log before letting
+either lane retry it — `stage1.py` itself skips already-completed records on disk, so a resumed job
+continues rather than restarting.
+
+**Status at the time this entry was written (2026-08-26, mid-build):**
+
+| Build | Status |
+|---|---|
+| DeepSeek + Llama-3, squad n1000 | ✅ done, 1000/1000 each |
+| Qwen3-8B, Qwen3.5-9B — trivia n1000/n2000 + squad n1000 (6 builds) | ✅ done, verified counts (1000/1000, 2000/2000, 1000/1000) |
+| Qwen3.5-27B — trivia n1000 | ✅ done, 1000/1000 |
+| Qwen3.5-27B — trivia n2000 | 🔄 running (lane A, GPU0), 360/2000 |
+| Qwen3.6-27B — trivia n1000 | 🔄 running (lane B, GPU1), 14/1000 |
+| Qwen3.6-27B trivia n2000, Qwen3.8-27B trivia n1000/n2000 | ⏳ queued (shared work-stealing queue) |
+
+**Caveats.** This entry documents infrastructure and in-progress data, not a result — no proxy has
+been trained or evaluated on any `_nothink` data yet. Record counts for the two running builds will
+have moved by the time this is read; check `ls .../records | wc -l` before citing. The lane/watchdog
+scripts (`lane_a_gpu0.sh`, `lane_b_gpu1.sh`, `watchdog_lanes.sh`, `resume_lane_a_tomorrow_noon.sh`,
+`build_qwen_nothink_regen.sh`, `build_deepseek_llama3_squad_n1000.sh`) are launched via `nohup ...
+& disown` and are designed to survive independently of any Claude Code session or SSH connection.
+
+**W&B: all datasets built so far auto-pushed, verified via the API** (Stage-1's `push_to_wandb`
+defaults `True`; none of these scripts pass `--no_push_to_wandb`). Every completed build above has a
+corresponding new version in `amortized_ue_stage1` under its existing `stage1_records_<model>_<dataset>_n<N>`
+collection name (the artifact name does not encode the `_nothink`/`_full` run-name suffix, so each
+regenerated dataset lands as a new version of the same collection, e.g.
+`stage1_records_Qwen3.5-9B_squad_n1000` v0→v2) — confirmed by listing versions and their
+`created_at`/`n_records` metadata directly from `wandb.Api()`, not from build logs. No manual push
+was needed.
+
+**Artifacts.** `amortized_ue/build_deepseek_llama3_squad_n1000.sh`, `build_qwen_nothink_regen.sh`,
+`lane_a_gpu0.sh`, `lane_b_gpu1.sh`, `watchdog_lanes.sh`, `resume_lane_a_tomorrow_noon.sh`. Code
+changes in `semantic_uncertainty/uncertainty/models/huggingface_models.py` (`_DISABLE_THINKING_MODELS`,
+both additive, see diff). New data under `/data2/mn1025/stage1/{deepseek-llm-7b-chat,
+Meta-Llama-3-8B-Instruct}_squad_n1000_full/` and `/data2/mn1025/stage1/*_nothink/` (per table above).
+Queue state: `/data2/mn1025/stage1_meta/nothink_bigtier_jobs.txt` +
+`nothink_bigtier_claims/`. Logs: `amortized_ue/logs/{lane_a,lane_b}_driver*.log`,
+`amortized_ue/logs/watchdog.log`, per-model `*_nothink.log`.

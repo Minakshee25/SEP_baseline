@@ -157,7 +157,30 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (updated 2026-08-25)
+## Current state (updated 2026-08-26)
+
+**🔄 E55 (2026-08-26, IN PROGRESS) — data-readiness, not a result: DeepSeek/Llama-3 squad builds
+(done) + a "nothink" regeneration of all 5 Qwen targets (running).** Two gaps closed/closing: (1)
+squad correctness studies (E39/E52/E54) were stuck at 2 targets — DeepSeek + Llama-3 now have
+`squad_n1000` too (1000/1000 each, same question selection as Llama-2/Mistral's), bringing squad
+coverage to 8/14 targets (4 original + Qwen3-8B/Qwen3.5-9B/gemma-7b-it/gemma-2-9b-it). (2) Qwen's
+`<think>` generation (E44's Qwen3.8-27B 65/1000-in-40h stall, Qwen3.5-9B's ~5-6% non-convergent
+tail) is now disabled outright via `_DISABLE_THINKING_MODELS` in `huggingface_models.py`
+(`apply_chat_template(..., enable_thinking=False)` — this pipeline never called
+`apply_chat_template` before, so E44's `tolerate_thinking` fix never actually reached Qwen's real
+switch) + a `skip_special_tokens=False` fix for the token-count desync that caused (confirmed live
+on Qwen3.5-9B/Qwen3.6-27B). Writes to new `_nothink`-suffixed dirs, old `_full` dirs untouched — all
+E44-E54 results stay reproducible. **Small tier (Qwen3-8B, Qwen3.5-9B) fully done** (trivia
+n1000/n2000 + squad n1000, 6/6 builds verified). **Big tier in progress** via a dual-GPU
+work-stealing queue (`lane_a_gpu0.sh`/`lane_b_gpu1.sh` + `watchdog_lanes.sh` for crash recovery) —
+Qwen3.5-27B trivia n1000 done, n2000 running; Qwen3.6-27B n1000 running; Qwen3.6-27B n2000 +
+Qwen3.8-27B n1000/n2000 still queued. **Live fencing bug caught+fixed:** a one-shot GPU-memory hold
+computed before the small-tier phase went negative when free memory dipped below the big-tier
+budget, silently skipping protection for the whole lane — fixed with per-phase dynamic re-fencing.
+**All completed builds already auto-pushed to W&B, verified via `wandb.Api()`** (`push_to_wandb`
+defaults `True`, none of these scripts opt out) — no manual push needed. Full arc + status table:
+EXPERIMENTS.md E55. **Do not cite `_nothink` numbers as final until the big-tier queue drains** —
+check record counts on disk before use.
 
 **E54 (2026-08-25) — the TRUE LOLO proxy's CORRECTNESS (not just SE-fidelity) on squad OOD, the
 last open cell of {model-seen/unseen} × {trivia/squad} × {SE-fidelity/correctness} for the 2
@@ -917,6 +940,12 @@ design for any such test. The multi-model ridge is now **saved** (it never had b
   pooling** (each Q to all sources → model-invariance signal) NOT the disjoint matched-partition, and
   anchor **TBG:30** (best→best); layers reconfirmed leak-free (Llama-2 TBG:30, Mistral/Llama-3 TBG:31,
   DeepSeek SLT:16 — E36).
+
+**Opened by E55 (new, untouched):** DeepSeek + Llama-3 now have squad_n1000 — E39/E52/E54's
+squad correctness studies could be extended from 2 targets (Llama-2, Mistral) to 4. Once the
+Qwen `_nothink` big-tier queue finishes, the whole Qwen/Gemma small-tier E45-E54 line could in
+principle be re-run on cleaner (non-thinking-contaminated) data — not yet decided whether the
+gain is worth the compute; ask before repointing any existing analysis at `_nothink` dirs.
 
 **Pending / carried over:**
 3. **(Partly done)** `amortized_ue/RESULTS.md` now holds the **four-model cross-LLM picture (E20–E30)**:
