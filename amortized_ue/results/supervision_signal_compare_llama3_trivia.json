@@ -1,0 +1,75 @@
+{
+  "model_name": "Meta-Llama-3-8B-Instruct",
+  "dataset": "trivia_qa",
+  "num_samples": 2000,
+  "n": 2000,
+  "run_dir": "/data2/mn1025/stage1/Meta-Llama-3-8B-Instruct_trivia_qa_n2000_full",
+  "acc_threshold": 0.5,
+  "acc_is_binary": true,
+  "incorrect_rate": 0.345,
+  "target": "incorrect (1 - canonical accuracy)",
+  "eval_set": "full n2000, no split",
+  "results": {
+    "SE": {
+      "auroc": 0.772859276468636,
+      "N": 2000,
+      "incorrect_rate": 0.345
+    },
+    "SE_binary": {
+      "auroc": 0.7089888261975883,
+      "N": 2000,
+      "incorrect_rate": 0.345
+    },
+    "n_clusters": {
+      "auroc": 0.7685485120035402,
+      "N": 2000,
+      "incorrect_rate": 0.345
+    },
+    "MC_sequence_entropy": {
+      "auroc": 0.7841376258435668,
+      "N": 2000,
+      "incorrect_rate": 0.345
+    },
+    "perplexity": {
+      "auroc": 0.5653844451819892,
+      "N": 2000,
+      "incorrect_rate": 0.345
+    }
+  },
+  "bootstrap": {
+    "method": "paired_bootstrap_auc (amortized_ue.correctness_eval); shared resample indices across all 5 signals; Mann-Whitney fast_auc",
+    "se_binary_threshold": 0.6977530585527411,
+    "n_resamples": 10000,
+    "seed": 0,
+    "deltas": {
+      "SE - SE_binary": {
+        "mean": 0.06389237854802604,
+        "lo95": 0.05103671113744429,
+        "hi95": 0.07712817490354301,
+        "n_valid_resamples": 10000,
+        "excludes_zero": true
+      },
+      "SE - n_clusters": {
+        "mean": 0.004301104627013999,
+        "lo95": 0.0017495219495016646,
+        "hi95": 0.006920066242668192,
+        "n_valid_resamples": 10000,
+        "excludes_zero": true
+      },
+      "SE - MC_sequence_entropy": {
+        "mean": -0.011205637458735311,
+        "lo95": -0.024658056892194125,
+        "hi95": 0.0018441123557455547,
+        "n_valid_resamples": 10000,
+        "excludes_zero": false
+      },
+      "SE - perplexity": {
+        "mean": 0.2075380978734918,
+        "lo95": 0.1845466474222578,
+        "hi95": 0.23074527888645863,
+        "n_valid_resamples": 10000,
+        "excludes_zero": true
+      }
+    }
+  }
+}

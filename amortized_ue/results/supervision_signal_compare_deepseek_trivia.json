@@ -1,0 +1,75 @@
+{
+  "model_name": "deepseek-llm-7b-chat",
+  "dataset": "trivia_qa",
+  "num_samples": 2000,
+  "n": 2000,
+  "run_dir": "/data2/mn1025/stage1/deepseek-llm-7b-chat_trivia_qa_n2000_full",
+  "acc_threshold": 0.5,
+  "acc_is_binary": true,
+  "incorrect_rate": 0.477,
+  "target": "incorrect (1 - canonical accuracy)",
+  "eval_set": "full n2000, no split",
+  "results": {
+    "SE": {
+      "auroc": 0.8150731948803668,
+      "N": 2000,
+      "incorrect_rate": 0.477
+    },
+    "SE_binary": {
+      "auroc": 0.7270694790176013,
+      "N": 2000,
+      "incorrect_rate": 0.477
+    },
+    "n_clusters": {
+      "auroc": 0.8101006730241189,
+      "N": 2000,
+      "incorrect_rate": 0.477
+    },
+    "MC_sequence_entropy": {
+      "auroc": 0.7820603396787602,
+      "N": 2000,
+      "incorrect_rate": 0.477
+    },
+    "perplexity": {
+      "auroc": 0.6101761326967864,
+      "N": 2000,
+      "incorrect_rate": 0.477
+    }
+  },
+  "bootstrap": {
+    "method": "paired_bootstrap_auc (amortized_ue.correctness_eval); shared resample indices across all 5 signals; Mann-Whitney fast_auc",
+    "se_binary_threshold": 0.9535958466520794,
+    "n_resamples": 10000,
+    "seed": 0,
+    "deltas": {
+      "SE - SE_binary": {
+        "mean": 0.0879665667485531,
+        "lo95": 0.07652165379898279,
+        "hi95": 0.09976316123738435,
+        "n_valid_resamples": 10000,
+        "excludes_zero": true
+      },
+      "SE - n_clusters": {
+        "mean": 0.004999994168880821,
+        "lo95": 0.0023476598944587312,
+        "hi95": 0.00771126827017643,
+        "n_valid_resamples": 10000,
+        "excludes_zero": true
+      },
+      "SE - MC_sequence_entropy": {
+        "mean": 0.032981556939672765,
+        "lo95": 0.020744916743895257,
+        "hi95": 0.04546058728605362,
+        "n_valid_resamples": 10000,
+        "excludes_zero": true
+      },
+      "SE - perplexity": {
+        "mean": 0.20486554066138637,
+        "lo95": 0.18323364868089248,
+        "hi95": 0.22671254828507148,
+        "n_valid_resamples": 10000,
+        "excludes_zero": true
+      }
+    }
+  }
+}

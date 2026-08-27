@@ -157,7 +157,24 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (updated 2026-08-26)
+## Current state (updated 2026-08-27)
+
+**E56 (2026-08-27) — how much of SE's wrong-answer signal survives cheaper supervision?** New
+standalone `supervision_signal_compare.py` (read-only, no GPU, no target-LLM calls) scores 5 signals
+by AUROC vs `incorrect` on trivia_qa **n2000, full set no split**, all 4 original targets, with a
+10k paired bootstrap (shared indices; `paired_bootstrap_auc`/`ci` reused from `correctness_eval.py`).
+**AUROC (Llama-2 / Mistral / Llama-3 / DeepSeek):** SE-continuous 0.787/0.752/0.773/0.815 ·
+**`n_clusters` 0.782/0.750/0.769/0.810** (within +0.002–0.006 of SE, sig. on 3/4, tied on Mistral —
+**the entailment clustering carries nearly all the signal; the entropy formula on top adds almost
+nothing**) · MC sequence entropy 0.749/0.747/**0.784**/0.782 (drop the entailment model: −0.03 on
+Llama-2/DeepSeek, wash on Mistral, nominally *ahead* on Llama-3) · **SE_binary 0.723/0.685/0.709/0.727
+(−0.06 to −0.09 vs continuous SE, every CI excludes 0 — binarising the label is the biggest single
+loss, and SE_binary scores below even raw `n_clusters` on all 4)** · perplexity 0.629/0.684/0.565/0.610
+(single canonical pass, no sampling: −0.07 to −0.21, sig. on all 4). Llama-2 SE 0.787 ≈ E31/E38's true
+10-sample SE ~0.783 (consistency check). **Caveat: full-set AUROC, no train/test split — the ranking
+of signals + the deltas are the result, not the absolute numbers.** Artifacts:
+`supervision_signal_compare.py`, `results/supervision_signal_compare_{llama2,mistral,llama3,deepseek}_trivia.json`.
+Full arc: EXPERIMENTS.md E56.
 
 **🔄 E55 (2026-08-26, IN PROGRESS) — data-readiness, not a result: DeepSeek/Llama-3 squad builds
 (done) + a "nothink" regeneration of all 5 Qwen targets (running).** Two gaps closed/closing: (1)

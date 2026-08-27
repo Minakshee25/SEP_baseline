@@ -3142,3 +3142,93 @@ Meta-Llama-3-8B-Instruct}_squad_n1000_full/` and `/data2/mn1025/stage1/*_nothink
 Queue state: `/data2/mn1025/stage1_meta/nothink_bigtier_jobs.txt` +
 `nothink_bigtier_claims/`. Logs: `amortized_ue/logs/{lane_a,lane_b}_driver*.log`,
 `amortized_ue/logs/watchdog.log`, per-model `*_nothink.log`.
+
+## E56 — how much of SE's wrong-answer signal survives cheaper supervision? (SE vs n_clusters / MC seq-entropy / perplexity / binarised SE) — ✅ diagnostic; clustering carries the signal, the entropy weighting barely does, binarising SE costs a significant ~0.07 AUROC
+
+**Goal.** SE (the Stage-2 training target) needs 10 high-temp samples *and* an entailment model to
+cluster them. This asks, purely as a **wrong-answer detector on the label set itself**, how much of
+that discrimination is retained by signals that need strictly less machinery, all read from the same
+Stage-1 records at zero extra cost:
+
+| signal | needs sampling? | needs entailment model? | needs the SE formula? |
+|---|---|---|---|
+| SE (`cluster_assignment_entropy`) | yes (10) | yes | yes |
+| SE_binary (SE thresholded via `stage2.data.best_split`) | yes (10) | yes | yes + binarise |
+| `n_clusters` (raw count of distinct semantic ids) | yes (10) | yes | **no** |
+| MC sequence entropy (−mean over the 10 samples of each sample's length-normalised mean token log-lik) | yes (10) | **no** | **no** |
+| perplexity (`exp(-mean(canonical.token_log_likelihoods))`) | **no** (1 canonical pass) | no | no |
+
+**Method.** New standalone `amortized_ue/supervision_signal_compare.py` — read-only over Stage-1, no
+GPU, no target-LLM calls, no new generation. Loads trivia_qa **n2000** (`load_records`, id-sorted,
+same convention as `linear_ceiling_probe.py`) for **all 4 original targets** (Llama-2, Mistral,
+Llama-3, DeepSeek). Target = `incorrect = 1 - canonical.accuracy` (accuracy is exact-match
+squad-metric, asserted already binary {0,1}; 0.5 threshold per `correctness_eval.py`'s fixed
+convention, a no-op here). AUROC on the **full n2000, no train/test split** (a descriptive
+discrimination measure on the label set, not held-out generalisation). SE_binary threshold from
+`best_split` fit on the same n2000 SE array (reused verbatim from `stage2/data.py`, not reinvented).
+Paired bootstrap for the deltas: **10000 resamples, one shared set of row indices reused for all 5
+signals**, via `paired_bootstrap_auc` + `ci` imported unchanged from `correctness_eval.py` (the
+E25/E26/E31/E38 convention). Four deltas per target, all `SE_continuous − X`.
+
+**AUROC vs `incorrect`, full n2000:**
+
+| signal | Llama-2 | Mistral | Llama-3 | DeepSeek |
+|---|---|---|---|---|
+| **SE (continuous)** | **0.7874** | **0.7521** | 0.7729 | **0.8151** |
+| SE_binary | 0.7227 | 0.6851 | 0.7090 | 0.7271 |
+| `n_clusters` | 0.7819 | 0.7504 | 0.7685 | 0.8101 |
+| MC sequence entropy | 0.7491 | 0.7465 | **0.7841** | 0.7821 |
+| perplexity | 0.6285 | 0.6842 | 0.5654 | 0.6102 |
+| best_split threshold | 0.698 | 0.814 | 0.698 | 0.954 |
+| incorrect rate | 0.4095 | 0.3675 | 0.3450 | 0.4770 |
+
+**Paired-bootstrap 95% CI on `SE_continuous − X` (mean [lo, hi]; "excl 0" = CI excludes zero):**
+
+| delta | Llama-2 | Mistral | Llama-3 | DeepSeek |
+|---|---|---|---|---|
+| − SE_binary | +0.0646 [+0.053, +0.076] **excl 0** | +0.0669 [+0.053, +0.081] **excl 0** | +0.0639 [+0.051, +0.077] **excl 0** | +0.0880 [+0.077, +0.100] **excl 0** |
+| − `n_clusters` | +0.0055 [+0.003, +0.008] **excl 0** | +0.0017 [−0.001, +0.004] n.s. | +0.0043 [+0.002, +0.007] **excl 0** | +0.0050 [+0.002, +0.008] **excl 0** |
+| − MC seq-entropy | +0.0382 [+0.023, +0.053] **excl 0** | +0.0056 [−0.008, +0.020] n.s. | −0.0112 [−0.025, +0.002] n.s. | +0.0330 [+0.021, +0.046] **excl 0** |
+| − perplexity | +0.1587 [+0.135, +0.182] **excl 0** | +0.0679 [+0.048, +0.088] **excl 0** | +0.2075 [+0.185, +0.231] **excl 0** | +0.2049 [+0.183, +0.227] **excl 0** |
+
+**Findings.**
+1. **The clustering step carries almost all of SE's signal; the entropy weighting on top of it barely
+   does.** `n_clusters` — just the integer count of distinct entailment clusters among the 10 samples,
+   no `logsumexp`/entropy at all — is within **+0.002 to +0.006 AUROC** of full continuous SE on every
+   target (significant on 3/4 by the tightest of margins, statistically tied on Mistral). Whatever the
+   SE formula adds over "how many different answers did it give" is real but negligible for
+   wrong-answer detection.
+2. **Binarising SE costs a significant ~0.06–0.09 AUROC on all 4 targets** — a much larger loss than
+   clustering-vs-`n_clusters` (~0.005) or dropping the entailment model (~0.03). Binarised SE is the
+   **weakest** of the entropy-family signals here, scoring *below* even raw `n_clusters` on all four.
+   This is a cost the SEP objective (predict binarised SE) pays that E31 never isolated: the continuous
+   ranking within each side of the `best_split` threshold is genuine wrong-answer information, and the
+   threshold throws it away.
+3. **Dropping the entailment model (MC sequence entropy) costs ~0.03 on the two Llama-2-family models
+   and DeepSeek, but is a wash on Mistral and nominally *ahead* on Llama-3** (−0.011, CI includes 0).
+   A sampling-based lexical uncertainty signal that needs the 10 generations but not DeBERTa is roughly
+   competitive with SE and, on one of four targets, better.
+4. **One forward pass is not enough.** Canonical-answer perplexity — the only signal that needs no
+   sampling — is **0.07 to 0.21 AUROC below SE, significant on every target**, and collapses to near
+   chance on Llama-3 (0.565). Consistent with the whole project's "sampling beats a single pass" line
+   (E31/E39).
+5. **DeepSeek has the most separable SE→correctness signal** (SE 0.815, highest of the four; also the
+   highest incorrect rate at 0.477) and Mistral the least (SE 0.752) — Mistral is also where every
+   delta is smallest/least significant.
+
+**Consistency check.** Llama-2 SE AUROC 0.787 here ≈ E31/E38's "true 10-sample SE" ≈ 0.783 (different
+code path, different row set — E38 was 200 held-out, this is full n2000) — the two agree, so the
+numbers are on the same footing as the correctness-eval line.
+
+**Caveats.** Full-set AUROC, **no train/test split** — these are label-set discrimination numbers, not
+held-out generalisation; treat the *ranking* of signals and the *deltas* as the result, not the
+absolute AUROCs. Accuracy is exact-match squad-metric with ~10% label noise (E32) ⇒ absolute AUROCs
+are mild under-estimates uniformly. trivia_qa n2000 only — no squad / no OOD. SE_binary uses a single
+`best_split` on the full array (matches how this script has no split); a train-fit threshold could
+differ slightly.
+
+**Artifacts.** `amortized_ue/supervision_signal_compare.py` (new, standalone),
+`amortized_ue/results/supervision_signal_compare_{llama2,mistral,llama3,deepseek}_trivia.json` (per
+target: 5 point estimates + all 4 bootstrap deltas + `best_split` threshold). Run:
+`python -m amortized_ue.supervision_signal_compare --model_name <M> --data_dir /data2/mn1025/stage1
+--out amortized_ue/results/supervision_signal_compare_<tag>_trivia.json` in `se_probes`.

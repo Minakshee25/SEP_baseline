@@ -1,0 +1,75 @@
+{
+  "model_name": "Mistral-7B-Instruct-v0.2",
+  "dataset": "trivia_qa",
+  "num_samples": 2000,
+  "n": 2000,
+  "run_dir": "/data2/mn1025/stage1/Mistral-7B-Instruct-v0.2_trivia_qa_n2000_full",
+  "acc_threshold": 0.5,
+  "acc_is_binary": true,
+  "incorrect_rate": 0.3675,
+  "target": "incorrect (1 - canonical accuracy)",
+  "eval_set": "full n2000, no split",
+  "results": {
+    "SE": {
+      "auroc": 0.7520534537925843,
+      "N": 2000,
+      "incorrect_rate": 0.3675
+    },
+    "SE_binary": {
+      "auroc": 0.6850851012341695,
+      "N": 2000,
+      "incorrect_rate": 0.3675
+    },
+    "n_clusters": {
+      "auroc": 0.7503680998090937,
+      "N": 2000,
+      "incorrect_rate": 0.3675
+    },
+    "MC_sequence_entropy": {
+      "auroc": 0.7464612406227313,
+      "N": 2000,
+      "incorrect_rate": 0.3675
+    },
+    "perplexity": {
+      "auroc": 0.6842273668360624,
+      "N": 2000,
+      "incorrect_rate": 0.3675
+    }
+  },
+  "bootstrap": {
+    "method": "paired_bootstrap_auc (amortized_ue.correctness_eval); shared resample indices across all 5 signals; Mann-Whitney fast_auc",
+    "se_binary_threshold": 0.8140452349615312,
+    "n_resamples": 10000,
+    "seed": 0,
+    "deltas": {
+      "SE - SE_binary": {
+        "mean": 0.06693027311942472,
+        "lo95": 0.05280847646860733,
+        "hi95": 0.08114916049190825,
+        "n_valid_resamples": 10000,
+        "excludes_zero": true
+      },
+      "SE - n_clusters": {
+        "mean": 0.0016976681909971524,
+        "lo95": -0.0009182756866330771,
+        "hi95": 0.00439292004758457,
+        "n_valid_resamples": 10000,
+        "excludes_zero": false
+      },
+      "SE - MC_sequence_entropy": {
+        "mean": 0.00564978687613621,
+        "lo95": -0.008344610657119845,
+        "hi95": 0.01998732128465368,
+        "n_valid_resamples": 10000,
+        "excludes_zero": false
+      },
+      "SE - perplexity": {
+        "mean": 0.0678921964238446,
+        "lo95": 0.04768015035287632,
+        "hi95": 0.08784738856563645,
+        "n_valid_resamples": 10000,
+        "excludes_zero": true
+      }
+    }
+  }
+}
