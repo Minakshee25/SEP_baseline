@@ -3357,3 +3357,60 @@ ceilings, not proxy/SEP/ridge numbers ([[sep-vs-ridge-different-baselines]]).
 (n2000) + `label_noise_ceiling_{Llama-2-7b-chat,Mistral-7B-Instruct-v0.2,Meta-Llama-3-8B-Instruct,deepseek-llm-7b-chat}_trivia_freshn1000.json`.
 Reproduce (per target, `se_probes`, CPU):
 `python -m amortized_ue.label_noise_ceiling --model_name <M> --dataset trivia_qa --num_samples <2000|1000> --data_dir /data2/mn1025/stage1 --out <path>`.
+
+---
+
+## E59 — E57's two-position ridge ceiling, re-scored on the fresh trivia_qa n1000 held-out set (all 4 targets) — ✅ diagnostic; E57's numbers hold at 5× power, but the second-position lift shrinks to ~+0.02 Spearman for 3 of 4
+
+**Why.** E57's combined TBG+SLT ridge ceiling was reported off the **200-row n2000 test split** (±0.05).
+Every training target also has a fresh, fully disjoint `trivia_qa_n1000_full` batch (E23/E28/E33). This
+re-scores E57's already-selected two-position ridge on that n1000 set — same in-distribution question
+type, 5× the eval rows — to check the ceiling and the second-position lift aren't split-sampling
+artifacts.
+
+**Method** (`amortized_ue/two_pos_ceiling_freshn1000.py` — imports `ridge_concat`, `FIRST_POS`, `OTHER`
+from `two_pos_ceiling.py` unchanged). **Identical to E57 in every step**: fit the concatenated ridge on
+the trivia n2000 **train** (1440), α chosen on the n2000 **val** (360), first position fixed at E57's
+leak-free CV best single (position, layer) per model, complement layer = argmax of the **n2000-val**
+Spearman. **No new selection logic** — the only change is that the final held-out predictions are scored
+on the fresh n1000 set instead of the 200-row n2000 test slice. `fit∩eval` id-overlap = **0** for all 4
+(disjointness re-confirmed, matching E31/E38). CPU, `se_probes`, `/data2` records.
+
+Selected combos are unchanged from E57 (selection never saw the eval set): Llama-2 `[TBG:30, SLT:13]`,
+Mistral `[TBG:31, SLT:6]`, Llama-3 `[TBG:31, SLT:11]`, DeepSeek `[SLT:16, TBG:28]`.
+
+**Results — fresh trivia_qa n1000 as the evaluation basis** (E57 200-row n2000-test in parentheses):
+
+| target | pos → +complement | single-pos ρ | single-pos r | **two-pos ρ** | **two-pos r** | 2-pos lift (ρ) |
+|---|---|---|---|---|---|---|
+| Llama-2-7b-chat | TBG:30 → +SLT:13 | 0.5956 (0.5853) | 0.6269 (0.5946) | **0.6160** (0.6026) | **0.6522** (0.6160) | +0.020 |
+| Mistral-7B-Instruct-v0.2 | TBG:31 → +SLT:6 | 0.6323 (0.6203) | 0.6426 (0.6355) | **0.6510** (0.6563) | **0.6841** (0.6754) | +0.019 |
+| Meta-Llama-3-8B-Instruct | TBG:31 → +SLT:11 | 0.6352 (0.6234) | 0.6816 (0.7166) | **0.6512** (0.6716) | **0.6948** (0.7517) | +0.016 |
+| deepseek-llm-7b-chat | SLT:16 → +TBG:28 | 0.6606 (0.6285) | 0.6638 (0.6424) | **0.7053** (0.6832) | **0.7063** (0.7032) | +0.045 |
+
+**Findings.**
+1. **E57's ceiling holds at 5× power.** Single-position ρ is +0.01–0.03 *higher* on n1000 than on the
+   200-row test for every target; two-position ρ is within ±0.02 of E57 except DeepSeek (+0.022) and
+   Llama-3 (−0.020). The ~0.62–0.71 Spearman band is real, not a small-split artifact.
+2. **The second-position lift shrinks on the larger set** — ~+0.02 ρ for Llama-2/Mistral/Llama-3 (vs
+   the +0.04–0.05 E57 read off the 200-row split), DeepSeek still the largest at +0.045. E57's headline
+   "+0.04–0.05 on all" is a 200-row over-estimate; **the honest lift is ~+0.02 for 3 of 4, ~+0.045 for
+   DeepSeek**. Pearson lift is a bit larger (Llama-2 +0.025, Mistral +0.042, Llama-3 +0.013, DeepSeek
+   +0.043).
+3. **Mistral's Spearman lift barely replicates:** +0.019 on n1000 vs E57's +0.036 on the test split.
+   Pearson still gains cleanly (+0.042).
+4. **Llama-3 keeps its Pearson > Spearman gap** (two-pos r 0.695 vs ρ 0.651), both below the optimistic
+   200-row test figures (r 0.752 / ρ 0.672) — the E57 Llama-3 Pearson was the most inflated single
+   number in that table.
+5. **DeepSeek is again the strongest** — two-position fresh-n1000 ρ 0.705 / r 0.706, and the only target
+   whose complement position is TBG-onto-SLT rather than SLT-onto-TBG.
+
+**Caveats.** Linear ridge ceilings, not proxy/SEP numbers ([[sep-vs-ridge-different-baselines]]).
+Complement layer still selected on a single 360-row n2000-val split (no CV) — flat plateau per E57, so
+cite the band not the argmax. Selection basis (train/val) is still the n2000 set; only the eval basis
+changed. trivia in-distribution only (no squad re-run — E57 covers that).
+
+**Artifacts.** `amortized_ue/two_pos_ceiling_freshn1000.py`,
+`scratch_xllm/two_pos_ceiling_freshn1000.json` (per target: single-position baseline, full complement
+sweep with both n2000-test and fresh-n1000 metrics, val-selected combo). Run:
+`python -m amortized_ue.two_pos_ceiling_freshn1000 --data_dir /data2/mn1025/stage1` in `se_probes`.
