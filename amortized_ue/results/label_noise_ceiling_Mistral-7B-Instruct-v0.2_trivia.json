@@ -1,0 +1,22 @@
+{
+ "dataset": "trivia_qa",
+ "num_samples": 2000,
+ "repeats": 200,
+ "model": "Mistral-7B-Instruct-v0.2",
+ "all_rows": {
+  "rows": 2000,
+  "samples_per_prompt": 10,
+  "r_half": 0.7648761257605325,
+  "r_half_std": 0.007093677016731282,
+  "reliability_n": 0.8667759902196273,
+  "ceiling": 0.931008050566496
+ },
+ "test_rows": {
+  "rows": 200,
+  "samples_per_prompt": 10,
+  "r_half": 0.7695789343551712,
+  "r_half_std": 0.02276499642100048,
+  "reliability_n": 0.8697876307344304,
+  "ceiling": 0.9326240564849432
+ }
+}

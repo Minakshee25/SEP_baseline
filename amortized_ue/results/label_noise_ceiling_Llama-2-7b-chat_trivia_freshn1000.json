@@ -1,0 +1,23 @@
+{
+ "dataset": "trivia_qa",
+ "set": "fresh_n1000",
+ "num_samples": 1000,
+ "repeats": 200,
+ "model": "Llama-2-7b-chat",
+ "all_rows": {
+  "rows": 1000,
+  "samples_per_prompt": 10,
+  "r_half": 0.7816344866232322,
+  "r_half_std": 0.010113523927455606,
+  "reliability_n": 0.8774352904502649,
+  "ceiling": 0.9367151597205337
+ },
+ "test_rows": {
+  "rows": 100,
+  "samples_per_prompt": 10,
+  "r_half": 0.7577184294793075,
+  "r_half_std": 0.03255006454223374,
+  "reliability_n": 0.8621613300189018,
+  "ceiling": 0.9285264293593919
+ }
+}

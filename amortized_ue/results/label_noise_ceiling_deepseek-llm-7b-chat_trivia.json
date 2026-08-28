@@ -1,0 +1,22 @@
+{
+ "dataset": "trivia_qa",
+ "num_samples": 2000,
+ "repeats": 200,
+ "model": "deepseek-llm-7b-chat",
+ "all_rows": {
+  "rows": 2000,
+  "samples_per_prompt": 10,
+  "r_half": 0.8186466731582197,
+  "r_half_std": 0.006927088988197309,
+  "reliability_n": 0.9002811653751048,
+  "ceiling": 0.948831473642767
+ },
+ "test_rows": {
+  "rows": 200,
+  "samples_per_prompt": 10,
+  "r_half": 0.8256478088694902,
+  "r_half_std": 0.0179428986363457,
+  "reliability_n": 0.9044984523940162,
+  "ceiling": 0.9510512354200568
+ }
+}

@@ -149,10 +149,16 @@ def main():
     p.add_argument("--observed_block", default="summary",
                    help="'summary' (ID test) or 'ood_summary' (OOD all-rows)")
     p.add_argument("--out", default=None, help="optional path to write JSON")
+    p.add_argument("--data_dir", default=None,
+                   help="Stage-1 records root (default: amortized_ue/data/stage1); "
+                        "point at /data2/mn1025/stage1 to read the fast off-NFS copy")
     args = p.parse_args()
 
-    cfg = Stage1Config(
+    cfg_kw = dict(
         model_name=args.model_name, dataset=args.dataset, num_samples=args.num_samples)
+    if args.data_dir:
+        cfg_kw["output_dir"] = args.data_dir
+    cfg = Stage1Config(**cfg_kw)
     ids, sem_ids = load_semantic_ids(cfg)
 
     print(f"\n{args.dataset} n={args.num_samples}  ({len(ids)} records)")

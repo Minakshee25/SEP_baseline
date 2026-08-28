@@ -1,0 +1,22 @@
+{
+ "dataset": "trivia_qa",
+ "num_samples": 2000,
+ "repeats": 200,
+ "model": "Meta-Llama-3-8B-Instruct",
+ "all_rows": {
+  "rows": 2000,
+  "samples_per_prompt": 10,
+  "r_half": 0.8170135114656957,
+  "r_half_std": 0.0073190387851031005,
+  "reliability_n": 0.8992927199607348,
+  "ceiling": 0.9483104554736992
+ },
+ "test_rows": {
+  "rows": 200,
+  "samples_per_prompt": 10,
+  "r_half": 0.8033007783923051,
+  "r_half_std": 0.02306002289655636,
+  "reliability_n": 0.8909226769241136,
+  "ceiling": 0.9438870043199629
+ }
+}

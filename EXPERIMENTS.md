@@ -3287,3 +3287,73 @@ ridge ceilings, not proxy or SEP numbers ([[sep-vs-ridge-different-baselines]]).
 **Artifacts.** `amortized_ue/two_pos_ceiling.py`, `scratch_xllm/two_pos_ceiling.json` (per target:
 single-position baseline, full complement sweep, val-selected + OOD-selected combos). Run:
 `python -m amortized_ue.two_pos_ceiling --data_dir /data2/mn1025/stage1` in `se_probes`.
+
+---
+
+## E58 — label-noise ceiling for all 4 targets (extends E8a's Llama-2-only ceiling to Mistral-v0.2 / Llama-3-8B / DeepSeek-7B, on both the n2000 ID set and the fresh n1000 set) — ✅ diagnostic; the SE label is ~equally reliable (~0.93–0.95) across all 4 targets
+
+**Why.** E8a established the split-half label-noise ceiling on the SE target for **Llama-2 only**
+(trivia ID-test 0.914, all-2000 0.934, squad 0.901). Every cross-LLM comparison since (E29–E31,
+E37–E38, E45–E54) reports "% of achievable signal recovered" against *that* number, implicitly
+assuming the other targets' labels are equally noisy. This closes the gap: same method, run for all 4
+training targets on the two trivia_qa sets they share.
+
+**Method** (`amortized_ue/label_noise_ceiling.py`, unchanged computation — only additive `--data_dir`
+flag added to read the fast off-NFS `/data2` copy). Verbatim E8a: split each prompt's stored
+`semantic_id`s into two disjoint halves, recompute `cluster_assignment_entropy` on each, Spearman
+across prompts, **200 random split-half draws**, seed 42, Spearman–Brown up-correct to the n-sample
+reliability, `ceiling = sqrt(reliability)`. The 200-/100-row sub-rows are the held-out test slice
+(`train_test_split` `test_size=0.1`, `split_seed=42` — matches `Stage2Config`). CPU, no GPU, no
+LLM/entailment re-run (holds the DeBERTa clustering fixed, so this is a mild *over*-estimate of the
+true ceiling per the script docstring). Llama-3 + DeepSeek n1000 records parallel-copied to `/data2`
+first ([[use-data2-not-nfs]]); byte-identical to NFS.
+
+**Results — n2000 ID set** (200-row = held-out ID test slice, matches E8a's basis):
+
+| target | rows | split-half r | reliability_n | **ceiling** |
+|---|---|---|---|---|
+| *Llama-2-7b-chat (E8a, for reference)* | 200 / 2000 | 0.717 / 0.773 | 0.835 / 0.872 | **0.914** / 0.934 |
+| Mistral-7B-Instruct-v0.2 | 200 | 0.770 ± 0.023 | 0.870 | **0.933** |
+|  | 2000 | 0.765 ± 0.007 | 0.867 | 0.931 |
+| Meta-Llama-3-8B-Instruct | 200 | 0.803 ± 0.023 | 0.891 | **0.944** |
+|  | 2000 | 0.817 ± 0.007 | 0.899 | 0.948 |
+| deepseek-llm-7b-chat | 200 | 0.826 ± 0.018 | 0.904 | **0.951** |
+|  | 2000 | 0.819 ± 0.007 | 0.900 | 0.949 |
+
+**Results — fresh n1000 set** (the E23 disjoint held-out batch; 100-row = its 0.1 test slice, wider CI):
+
+| target | rows | split-half r | reliability_n | **ceiling** |
+|---|---|---|---|---|
+| Llama-2-7b-chat | 1000 | 0.782 ± 0.010 | 0.877 | **0.937** |
+|  | 100 | 0.758 ± 0.033 | 0.862 | 0.929 |
+| Mistral-7B-Instruct-v0.2 | 1000 | 0.754 ± 0.012 | 0.860 | **0.927** |
+|  | 100 | 0.734 ± 0.042 | 0.847 | 0.920 |
+| Meta-Llama-3-8B-Instruct | 1000 | 0.818 ± 0.010 | 0.900 | **0.949** |
+|  | 100 | 0.830 ± 0.030 | 0.907 | 0.952 |
+| deepseek-llm-7b-chat | 1000 | 0.828 ± 0.008 | 0.906 | **0.952** |
+|  | 100 | 0.848 ± 0.024 | 0.918 | 0.958 |
+
+**Findings.**
+1. **All 4 targets' SE labels are about equally reliable — ceiling ~0.93–0.95 everywhere.** Noise
+   explains only ~5–7 points of the gap to 1.0 for any target, same as E8a found for Llama-2. The
+   "% recovered" framing used across E29–E54 is sound for all 4, not just Llama-2.
+2. **Ordering is stable across both sets:** DeepSeek ≈ Llama-3 (0.95) > Llama-2 (0.937) > Mistral
+   (0.927–0.933). Llama-3 and DeepSeek labels are marginally *less* noisy than Llama-2's; Mistral's
+   are marginally *more*. Small effect — within ~0.02 across the board.
+3. **The two sets agree to ~0.005 per target** (Llama-2 0.937 vs 0.934, Mistral 0.927 vs 0.931,
+   Llama-3 0.949 vs 0.948, DeepSeek 0.952 vs 0.949) — the fresh n1000 batch carries the same label
+   quality as the n2000 ID set.
+4. Unlike E8a's Llama-2 (ID-test 0.914 sitting *below* all-rows 0.934), the other 3 targets show the
+   sub-row slice within ~0.002–0.006 of the full-set number — no meaningful test-split effect. The
+   Llama-2 ID-test dip is a 200-row sampling artifact, not a property of its labels.
+
+**Caveats.** Sub-row slices are n=200 (ID set) / n=100 (fresh set) so their `r_half` CI is wide
+(±0.02–0.04) — cite the full-set ceiling. Entailment clustering held fixed → true ceiling is slightly
+*lower* than reported (unmeasured DeBERTa noise). No squad ceilings re-run here (E8a's Llama-2 squad
+0.901 stands; E57 covers the squad *ridge* ceiling for the other 3). These are label-reliability
+ceilings, not proxy/SEP/ridge numbers ([[sep-vs-ridge-different-baselines]]).
+
+**Artifacts.** `amortized_ue/results/label_noise_ceiling_{Mistral-7B-Instruct-v0.2,Meta-Llama-3-8B-Instruct,deepseek-llm-7b-chat}_trivia.json`
+(n2000) + `label_noise_ceiling_{Llama-2-7b-chat,Mistral-7B-Instruct-v0.2,Meta-Llama-3-8B-Instruct,deepseek-llm-7b-chat}_trivia_freshn1000.json`.
+Reproduce (per target, `se_probes`, CPU):
+`python -m amortized_ue.label_noise_ceiling --model_name <M> --dataset trivia_qa --num_samples <2000|1000> --data_dir /data2/mn1025/stage1 --out <path>`.
