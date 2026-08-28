@@ -12,8 +12,9 @@ Procedure per model:
   2. Sweep every layer of the COMPLEMENTARY position; for each, fit the concatenated ridge and
      score it on VALIDATION Spearman (never test). Pick the complement layer with the best val
      score -- leak-free, same selection philosophy as reconfirm_layers.py.
-  3. Report the held-out TEST Spearman (ID) and the all-rows squad Spearman (OOD) at that
-     val-selected two-position combo. Also report the best-OOD complement for context.
+  3. Report the held-out TEST Spearman + Pearson r (ID) and the all-rows squad Spearman +
+     Pearson r (OOD) at that val-selected two-position combo -- both correlations computed on
+     the identical fitted predictions. Also report the best-OOD complement for context.
 
 Read-only: reads Stage-1 records, trains only throw-away sklearn ridges, writes one JSON.
 
@@ -26,9 +27,18 @@ import json
 import argparse
 
 import numpy as np
+from scipy.stats import pearsonr
 
 from amortized_ue.config import Stage1Config
 from amortized_ue.linear_ceiling_probe import load_matrix, splits, fit_probe, rho
+
+
+def prho(a, b) -> float:
+    """Pearson r with the same degenerate-input guard as linear_ceiling_probe.rho."""
+    if np.std(a) < 1e-12 or np.std(b) < 1e-12:
+        return 0.0
+    r = pearsonr(a, b)[0]
+    return 0.0 if (r is None or np.isnan(r)) else float(r)
 
 # leak-free best single (position, layer) per model -- reconfirm_layers.py --cv 5
 FIRST_POS = {
@@ -46,12 +56,16 @@ def ridge_concat(hid, y, tr, va, te, hid_ood, y_ood, pos_layers):
     squad Spearman (OOD)."""
     X = np.concatenate([hid[p][l] for p, l in pos_layers], axis=1)     # [N, sum(H)]
     m, sc, alpha, val_s = fit_probe(X, y, tr, va)
-    id_s = rho(m.predict(sc.transform(X[te])), y[te])
-    ood_s = float("nan")
+    id_pred = m.predict(sc.transform(X[te]))                           # exact fitted preds
+    id_s, id_p = rho(id_pred, y[te]), prho(id_pred, y[te])
+    ood_s = ood_p = float("nan")
     if hid_ood is not None:
         Xo = np.concatenate([hid_ood[p][l] for p, l in pos_layers], axis=1)
-        ood_s = rho(m.predict(sc.transform(Xo)), y_ood)
-    return {"alpha": alpha, "val": float(val_s), "id": float(id_s), "ood": float(ood_s)}
+        ood_pred = m.predict(sc.transform(Xo))                         # same predictions scored below
+        ood_s, ood_p = rho(ood_pred, y_ood), prho(ood_pred, y_ood)
+    return {"alpha": alpha, "val": float(val_s),
+            "id": float(id_s), "id_pearson": float(id_p),
+            "ood": float(ood_s), "ood_pearson": float(ood_p)}
 
 
 def run_model(model, data_dir, id_ns, ood_ns):
@@ -95,12 +109,15 @@ def run_model(model, data_dir, id_ns, ood_ns):
         "val_selected": {
             "positions": [[p1, l1], [p2, by_val["complement_layer"]]],
             "val_spearman": by_val["val"], "id_spearman": by_val["id"],
-            "ood_spearman": by_val["ood"], "alpha": by_val["alpha"],
+            "id_pearson": by_val["id_pearson"],
+            "ood_spearman": by_val["ood"], "ood_pearson": by_val["ood_pearson"],
+            "alpha": by_val["alpha"],
         },
         "ood_selected_context": (None if by_ood is None else {
             "positions": [[p1, l1], [p2, by_ood["complement_layer"]]],
             "val_spearman": by_ood["val"], "id_spearman": by_ood["id"],
-            "ood_spearman": by_ood["ood"],
+            "id_pearson": by_ood["id_pearson"],
+            "ood_spearman": by_ood["ood"], "ood_pearson": by_ood["ood_pearson"],
         }),
         "sweep": sweep,
     }
@@ -124,14 +141,17 @@ def main():
         p1 = res["first_position"]
         vs = res["val_selected"]
         print(f"  first pos (leak-free best single): {p1['pos']}:{p1['layer']}  "
-              f"ID {b['id']:.4f}  OOD {b['ood']:.4f}")
+              f"ID rho {b['id']:.4f} / r {b['id_pearson']:.4f}  "
+              f"OOD rho {b['ood']:.4f} / r {b['ood_pearson']:.4f}")
         print(f"  + val-selected complement {vs['positions'][1][0]}:{vs['positions'][1][1]}  "
-              f"-> val {vs['val_spearman']:.4f}  ID {vs['id_spearman']:.4f}  "
-              f"OOD {vs['ood_spearman']:.4f}")
+              f"-> val rho {vs['val_spearman']:.4f}  "
+              f"ID rho {vs['id_spearman']:.4f} / r {vs['id_pearson']:.4f}  "
+              f"OOD rho {vs['ood_spearman']:.4f} / r {vs['ood_pearson']:.4f}")
         oc = res["ood_selected_context"]
         if oc:
             print(f"  (context) best-OOD complement {oc['positions'][1][0]}:{oc['positions'][1][1]}"
-                  f"  ID {oc['id_spearman']:.4f}  OOD {oc['ood_spearman']:.4f}")
+                  f"  ID rho {oc['id_spearman']:.4f} / r {oc['id_pearson']:.4f}  "
+                  f"OOD rho {oc['ood_spearman']:.4f} / r {oc['ood_pearson']:.4f}")
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w") as f:
