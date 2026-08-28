@@ -3232,3 +3232,58 @@ differ slightly.
 target: 5 point estimates + all 4 bootstrap deltas + `best_split` threshold). Run:
 `python -m amortized_ue.supervision_signal_compare --model_name <M> --data_dir /data2/mn1025/stage1
 --out amortized_ue/results/supervision_signal_compare_<tag>_trivia.json` in `se_probes`.
+
+## E57 — combined two-position ridge ceiling for Mistral-v0.2 / Llama-3-8B / DeepSeek-7B (extending E8c's Llama-2 TBG:22+SLT:15) — ✅ diagnostic; a second position lifts every model's ID ridge ceiling to ~0.66–0.68 Spearman
+
+**Why.** E8c established Llama-2's linear ceiling by concatenating two hidden-state positions
+(TBG:22 + SLT:15 → ID Spearman 0.642) and showed the two positions are complementary (+0.042 over the
+best single). E10 built the reference proxy on exactly that combo. The other three targets only ever
+had a **single-position** leak-free ceiling (`reconfirm_layers.py`: Mistral TBG:31, Llama-3 TBG:31,
+DeepSeek SLT:16). This fills that gap — same ridge-sweep method as `linear_ceiling_probe.py`, extended
+to two positions.
+
+**Method** (`amortized_ue/two_pos_ceiling.py`, new, read-only, CPU, `se_probes`, `--data_dir
+/data2/mn1025/stage1`). Reuses `linear_ceiling_probe`'s `load_matrix / splits / fit_probe / rho`
+verbatim (ridge → continuous `cluster_assignment_entropy`, α on val Spearman, trivia_qa n2000, split
+1440/360/200 seed 42). Per model: (1) fix the first position at the model's leak-free best single
+`(pos, layer)` from `reconfirm_layers.py --cv 5`; (2) sweep every layer of the complementary position,
+**concatenate the two hidden-state vectors feature-wise** (exactly E8c's construction — verified: this
+code reproduces Llama-2 TBG:22+SLT:15 at ID 0.6425 / OOD 0.437, matching E8c's 0.642), fit one ridge,
+**select the complement layer on validation Spearman** (leak-free, same philosophy as
+`reconfirm_layers.py`); (3) report held-out TEST Spearman (ID) + all-rows squad n1000 Spearman (OOD).
+All four targets now have squad n1000 (E55 built DeepSeek + Llama-3's).
+
+**Results** (ID = held-out test Spearman, OOD = squad n1000 all-rows; val-selected complement):
+
+| target | 1st pos (leak-free) | single ID / OOD | + val-sel complement | two-pos ID | two-pos OOD | ID gain |
+|---|---|---|---|---|---|---|
+| Mistral-7B-Instruct-v0.2 | TBG:31 | 0.620 / 0.534 | SLT:6  | **0.656** | 0.571 | +0.036 |
+| Meta-Llama-3-8B-Instruct | TBG:31 | 0.623 / 0.483 | SLT:11 | **0.672** | 0.540 | +0.049 |
+| deepseek-llm-7b-chat | SLT:16 | 0.629 / 0.529 | TBG:28 | **0.683** | 0.534 | +0.054 |
+| *Llama-2-7b-chat (ref, leak-free 1st pos)* | TBG:30 | 0.585 / 0.269 | SLT:13 | 0.603 | 0.423 | +0.018 |
+| *Llama-2-7b-chat (E8c/E10 fixed combo)* | TBG:22 | 0.600 / 0.301 | SLT:15 (fixed) | 0.642 | 0.437 | +0.042 |
+
+**Findings.**
+1. **The second position helps every target** — ID ridge ceiling +0.036 to +0.054, matching the
+   magnitude E8c/E11 measured for Llama-2 (+0.042). The three non-Llama-2 targets land at a **higher
+   absolute ceiling (~0.66–0.68) than Llama-2 (~0.60–0.64)** — consistent with their higher
+   single-position ceilings.
+2. **OOD also improves for all** (+0.04 to +0.15 over the single position), largest for Llama-2 and
+   Llama-3 whose single-TBG OOD was weakest. The OOD-optimal complement is a slightly different (later
+   SLT / earlier TBG) layer than the val-selected one — reported as `ood_selected_context` in the JSON
+   (e.g. Mistral SLT:14 → OOD 0.623; DeepSeek TBG:24 → 0.563; Llama-3 SLT:17 → 0.562).
+3. **The complement plateau is flat** (val within ~0.003 across a wide band): Mistral's SLT band
+   SLT:4–15 is all ~0.67 val / 0.64–0.67 ID; DeepSeek's TBG:19–29 all ~0.70 val. So the exact
+   complement layer is val-noise; the ceiling is the ~0.66–0.68 plateau, not the argmax.
+4. **Llama-2's 22-vs-30 wobble reappears:** at the leak-free first position TBG:30 the two-pos ceiling
+   is only 0.603, below the E8c/E10 fixed TBG:22+SLT:15 combo (0.642) — the val scores are near-tied
+   (0.6325 vs 0.6328) but TBG:22 generalises better on this test split (already noted E34/E36). This is
+   why E10's reference proxy uses TBG:22, not the CV-picked TBG:30.
+
+**Caveats.** Held-out test n=200 (ID) so ±0.05-ish; complement selected on a single 360-row val split
+(no CV) — flat plateau means the argmax is noisy, cite the band. No retraining — these are linear
+ridge ceilings, not proxy or SEP numbers ([[sep-vs-ridge-different-baselines]]). trivia→squad only.
+
+**Artifacts.** `amortized_ue/two_pos_ceiling.py`, `scratch_xllm/two_pos_ceiling.json` (per target:
+single-position baseline, full complement sweep, val-selected + OOD-selected combos). Run:
+`python -m amortized_ue.two_pos_ceiling --data_dir /data2/mn1025/stage1` in `se_probes`.
