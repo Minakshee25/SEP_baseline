@@ -3556,6 +3556,100 @@ GPU1 training lane so the watchdog stays dormant, kill+resume the resumable Qwen
 the freed memory, run E62, SIGCONT the lane — cost was one lane retry attempt + a model reload on
 Qwen3.8, nothing lost).
 
+## E63 — leave-TWO-out cross-model test: does a `q_resp_only` proxy trained on 6 target LLMs reproduce the SE disagreement of the 2 held-out ones (DeepSeek-LLM-7B-Chat vs Qwen3-8B)? — ✅ **YES, and far more strongly than E40's aligned-hidden-state ridge.** Predicted-vs-true SE-gap Spearman **+0.399** [+0.337, +0.460] / Pearson **+0.501** [+0.439, +0.559], overall sign-agreement **0.643** [0.612, 0.676] on 701 non-tied questions — vs E40's pooled ridge r +0.110. Sign-agreement climbs monotonically with the true gap (Q2 0.562 → Q3 0.622 → Q4 0.730). **Response text is the model-specific channel** (E40 finding #5, now in a clean null-is-0 design).
+
+**Why this exists.** E40 asked whether the pooled multi-model probe reproduces genuine per-model SE
+disagreement or is only a "hard question" detector, and found the aligned-hidden-state ridge is
+*genuinely* model-specific but **thin** (pooled leave-TWO-out r = +0.110, 12.6% of the attainable
+ceiling). Its [F] arm-comparison *hinted* that `q_resp_only` (question + canonical answer **text**)
+carries far more model-specificity (+0.237 vs the ridge's +0.075) — but only in the **biased
+leave-ONE-out frame** (E40b proved the LOO null is **−1.0**, not 0, for a perfect difficulty
+predictor). The open task (`amortized_ue/CLAUDE.md`: *"the proxy retrained leave-TWO-out (GPU), which
+would also test whether response text is genuinely the model-specific channel"*) is exactly this.
+
+**Design — a genuine leave-TWO-out, null IS 0.** ONE `q_resp_only` proxy (frozen Llama-3.2-3B + LoRA
++ REG head, no hidden states, no alignment) trained by pooling **6 target LLMs'** trivia_qa n2000
+train/val splits (Llama-2-7b-chat, Mistral-7B-Instruct-v0.2, Meta-Llama-3-8B-Instruct, Qwen3.5-9B,
+gemma-7b-it, gemma-2-9b-it — SE label z-scored **per model** on train stats, 8640 train / 2160 val
+pooled rows), **held out** deepseek-llm-7b-chat + Qwen3-8B entirely. Recipe identical to E53 / the
+deploy checkpoint: 3 seeds, batch 8 × grad-accum 4 (effective 32), projector_hidden_dim 1024, k=4,
+10 epochs (seeds ran 6/10/6 epochs, ~50 min total; val-pool sanity Spearman 0.681/0.681/0.669). The
+**same** proxy scores both held-out models on their **full shared 1000-question set** (id overlap
+asserted: 1000/1000 **identical**, 0 non-shared on either side). Per question:
+`predicted_diff = proxy(DeepSeek) − proxy(Qwen3-8B)`, `true_diff = SE(DeepSeek) − SE(Qwen3-8B)`.
+Because `q_resp_only`'s input for a given question is `Question: {q}\nAnswer: {canonical response}` —
+the **question is identical for the two models** — a pure question-difficulty predictor emits
+`predicted_diff = 0` exactly ⇒ the null IS 0 (no leave-ONE-out fold-composition artifact). Reported
+both raw (the formula above) and E40b-style within-model qnorm.
+
+**Results (full shared N=1000; `predicted_diff` centered at mean −0.014, std 0.500).**
+
+| (a) predicted_diff vs true_diff | Spearman [95% CI] | Pearson [95% CI] | sign-agreement [95% CI] |
+|---|---|---|---|
+| **raw diff (the formula)** | **+0.399 [+0.337, +0.460]** | **+0.501 [+0.439, +0.559]** | **0.643 [0.612, 0.676]** (n=701 non-tie) |
+| qnorm diff (E40b convention) | +0.363 [+0.301, +0.423] | +0.473 [+0.415, +0.527] | 0.598 [0.568, 0.628] (n=999) |
+
+*(For scale: E40's pooled leave-TWO-out ridge on aligned hidden states scored r = +0.110
+[+0.027, +0.192]. Same estimand, ~3.6× the effect, and here on N=1000 not 200.)*
+
+| (b) sign-agreement by \|true_diff\| quartile (raw; largest gap → smallest) | n | non-tie | \|dY\| range | sign-agreement |
+|---|---|---|---|---|
+| **Q4 (largest)** | 250 | 250 | [0.842, 2.303] | **0.730** |
+| Q3 | 250 | 250 | [0.330, 0.842] | 0.622 |
+| Q2 | 250 | 201 | [0.000, 0.330] | 0.562 |
+| Q1 (smallest) | 250 | 0 | [0.000, 0.000] | 0.500 (trivial — all tied) |
+
+Monotone in gap size — the proxy reproduces the disagreement **when the two models genuinely differ**
+and is at chance when they don't. Same shape as E40 finding #3 but far stronger (E40's top-9% peaked
+at 0.600; here the top **25%** is 0.730). 299/1000 questions have `true_diff` exactly 0 (both models
+fully self-consistent); of the 701 real comparisons the proxy calls 64.3% correctly.
+
+| (c) per-model proxy-vs-true-SE Spearman (sanity — the LTO proxy never saw either model) | ρ | mean SE | mean acc |
+|---|---|---|---|
+| deepseek-llm-7b-chat | **+0.770** | 0.804 | 0.527 |
+| Qwen3-8B | **+0.727** | 0.561 | 0.511 |
+
+Both **above** E62's reference proxy on its genuine cross-model targets (0.58–0.68) — the 6-model
+pool transfers cleanly to two unseen families in absolute SE-fidelity, not just in the disagreement
+signal.
+
+**Conclusion.** In a clean design where the null is provably 0, a **label-free, hidden-state-free,
+sampling-free** text proxy trained on 6 LLMs reproduces the SE disagreement between two **entirely
+held-out** LLMs at Spearman +0.399 / sign-agreement 0.643 — **~3.6× E40's aligned-hidden-state
+ridge on the same estimand**. This settles E40's open question: **the model-specific uncertainty
+signal lives in the response text, not (much) in the aligned hidden state.** Intuitive in hindsight —
+the sampled answer *is* each model's own output, whereas Procrustes alignment rotates hidden states
+into a shared frame that washes out what makes each model distinctive (E40/E33/E38).
+
+**Caveats (stated).** (1) One held-out **pair**, not E40b's 6-pair pooled design — but N=1000 (5× E40's
+200) keeps the CIs tight. (2) The two models differ in base rate (mean SE 0.804 vs 0.561); the qnorm
+variant removes that per-model offset and still gives +0.363 / sign-agr 0.598, so it is not a
+scale artifact. (3) `q_resp_only` reads each model's **own canonical answer**, so "model-specific"
+here legitimately includes "the two models literally answered differently" — which is the point, it
+is what a deployed proxy sees. (4) Llama-2's SE label is the noisiest of the pool but it is a
+training model here, not a target.
+
+**Infra.** `amortized_ue/e63_gpu_swap.sh` (E61/E62 pattern, GPU1: SIGSTOP the training lane so the
+watchdog stays dormant, SIGKILL + resume the resumable gemma-3-27b-it stage1 at 1420/2000, fence the
+freed memory, run train+eval, SIGCONT). First attempt OOM'd at a 16 GB fence budget — 3B LoRA
+forward+backward needs more headroom than E62's inference-only pass — relaunched at 30 GB, **0
+records lost** (gemma-3 resumed from 1420, one model reload). Two extra belt-and-braces safety nets
+added: `e63_lane_safety_net.sh` (force `kill -CONT` the lane if the swap script is `kill -9`'d, or
+after a 3 h hard deadline) and `e63_gpu_bridge.sh` (the instant the E63 python exits, holds the freed
+GPU1 slack *above* gemma-3's working-set budget — cannot OOM the reload — until gemma-3 reclaims the
+card, closing the ~30 s co-tenant window). Both fired correctly: bridge held for 31 s, safety net saw
+the normal resume and exited. GPU0 / Qwen3.8-27B untouched.
+
+**Artifacts.** `amortized_ue/e63_lto_deepseek_qwen3_8b.py` (`--stage overlap|train|eval|all|push_wandb`),
+`amortized_ue/{e63_gpu_swap,e63_lane_safety_net,e63_gpu_bridge}.sh`;
+`amortized_ue/results/e63_lto_deepseek_qwen3_8b.json` (all (a)/(b)/(c) blocks + overlap check),
+`amortized_ue/results/e63_lto_disagreement_table.json` (all 1000 shared questions, each with both
+responses, both SEs, predicted_diff, true_diff, correct — sorted by \|true_diff\|),
+`amortized_ue/results/e63_lto_examples_curated.json` (top-5 correctly-called + top-5 incorrectly-called
+by \|true_diff\|), `amortized_ue/results/e63_lto_train_curves.json` (per-seed curves + per-model
+pooling stats); checkpoints `amortized_ue/stage2/runs/E63_lto_6model_qresp/checkpoints/` (3 × 87 MB) +
+**W&B `stage2_ckpts_E63_lto_6model_qresp:v0`** (verified by fetch, COMMITTED). Env `amortized_stage2`.
+
 ## E64 — is E45's gemma-2-9b-it zero-shot LOSS a base-rate artefact or a real transfer failure? — ✅ **REAL, not base-rate.** Matching wrong-answer count leaves the other 3 targets' proxy edge untouched; a fully base-rate-matched (0.5/0.5) subset reproduces gemma-2-9b-it's −0.047 in 100% of resamples; true SE separates gemma-2-9b-it's right/wrong answers normally while the deploy proxy's text reading does not.
 
 **Goal.** E45 scored the DEPLOY proxy (frozen Llama-3.2-3B + LoRA, pooled Llama-2/Mistral/Llama-3/

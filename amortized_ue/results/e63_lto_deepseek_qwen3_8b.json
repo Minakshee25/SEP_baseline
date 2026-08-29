@@ -1,0 +1,197 @@
+{
+ "config": {
+  "train_models": [
+   "Llama-2-7b-chat",
+   "Mistral-7B-Instruct-v0.2",
+   "Meta-Llama-3-8B-Instruct",
+   "Qwen3.5-9B",
+   "gemma-7b-it",
+   "gemma-2-9b-it"
+  ],
+  "held_out_A": "deepseek-llm-7b-chat",
+  "held_out_B": "Qwen3-8B",
+  "arm": "q_resp_only",
+  "ckpt_dir": "/vol/bitbucket/mn1025/individual_project/semantic-entropy-probes/amortized_ue/stage2/runs/E63_lto_6model_qresp/checkpoints",
+  "data_dir": "/data2/mn1025/stage1",
+  "n_shared_questions": 1000,
+  "bootstrap": 10000
+ },
+ "overlap_check": {
+  "A": "deepseek-llm-7b-chat",
+  "B": "Qwen3-8B",
+  "n_A": 1000,
+  "n_B": 1000,
+  "overlap": 1000,
+  "A_only": 0,
+  "B_only": 0,
+  "identical": true
+ },
+ "a_overall_correlation": {
+  "raw_diff_PRIMARY": {
+   "spearman": 0.3992189756748727,
+   "spearman_ci95": {
+    "mean": 0.3993955358822149,
+    "lo95": 0.33731335502294,
+    "hi95": 0.46039234091180997
+   },
+   "pearson": 0.5010584656237251,
+   "pearson_ci95": {
+    "mean": 0.5008287252618817,
+    "lo95": 0.43883728738798544,
+    "hi95": 0.5589791763458537
+   },
+   "overall_sign_agreement": 0.6433666191155493,
+   "overall_sign_agreement_ci95": {
+    "mean": 0.6437018703001138,
+    "lo95": 0.6116490783734346,
+    "hi95": 0.6760964008299015
+   },
+   "n_nontie": 701
+  },
+  "qnorm_diff_E40b": {
+   "spearman": 0.36317494673529105,
+   "spearman_ci95": {
+    "mean": 0.36328548682711,
+    "lo95": 0.3008900046698341,
+    "hi95": 0.42267494594732513
+   },
+   "pearson": 0.47268032386314984,
+   "pearson_ci95": {
+    "mean": 0.4726877537680727,
+    "lo95": 0.41452678204688304,
+    "hi95": 0.5268729935975434
+   },
+   "overall_sign_agreement": 0.5980980980980981,
+   "overall_sign_agreement_ci95": {
+    "mean": 0.5980586365801882,
+    "lo95": 0.5675675675675675,
+    "hi95": 0.6276276276276276
+   },
+   "n_nontie": 999
+  },
+  "predicted_diff_summary": {
+   "mean": -0.014187212918419394,
+   "std": 0.50000075474379,
+   "min": -2.1489892303943634,
+   "max": 2.1729752893249192
+  },
+  "true_diff_summary": {
+   "mean": 0.2423328426798661,
+   "std": 0.7272471576991509,
+   "min": -2.163955656882057,
+   "max": 2.3025850929940455,
+   "abs_mean": 0.5294467373255088,
+   "abs_median": 0.329583686600433,
+   "frac_abs_gt_0.5": 0.444
+  }
+ },
+ "b_quartiles": {
+  "raw_diff_PRIMARY": {
+   "quartiles": [
+    {
+     "quartile": "Q4_largest",
+     "n": 250,
+     "n_nontie": 250,
+     "abs_true_diff_range": [
+      0.8415991672498424,
+      2.3025850929940455
+     ],
+     "sign_agreement": 0.73
+    },
+    {
+     "quartile": "Q3",
+     "n": 250,
+     "n_nontie": 250,
+     "abs_true_diff_range": [
+      0.32958368660043313,
+      0.8415991672498423
+     ],
+     "sign_agreement": 0.622
+    },
+    {
+     "quartile": "Q2",
+     "n": 250,
+     "n_nontie": 201,
+     "abs_true_diff_range": [
+      0.0,
+      0.3295836866004329
+     ],
+     "sign_agreement": 0.5621890547263682
+    },
+    {
+     "quartile": "Q1_smallest",
+     "n": 250,
+     "n_nontie": 0,
+     "abs_true_diff_range": [
+      0.0,
+      0.0
+     ],
+     "sign_agreement": 0.5
+    }
+   ],
+   "overall_sign_agreement": 0.6433666191155493,
+   "overall_sign_agreement_ci95": {
+    "mean": 0.6437018703001138,
+    "lo95": 0.6116490783734346,
+    "hi95": 0.6760964008299015
+   }
+  },
+  "qnorm_diff_E40b": {
+   "quartiles": [
+    {
+     "quartile": "Q4_largest",
+     "n": 250,
+     "n_nontie": 250,
+     "abs_true_diff_range": [
+      0.9509828122183123,
+      2.815871785967443
+     ],
+     "sign_agreement": 0.784
+    },
+    {
+     "quartile": "Q3",
+     "n": 250,
+     "n_nontie": 250,
+     "abs_true_diff_range": [
+      0.4062437306187734,
+      0.9469634054343778
+     ],
+     "sign_agreement": 0.534
+    },
+    {
+     "quartile": "Q2",
+     "n": 250,
+     "n_nontie": 250,
+     "abs_true_diff_range": [
+      0.3036484951131395,
+      0.4062437306187734
+     ],
+     "sign_agreement": 0.508
+    },
+    {
+     "quartile": "Q1_smallest",
+     "n": 250,
+     "n_nontie": 249,
+     "abs_true_diff_range": [
+      0.0,
+      0.3036484951131395
+     ],
+     "sign_agreement": 0.5662650602409639
+    }
+   ],
+   "overall_sign_agreement": 0.5980980980980981
+  }
+ },
+ "c_per_model_spearman": {
+  "deepseek-llm-7b-chat": {
+   "spearman_proxy_vs_true_se": 0.7703855909915941,
+   "mean_true_SE": 0.8035008509874765,
+   "mean_accuracy": 0.527
+  },
+  "Qwen3-8B": {
+   "spearman_proxy_vs_true_se": 0.7271020509952313,
+   "mean_true_SE": 0.5611680083076104,
+   "mean_accuracy": 0.511
+  }
+ }
+}

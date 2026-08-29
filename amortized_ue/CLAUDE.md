@@ -159,6 +159,39 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 
 ## Current state (updated 2026-08-29)
 
+**E63 (2026-08-29) — leave-TWO-out cross-model test: a `q_resp_only` proxy trained on 6 target LLMs,
+scored on the SE disagreement of 2 held-out ones (DeepSeek-LLM-7B-Chat vs Qwen3-8B) → response text
+IS the model-specific channel, ~3.6× stronger than E40's aligned-hidden-state ridge.** Settles the
+open E40 task (*"proxy retrained leave-TWO-out (GPU) … test whether response text is genuinely the
+model-specific channel"*). ONE `q_resp_only` proxy (frozen Llama-3.2-3B + LoRA, no hidden states, no
+alignment), pooled from Llama-2 / Mistral-v0.2 / Llama-3 / Qwen3.5-9B / gemma-7b-it / gemma-2-9b-it
+trivia n2000 (SE z-scored per model; 8640/2160 pooled rows), DeepSeek + Qwen3-8B held out entirely.
+Same recipe as E53 / deploy ckpt (3 seeds, batch 8 × grad-accum 4 = eff 32, proj 1024, k=4, 10 ep).
+The **same** proxy scores both held-out models on their **full shared 1000-Q set** (id overlap
+1000/1000 identical, asserted); `predicted_diff = proxy(DeepSeek) − proxy(Qwen3-8B)` vs
+`true_diff = SE(DeepSeek) − SE(Qwen3-8B)`. **Null IS 0** (one proxy, both members; the question text
+is identical for the pair so a difficulty-only predictor emits `predicted_diff = 0` — no
+leave-ONE-out fold artifact; empirically `predicted_diff` mean −0.014). **Results (N=1000):**
+**(a)** raw Spearman(dP,dY) **+0.399 [+0.337, +0.460]**, Pearson **+0.501 [+0.439, +0.559]**, overall
+sign-agreement **0.643 [0.612, 0.676]** on 701 non-tied Qs (qnorm/E40b variant: +0.363 / +0.473 /
+0.598) — vs **E40's pooled leave-TWO-out ridge r = +0.110** on the same estimand. **(b)** sign-agreement
+monotone in the true gap: Q2 0.562 → Q3 0.622 → **Q4 (largest gap) 0.730** (E40's top-9% peaked at
+0.600; here the top-25% is 0.730); Q1 all-tied = 0.500. **(c)** sanity — the LTO proxy (never saw
+either model) has strong absolute SE-fidelity on both: DeepSeek ρ **+0.770**, Qwen3-8B ρ **+0.727**
+(above E62's reference proxy on its cross-model targets, 0.58–0.68). **Conclusion: the model-specific
+uncertainty signal lives in the response text, not (much) in the aligned hidden state** — the sampled
+answer *is* each model's own output, whereas Procrustes alignment washes out what makes each model
+distinctive (consistent with E40 #5 / E33 / E38). Caveats: one held-out pair (not E40b's 6-pair
+pool), but N=1000 = 5× E40; the two models differ in base rate (SE 0.804 vs 0.561) — the qnorm
+variant controls for it and still gives +0.363. Infra: `e63_gpu_swap.sh` (GPU1, interrupted
+gemma-3-27b-it at 1420/2000 — resumed clean, one reload, 0 lost; first try OOM'd at a 16 GB fence,
+relaunched at 30 GB) + two new safety nets: `e63_lane_safety_net.sh` (force-CONT the lane if the swap
+script is `kill -9`'d / after 3 h) and `e63_gpu_bridge.sh` (hold the freed GPU1 slack above gemma-3's
+budget through the ~30 s handoff — cannot OOM the reload). Results:
+`results/e63_lto_{deepseek_qwen3_8b,disagreement_table,examples_curated,train_curves}.json`,
+checkpoints `stage2/runs/E63_lto_6model_qresp/checkpoints/` + **W&B `stage2_ckpts_E63_lto_6model_qresp:v0`**
+(verified by fetch). Full arc: EXPERIMENTS.md E63.
+
 **E64 (2026-08-29) — is E45's gemma-2-9b-it zero-shot LOSS a base-rate artefact? → NO, it is a
 real per-model transfer failure.** E45's DEPLOY proxy lost to true 10-sample SE only on
 gemma-2-9b-it (AUROC_incorrect 0.722 vs 0.769, −0.047\*), which is also a base-rate outlier
@@ -970,9 +1003,11 @@ design for any such test. The multi-model ridge is now **saved** (it never had b
   of a LOLO number is biased down. Worth one pass to check nothing in the write-up leans that way.
 - **Raise the power of the E40 clean test:** N=200 held-out questions and 2-source LTO probes are the
   binding limits. A 3-source clean design needs a 5th target LLM; more questions need fresh Stage-1.
-- **Does the SLM proxy preserve more model-specificity than the ridge?** [F] hints yes for `q_resp_only`
-  (+0.237 vs +0.075) but only in the biased LOO frame — a clean answer needs the proxy retrained
-  leave-TWO-out (GPU), which would also test whether response text is genuinely the model-specific channel.
+- **Does the SLM proxy preserve more model-specificity than the ridge? — ✅ DONE (E63): YES, ~3.6×.**
+  A `q_resp_only` proxy trained leave-TWO-out on 6 LLMs reproduces the DeepSeek-vs-Qwen3-8B SE
+  disagreement at Spearman +0.399 / sign-agreement 0.643 (N=1000), vs E40's aligned-ridge +0.110 on
+  the same estimand — in a clean null-is-0 design. Response text is the model-specific channel. See
+  EXPERIMENTS.md E63.
 
 **NOW — pick the next thrust (all open):**
 - **E35 follow-ups (harden the pooling result — RESULTS ARE NOT REVIEW-VERIFIED):**
