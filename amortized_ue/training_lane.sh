@@ -37,7 +37,9 @@ OUT=/data2/mn1025/stage1
 IDS_FILE=/data2/mn1025/stage1_meta/shared_n1000_ids.txt
 BIG_BUDGET=44000     # 27B single-GPU + CPU offload working set
 SAFETY=800
-MAX_ATTEMPTS=3       # per lane, per job; then release for the other lane / give up
+MAX_ATTEMPTS=3       # consecutive NO-PROGRESS rounds per lane per job; a round
+                    # that writes >=1 record resets the counter (external kills
+                    # are free). Then release for the other lane / give up.
 
 mkdir -p amortized_ue/logs "$CLAIMS_DIR"
 log(){ echo ">>> $(date '+%m-%d %H:%M:%S') [$LANE_TAG] $*"; }
@@ -79,22 +81,35 @@ run_job(){
   local run_name="$1" target="$2" model_name="$3" dataset="$4" only_ids="$5" num_samples="$6"
   local jlog="amortized_ue/logs/${run_name}.log"
   local extra=(); [ "$only_ids" = "yes" ] && extra=(--only_ids "$IDS_FILE" --selection_num_samples 3074)
-  local attempt=1 have
-  while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
+  # A strike is only counted when an attempt makes ZERO progress. An external
+  # kill (co-tenant OOM, a GPU-swap SIGTERM) always lets real records through, so
+  # it resumes for free -- but a genuine "can't even start" failure (OOM at load,
+  # bad arch, missing weights) still writes nothing and still dies after
+  # MAX_ATTEMPTS consecutive no-progress rounds.
+  local stalls=0 have have_before rc
+  while true; do
     have=$(ls "$OUT/${run_name}/records" 2>/dev/null | wc -l)
     if [ "${have:-0}" -ge "$target" ]; then log "$run_name complete ($have/$target)"; return 0; fi
-    log "starting $run_name (attempt $attempt/$MAX_ATTEMPTS, have ${have:-0}/$target)"
+    log "starting $run_name (have ${have:-0}/$target, stalls ${stalls}/$MAX_ATTEMPTS)"
     fence
+    have_before=${have:-0}
     python -m amortized_ue.stage1 --model_name "$model_name" --dataset "$dataset" \
       --num_samples "$num_samples" "${extra[@]}" \
       --output_dir "$OUT" --run_name "$run_name" >> "$jlog" 2>&1
-    local rc=$?
+    rc=$?
     have=$(ls "$OUT/${run_name}/records" 2>/dev/null | wc -l)
-    log "$run_name attempt $attempt exited rc=$rc, records=${have:-0}/$target"
-    if [ "${have:-0}" -ge "$target" ]; then return 0; fi
-    attempt=$((attempt+1)); sleep 15
+    if [ "${have:-0}" -ge "$target" ]; then log "$run_name complete ($have/$target)"; return 0; fi
+    if [ "${have:-0}" -gt "$have_before" ]; then
+      log "$run_name progressed ${have_before}->${have} (rc=$rc) -- resuming, strike not counted"
+      stalls=0
+    else
+      stalls=$((stalls+1))
+      log "$run_name made NO progress (rc=$rc) -- stall ${stalls}/$MAX_ATTEMPTS"
+      [ "$stalls" -ge "$MAX_ATTEMPTS" ] && break
+    fi
+    sleep 15
   done
-  log "!!! $run_name INCOMPLETE after $MAX_ATTEMPTS attempts (${have:-0}/$target)"
+  log "!!! $run_name INCOMPLETE after $MAX_ATTEMPTS consecutive no-progress stalls (${have:-0}/$target)"
   return 1
 }
 
