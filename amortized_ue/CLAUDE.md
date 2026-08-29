@@ -159,6 +159,28 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 
 ## Current state (updated 2026-08-29)
 
+**E64 (2026-08-29) — is E45's gemma-2-9b-it zero-shot LOSS a base-rate artefact? → NO, it is a
+real per-model transfer failure.** E45's DEPLOY proxy lost to true 10-sample SE only on
+gemma-2-9b-it (AUROC_incorrect 0.722 vs 0.769, −0.047\*), which is also a base-rate outlier
+(mean_acc 0.684 vs 0.42–0.56 for the other 3). New additive `e64_gemma_baserate_reanalysis.py`
+(read-only over E44/E45 records, no retraining; Stage A re-runs the frozen proxy's forward pass —
+**reproduces E45's AUROCs to 3 dp** — and persists per-question scores to
+`results/e64_perid_preds.json` so future Qwen/Gemma reanalyses need no GPU). Three checks: (1)
+restrict all 4 targets to gemma-2-9b-it's 316 wrong questions; (2a) downsample the other 3 targets'
+wrong answers to match gemma-2-9b-it's *count*; (2b) fully balanced 316-wrong + 316-correct
+(incorrect-rate exactly 0.5 for every target), 1000 resamples. **Result:** matching the wrong-answer
+count leaves the other 3 targets' proxy-vs-SE delta **unchanged** (+0.053/+0.009/+0.078, identical
+to 3 dp); the balanced 0.5/0.5 subset reproduces gemma-2-9b-it's **−0.047 in 100% of 1000
+resamples** while the other 3 stay firmly positive. **Separation diagnostic:** `q_resp_only`'s
+wrong-vs-right score margin for gemma-2-9b-it is compressed (**0.545** vs 0.81–0.90 for the other 3),
+while **true SE's** margin for gemma-2-9b-it is completely normal (0.70 vs 0.65–0.84) — sampling on
+gemma-2-9b-it's *own* distribution works fine; the deploy proxy reading its *response text* does
+not. Consistent with E47 (gemma-2-9b-it SE-fidelity *rank* correlation fine at 0.674, *class
+separation* not). **No E45 headline overturned** — it removes the base-rate caveat and localises the
+loss. Infra: `e64_gpu_swap.sh` (E61/E62/E63 pattern, GPU0, interrupted Qwen3.8-27B — one retry
+attempt + a reload, 0 records lost). Results: `results/e64_{perid_preds,gemma_baserate_reanalysis}.json`.
+Full arc: EXPERIMENTS.md E64.
+
 **E62 (2026-08-29) — `q_resp_only` ALONE (reference proxy text arm, no fusion) vs each target's OWN
 supervised SEP, all 4 alignment targets.** New additive `e62_qresp_alone_vs_sep.py` (reuses
 `compute_sep`/`score_block` from `se_fidelity_proxy_vs_sep.py`; `--dry_run` checks the CPU setup).
