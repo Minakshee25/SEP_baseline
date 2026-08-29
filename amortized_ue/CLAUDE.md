@@ -181,7 +181,13 @@ either model) has strong absolute SE-fidelity on both: DeepSeek ρ **+0.770**, Q
 (above E62's reference proxy on its cross-model targets, 0.58–0.68). **Conclusion: the model-specific
 uncertainty signal lives in the response text, not (much) in the aligned hidden state** — the sampled
 answer *is* each model's own output, whereas Procrustes alignment washes out what makes each model
-distinctive (consistent with E40 #5 / E33 / E38). Caveats: one held-out pair (not E40b's 6-pair
+distinctive (consistent with E40 #5 / E33 / E38). **Failure analysis** (`e63_lto_failure_analysis.py` → `results/e63_lto_failures.json`): of 701 real
+disagreements, 407 right / 294 fail — 206 opposite-direction + **88 no-direction** (`predicted_diff`
+exactly 0 because both models gave the *identical* canonical answer, a hard ceiling on a
+text-only proxy, not a bug); strict hit-rate 0.581 if those 88 are misses. Failures concentrate
+at small gaps (Q4 hit-rate 0.727 → Q1 0.497) and the proxy systematically **under-reads DeepSeek's
+uncertainty** (158/206 opposite-direction failures have DeepSeek as the truly-more-uncertain one —
+it is the unseen *family*). Caveats: one held-out pair (not E40b's 6-pair
 pool), but N=1000 = 5× E40; the two models differ in base rate (SE 0.804 vs 0.561) — the qnorm
 variant controls for it and still gives +0.363. Infra: `e63_gpu_swap.sh` (GPU1, interrupted
 gemma-3-27b-it at 1420/2000 — resumed clean, one reload, 0 lost; first try OOM'd at a 16 GB fence,

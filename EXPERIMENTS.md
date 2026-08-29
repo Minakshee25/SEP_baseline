@@ -3630,6 +3630,46 @@ here legitimately includes "the two models literally answered differently" — w
 is what a deployed proxy sees. (4) Llama-2's SE label is the noisiest of the pool but it is a
 training model here, not a target.
 
+**Failure analysis (follow-up, `e63_lto_failure_analysis.py` — read-only over the committed table).**
+Of the **701 genuine disagreements** the proxy calls **407 right (58.1%)** and **fails on 294 (41.9%)**.
+The 294 failures split into two mechanically distinct kinds:
+
+| failure kind | n | what happened |
+|---|---|---|
+| **opposite direction** | **206** (29.4%) | proxy's `predicted_diff` had the wrong sign — it actively pointed at the *less* uncertain model |
+| **no direction** | **88** (12.6%) | `predicted_diff` **exactly 0** — and in **all 88**, the two models produced the **identical canonical answer string**, so the text proxy has literally the same input for both and cannot separate them, even though the sampled SE differed (e.g. both answer `"tintin"` but DeepSeek SE 1.61 vs Qwen3-8B SE 0.00) |
+
+The E63 [a] sign-agreement **0.643** scores those 88 as coin-flips (0.5); scoring them as misses gives
+a **strict hit-rate of 0.581**. Both are reported — the 88 are a hard *ceiling* on a
+canonical-answer-only proxy, not a modelling error.
+
+**Failures concentrate where the models barely differ** (quartiles here are over the 701 real
+disagreements, not all 1000):
+
+| quartile by \|true SE gap\| | \|dY\| range | failures / disagreements | hit-rate |
+|---|---|---|---|
+| Q4 (largest gaps) | [1.075, 2.303] | 48 / 176 | **0.727** |
+| Q3 | [0.618, 1.075] | 73 / 175 | 0.583 |
+| Q2 | [0.325, 0.614] | 85 / 175 | 0.514 |
+| Q1 (smallest gaps) | [0.000, 0.325] | 88 / 175 | 0.497 (chance) |
+
+**Asymmetry:** in **158 of the 206** opposite-direction failures the truly-more-uncertain model was
+**DeepSeek** — the proxy systematically **under-reads DeepSeek's uncertainty** relative to Qwen3-8B
+(DeepSeek is the unseen *family*; its answer-text distribution is the one the 6-model pool covers
+least well). In **73 of 206** the confident model had SE ≈ 0 (fully self-consistent, often a clean
+correct answer) yet the proxy still leaned the other way.
+
+**Representative failure questions** (full lists — 206 + 88 — in `results/e63_lto_failures.json`):
+- *opposite direction:* "Who directed 'Last Tango in Paris'?" — DeepSeek "Bernardo Bertolucci" (SE 1.75,
+  **correct**) vs Qwen3-8B "francis ford coppola" (SE 0.00, wrong); true gap +1.75, proxy said −0.99.
+  "What is the name of the drunken robot in Futurama?" — DeepSeek "bender" (SE 2.16, wrong) vs Qwen3-8B
+  "fry" (SE 0.64, wrong); true gap +1.52, proxy said −1.14. "Which jewellers make the Super Bowl
+  Trophy?" — DeepSeek "hublot" (SE 2.16) vs Qwen3-8B "tiffany & co." (SE 0.00, correct); proxy said −0.25.
+- *no direction (identical answer):* "…'Is this a dagger which I see before me'…" — both "macbeth", DeepSeek
+  SE 1.50 / Qwen3-8B SE 0.00. "Father Ted is set on which fictional island?" — both "craggy island",
+  DeepSeek SE 0.00 / Qwen3-8B SE 1.47. "Gunfight at the OK Corral town?" — both "tombstone", DeepSeek
+  SE 1.61 / Qwen3-8B SE 0.00.
+
 **Infra.** `amortized_ue/e63_gpu_swap.sh` (E61/E62 pattern, GPU1: SIGSTOP the training lane so the
 watchdog stays dormant, SIGKILL + resume the resumable gemma-3-27b-it stage1 at 1420/2000, fence the
 freed memory, run train+eval, SIGCONT). First attempt OOM'd at a 16 GB fence budget — 3B LoRA
@@ -3648,8 +3688,13 @@ the normal resume and exited. GPU0 / Qwen3.8-27B untouched.
 responses, both SEs, predicted_diff, true_diff, correct — sorted by \|true_diff\|),
 `amortized_ue/results/e63_lto_examples_curated.json` (top-5 correctly-called + top-5 incorrectly-called
 by \|true_diff\|), `amortized_ue/results/e63_lto_train_curves.json` (per-seed curves + per-model
-pooling stats); checkpoints `amortized_ue/stage2/runs/E63_lto_6model_qresp/checkpoints/` (3 × 87 MB) +
-**W&B `stage2_ckpts_E63_lto_6model_qresp:v0`** (verified by fetch, COMMITTED). Env `amortized_stage2`.
+pooling stats); `amortized_ue/e63_lto_failure_analysis.py` +
+`amortized_ue/results/e63_lto_failures.json` (all 206 opposite-direction + 88 no-direction failure
+questions, with both responses / both SEs / predicted_diff / true_diff; + the per-quartile failure
+counts and the DeepSeek under-read asymmetry); checkpoints
+`amortized_ue/stage2/runs/E63_lto_6model_qresp/checkpoints/` (3 × 87 MB) +
+**W&B `stage2_ckpts_E63_lto_6model_qresp:v0`** (verified by fetch, COMMITTED). Env `amortized_stage2`
+(CPU `se_probes` for `--stage overlap` and the failure analysis).
 
 ## E64 — is E45's gemma-2-9b-it zero-shot LOSS a base-rate artefact or a real transfer failure? — ✅ **REAL, not base-rate.** Matching wrong-answer count leaves the other 3 targets' proxy edge untouched; a fully base-rate-matched (0.5/0.5) subset reproduces gemma-2-9b-it's −0.047 in 100% of resamples; true SE separates gemma-2-9b-it's right/wrong answers normally while the deploy proxy's text reading does not.
 
