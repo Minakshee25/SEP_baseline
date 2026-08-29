@@ -3610,8 +3610,9 @@ fully self-consistent); of the 701 real comparisons the proxy calls 64.3% correc
 | Qwen3-8B | **+0.727** | 0.561 | 0.511 |
 
 Both **above** E62's reference proxy on its genuine cross-model targets (0.58–0.68) — the 6-model
-pool transfers cleanly to two unseen families in absolute SE-fidelity, not just in the disagreement
-signal.
+pool transfers cleanly to both held-out models in absolute SE-fidelity, not just in the disagreement
+signal. (DeepSeek is an unseen model *and* unseen family; Qwen3-8B is an unseen model whose family
+*is* in the pool via Qwen3.5-9B — so the DeepSeek number is the stronger cross-family evidence.)
 
 **Conclusion.** In a clean design where the null is provably 0, a **label-free, hidden-state-free,
 sampling-free** text proxy trained on 6 LLMs reproduces the SE disagreement between two **entirely
