@@ -3555,3 +3555,75 @@ seed-mean, each with the paired-bootstrap CI vs SEP on both metrics),
 GPU1 training lane so the watchdog stays dormant, kill+resume the resumable Qwen3.8 stage1, fence
 the freed memory, run E62, SIGCONT the lane — cost was one lane retry attempt + a model reload on
 Qwen3.8, nothing lost).
+
+## E64 — is E45's gemma-2-9b-it zero-shot LOSS a base-rate artefact or a real transfer failure? — ✅ **REAL, not base-rate.** Matching wrong-answer count leaves the other 3 targets' proxy edge untouched; a fully base-rate-matched (0.5/0.5) subset reproduces gemma-2-9b-it's −0.047 in 100% of resamples; true SE separates gemma-2-9b-it's right/wrong answers normally while the deploy proxy's text reading does not.
+
+**Goal.** E45 scored the DEPLOY proxy (frozen Llama-3.2-3B + LoRA, pooled Llama-2/Mistral/Llama-3/
+DeepSeek n2000, text arms only) **zero-shot** on 4 Qwen/Gemma targets. On **gemma-2-9b-it** it was
+the only place in the whole project where `q_resp_only` *significantly lost* to true 10-sample SE
+(AUROC_incorrect 0.722 vs 0.769, −0.047 [−0.075, −0.020]). E45 flagged — as a hypothesis, not
+established — that gemma-2-9b-it is also a base-rate outlier: mean_acc **0.684** / incorrect-rate
+**0.316**, vs 0.42–0.56 / 0.44–0.58 for the other 3 targets. A model that is simply *better* at
+trivia_qa has fewer wrong answers to detect, which could weaken/noise the signal independent of any
+family-transfer failure. This entry tests that.
+
+**Method (additive, `e64_gemma_baserate_reanalysis.py`; read-only over the E44/E45 records, NO
+retraining).** E45 saved only aggregate AUROCs, so Stage A re-runs the frozen DEPLOY proxy's
+forward pass (deterministic; **reproduces E45's AUROCs to 3 dp** — 0.840/0.818/0.848/0.722) and
+**persists the per-question `q_only`/`q_resp_only` scores** (`results/e64_perid_preds.json`) so any
+future reanalysis needs no GPU. All 4 targets share the identical 1000 trivia_qa ids. Stage B (CPU):
+- **Check 1 — matched-difficulty subset.** Restrict all 4 targets to the 316 questions gemma-2-9b-it
+  got WRONG, re-score. AUROC_incorrect is undefined for gemma-2-9b-it there (every row incorrect) —
+  reported NaN with SE-fidelity Spearman as the substitute; the other 3 targets keep both classes.
+- **Check 2a (as scoped) — downsample wrong to gemma's COUNT.** For each other target keep every
+  correct question + a random 316-sample of its wrong questions; 1000 resamples.
+- **Check 2b (supplementary, cleaner) — fully balanced.** Random 316 wrong + 316 correct →
+  incorrect-rate exactly 0.5 for **every** target incl. a resampled gemma-2-9b-it; 1000 resamples.
+
+**Results.** `d` = AUROC_incorrect(`q_resp_only`) − AUROC_incorrect(true SE).
+
+| target | original full-1000 `d` | check 2a (match wrong count) `d` [95% over resamples], frac<0 | check 2b (balanced 0.5/0.5) `d` [95%], frac<0 |
+|---|---|---|---|
+| Qwen3-8B | +0.053 | +0.053 [+0.039, +0.066], 0.00 | +0.053 [+0.035, +0.070], 0.00 |
+| Qwen3.5-9B | +0.009 | +0.009 [−0.001, +0.018], 0.04 | +0.009 [−0.006, +0.025], 0.13 |
+| gemma-7b-it | +0.078 | +0.078 [+0.062, +0.094], 0.00 | +0.078 [+0.059, +0.096], 0.00 |
+| **gemma-2-9b-it** | **−0.047** | −0.047 (ref; already 316 wrong) | **−0.047 [−0.063, −0.031], 1.00** |
+
+- **Check 2a:** matching the wrong-answer *count* to gemma-2-9b-it's leaves the other 3 targets'
+  proxy-vs-SE delta **completely unchanged** (identical to 3 dp).
+- **Check 2b (decisive):** with difficulty *and* base rate held identical across all 4 targets
+  (0.5/0.5), gemma-2-9b-it's delta is still **−0.047, negative in 100% of 1000 resamples**, while
+  the other 3 stay firmly positive. The negative result is intrinsic to gemma-2-9b-it, not to its
+  base rate.
+- **Check 1:** on gemma-2-9b-it's own hard (wrong) questions the proxy still tracks its SE fine
+  (Spearman `q_resp_only`↔true SE = **+0.724**, ≈ its full-set 0.674 from E47); and the other 3
+  targets' deltas on this hard subset barely move from their full-set values (Δ vs full
+  +0.000 / −0.016 / −0.007). Hard questions per se do not create a negative proxy-vs-SE gap.
+
+**Why (separation diagnostic, added to every block).** The `q_resp_only` score's margin between
+gemma-2-9b-it's wrong and right answers is **compressed**: separation gap **0.545** vs
+**0.90 / 0.81 / 0.87** for the other 3 targets. Meanwhile **true SE's** separation gap for
+gemma-2-9b-it is completely normal (**0.70** vs 0.76 / 0.84 / 0.65). So true SE — measured on
+gemma-2-9b-it's *own* generation distribution — separates its right/wrong answers as well as for
+any target; the **deploy proxy reading gemma-2-9b-it's response *text*** produces a weaker signal
+for this specific model. This is a genuine per-model transfer limitation of the model-agnostic text
+pathway, consistent with E47 (gemma-2-9b-it's SE-fidelity *rank* correlation is fine at 0.674 while
+its wrong-vs-right *class separation* is not) and with E45 finding #1 ("the thesis extends to new
+vendors, but not uniformly").
+
+**Conclusion.** E45's base-rate hypothesis is **rejected**. gemma-2-9b-it's zero-shot loss to true
+SE is a real, model-specific transfer failure of the text proxy, not an artefact of its higher
+trivia_qa accuracy. It does not overturn any E45 headline (2/4 still beat true SE, 1/4 on par, 1/4 —
+gemma-2-9b-it — loses); it removes the "maybe it's just base rate" caveat and localises the loss to
+a compressed answer-text signal for this one model.
+
+**Infra.** Ran Stage A via `e64_gpu_swap.sh` (same proven pattern as E61/E62/E63): SIGSTOP the GPU0
+training lane so the watchdog stays dormant, SIGKILL + resume the resumable Qwen3.8-27B stage1
+child, fence the freed ~30 GB with `gpu_reserve`, run the forward pass under `amortized_stage2_v5`
+(NFS-free venv), SIGCONT the lane. Cost: one lane retry attempt (2/3) + one model reload on the
+Qwen3.8-27B build, **0 records lost** (resumed from 1755/2000). GPU1 / E63 untouched.
+
+**Artifacts.** `amortized_ue/e64_gemma_baserate_reanalysis.py`, `amortized_ue/e64_gpu_swap.sh`,
+`amortized_ue/results/e64_perid_preds.json` (per-question proxy scores + labels, 4 targets ×
+1000 — reuse this for any future Qwen/Gemma zero-shot reanalysis, no GPU needed),
+`amortized_ue/results/e64_gemma_baserate_reanalysis.json`, `amortized_ue/e64_swap.log`.
