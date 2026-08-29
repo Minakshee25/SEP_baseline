@@ -159,6 +159,28 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 
 ## Current state (updated 2026-08-29)
 
+**E62 (2026-08-29) — `q_resp_only` ALONE (reference proxy text arm, no fusion) vs each target's OWN
+supervised SEP, all 4 alignment targets.** New additive `e62_qresp_alone_vs_sep.py` (reuses
+`compute_sep`/`score_block` from `se_fidelity_proxy_vs_sep.py`; `--dry_run` checks the CPU setup).
+Fills the gap E27/E29/E30 left: that comparison existed cleanly only for Mistral; Llama-3/DeepSeek
+had a point estimate buried in `procrustes_e30_ens_vs_qresp_*.json` with no CI vs SEP, Llama-2 had
+nothing, and no target had a paired-bootstrap `(q_resp_only − SEP)` delta. (E51's
+`se_fidelity_proxy_vs_sep.json` does **not** cover this — its "proxy" is the fused ensemble.) proxy
+= `REFERENCE_multipos_p1024_5arm_ckpt` `q_resp_only` 5 seeds seed-averaged, one forward pass, **no
+target hidden states / labels / sampling / fusion**; SEP = E41-fixed TBG layer, fit on target's OWN
+n2000 train; eval = fresh trivia n1000 (0 id-overlap); paired bootstrap 10k. **Results (Spearman /
+AUROC_se; Δ = q_resp_only − SEP):** Llama-2 (ID) 0.622/0.835 vs 0.523/0.779 → **Δρ +0.095\* / Δauc
++0.056\***; Mistral 0.587/0.852 vs 0.548/0.834 → Δρ +0.035 n.s.; Llama-3 0.581/0.827 vs 0.596/0.843
+→ Δρ −0.014 n.s.; DeepSeek 0.683/0.857 vs 0.583/0.805 → **Δρ +0.098\* / Δauc +0.053\***.
+**The label-free text-only arm is on par with or beats the matched SEP on SE-fidelity — sig. better
+on Llama-2 (ID) + DeepSeek, tie on Mistral + Llama-3, never sig. worse.** Reproduces the E30
+partials (Mistral/Llama-3/DeepSeek) to full precision. Consistent with E33 ("`q_resp_only` is the
+deployable primitive"). Results: `results/e62_qresp_alone_vs_sep.json`. Full arc: EXPERIMENTS.md
+E62. **Infra:** ran via `e62_gpu_swap.sh` — SIGSTOP the training LANE (a stopped-but-alive pid keeps
+the watchdog dormant, so no need to kill the watchdog as in E61), kill+resume the resumable stage1
+child, fence the freed memory with `gpu_reserve`, run, SIGCONT the lane. Cost: one lane retry
+attempt + a model reload on the interrupted Qwen3.8 build, nothing lost.
+
 **E61 (2026-08-29) — RQ1 inference-latency benchmark.** New additive `rq1_latency.py` +
 `run_rq1_latency.sh` + `resume_training_queue.sh`. Llama-2-7b-chat, 200-q held-out test split, one
 L40, bs=1, 10 warm-ups, `torch.cuda.synchronize()` bracketing. **ms/question:** Block A (1 canonical
