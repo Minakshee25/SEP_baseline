@@ -3478,3 +3478,64 @@ reused clustering path reproduces correctly.
 (orchestrator — frees GPU0, runs both env groups, single-shot),
 `amortized_ue/resume_training_queue.sh` (clean watchdog restart used after the run),
 `amortized_ue/results/rq1_latency_Llama-2-7b-chat.json` (per-block stats + per-question arrays).
+
+## E62 — `q_resp_only` ALONE (the reference proxy's text arm, no fusion) vs each target's OWN supervised SEP, all 4 alignment targets — ✅ the label-free text proxy is on par with or beats the matched SEP on SE-fidelity: significantly better on Llama-2 + DeepSeek, statistical tie on Mistral + Llama-3, never significantly worse
+
+**Motivation.** E27/E29/E30 established, for **Mistral**, that the Llama-2-trained REFERENCE proxy's
+`q_resp_only` prediction (question + canonical answer text, **no hidden states / labels / sampling**)
+is competitive with Mistral's matched SEP. The analogous stand-alone number was never cleanly pinned
+for the other three targets:
+- **Llama-3 / DeepSeek** — a `q_resp_only_alone` point estimate is buried inside
+  `procrustes_e30_ens_vs_qresp_<slug>.json`, but its only paired-bootstrap CI there is vs the
+  *ensemble*, never vs SEP.
+- **Llama-2** — never computed at all (Llama-2 is the reference model, so this is the
+  in-distribution baseline of the whole cross-model line).
+- No target had a paired-bootstrap `(q_resp_only − SEP)` delta on SE-fidelity.
+
+Note `results/se_fidelity_proxy_vs_sep.json` (E51) looks like it covers this but does **not** — its
+"proxy" there is the fused **ensemble** of the LOLO / deploy checkpoints, not the reference
+checkpoint's `q_resp_only` arm alone.
+
+**Method (E27/E29 methodology minus the ensemble parts).** `amortized_ue/e62_qresp_alone_vs_sep.py`,
+reusing the audited `compute_sep` / `score_block` from `se_fidelity_proxy_vs_sep.py`:
+- **proxy** = `REFERENCE_multipos_p1024_5arm_ckpt` `q_resp_only` seeds (5), seed-averaged, one
+  forward pass per record via `arm_preds_per_seed(ckpt_dir=REF)`. No target hidden states / labels /
+  sampling / fusion / aligned-z.
+- **SEP** = per-`(position,layer)` LogisticRegression on `best_split`-binarised SE, fit on the
+  target's OWN trivia_qa n2000 **train** split, evaluated on the same fresh n1000. Layer = E41-fixed
+  TBG layer (`exp2_run.BEST_TBG`; Llama-2 TBG:30) — reproduces `results/sep_reference_values.json`
+  to 4 dp for all 4 targets.
+- **eval** = fresh trivia_qa n1000, 0 id-overlap with n2000 (asserted per target).
+- **metric** = Spearman(pred, continuous CAE) + AUROC(pred, SE>thr); paired bootstrap (shared
+  resample indices), 10000 resamples, for `(q_resp_only − SEP)` on both.
+
+**Results (fresh trivia_qa n1000, N=1000/target).**
+
+| target | `q_resp_only` ρ / AUROC | own SEP ρ / AUROC | Δρ (q_resp − SEP) [95% CI] | ΔAUROC [95% CI] |
+|---|---|---|---|---|
+| **Llama-2**\* | 0.622 / 0.835 | 0.523 / 0.779 (TBG:30) | **+0.095 [+0.054, +0.137]** sig | **+0.056 [+0.030, +0.083]** sig |
+| **Mistral** | 0.587 / 0.852 | 0.548 / 0.834 (TBG:31) | +0.035 [−0.013, +0.083] n.s. | +0.018 [−0.013, +0.050] n.s. |
+| **Llama-3** | 0.581 / 0.827 | 0.596 / 0.843 (TBG:31) | −0.014 [−0.058, +0.030] n.s. | −0.017 [−0.046, +0.013] n.s. |
+| **DeepSeek** | 0.683 / 0.857 | 0.583 / 0.805 (TBG:28) | **+0.098 [+0.055, +0.142]** sig | **+0.053 [+0.026, +0.080]** sig |
+
+\* Llama-2 is **in-distribution** — the reference proxy was trained on Llama-2 trivia n2000; the
+fresh n1000 is disjoint-by-id but same model + dataset. Mistral / Llama-3 / DeepSeek are genuine
+**cross-model transfer** (the proxy never saw them).
+
+**Conclusion.** The reference proxy's text-only `q_resp_only` arm — **zero target hidden states,
+labels, or sampling** — is **statistically on par with or better than** each target's own supervised
+SEP on SE-fidelity: significantly better on 2/4 (Llama-2 ID, DeepSeek cross-model), a clean tie on
+2/4 (Mistral, Llama-3), and **never significantly worse**. This is the non-ensembled, per-target
+version of E27's Mistral headline, now confirmed across all four alignment targets. It reproduces
+the pre-existing partial numbers exactly (Mistral 0.587/0.852, Llama-3 0.581/0.827, DeepSeek
+0.683/0.857 — all match `procrustes_e30_ens_vs_qresp_*.json` to full precision) and fills in the
+missing Llama-2 point + all four paired-bootstrap deltas. Consistent with E33's verdict that
+`q_resp_only` is the right primitive for a deployable amortized-UE proxy.
+
+**Artifacts.** `amortized_ue/e62_qresp_alone_vs_sep.py` (`--dry_run` verifies the CPU setup),
+`amortized_ue/results/e62_qresp_alone_vs_sep.json` (per-target blocks: SEP + 5 proxy seeds +
+seed-mean, each with the paired-bootstrap CI vs SEP on both metrics),
+`amortized_ue/e62_gpu_swap.sh` (the race-free GPU-borrow orchestrator used for the run: SIGSTOP the
+GPU1 training lane so the watchdog stays dormant, kill+resume the resumable Qwen3.8 stage1, fence
+the freed memory, run E62, SIGCONT the lane — cost was one lane retry attempt + a model reload on
+Qwen3.8, nothing lost).
