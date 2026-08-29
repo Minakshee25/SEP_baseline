@@ -157,7 +157,20 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (updated 2026-08-27)
+## Current state (updated 2026-08-29)
+
+**E61 (2026-08-29) — RQ1 inference-latency benchmark.** New additive `rq1_latency.py` +
+`run_rq1_latency.sh` + `resume_training_queue.sh`. Llama-2-7b-chat, 200-q held-out test split, one
+L40, bs=1, 10 warm-ups, `torch.cuda.synchronize()` bracketing. **ms/question:** Block A (1 canonical
+fp32 generation) 242.6±67.6 · Block B (10 samples + DeBERTa clustering) **3647±1054** (sampling 2513,
+clustering 1135) · Block C (1 `q_resp_only` proxy pass, deploy ckpt, bf16 Llama-3.2-3B) **41.5±1.1**;
+batched bs=32 Block C 299.9 q/s. **Speedups: B/C bs=1 87.9× · end-to-end (A+B)/(A+C) 13.7× · batched
+~1100×.** Sanity: Block B re-derived CAE 0.570 / n_clusters 2.71 (matches stored labels). Absolute ms
+are L40-specific — the ratios are the result; fp32 target vs bf16 proxy is the honest as-built
+comparison. **Mistral-v0.2 2nd data point deferred** (script + n2000 split ready). Results:
+`results/rq1_latency_Llama-2-7b-chat.json`. Full arc: EXPERIMENTS.md E61. **Infra lesson:** stop the
+training WATCHDOG (not just the lane) before benchmarking on a shared card — it resurrects the GPU0
+lane mid-run; a memory fence can't help (fp32 Llama-2-7b peaks ~33GB of the 44GB card).
 
 **E56 (2026-08-27) — how much of SE's wrong-answer signal survives cheaper supervision?** New
 standalone `supervision_signal_compare.py` (read-only, no GPU, no target-LLM calls) scores 5 signals

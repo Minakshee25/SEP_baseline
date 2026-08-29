@@ -3414,3 +3414,67 @@ changed. trivia in-distribution only (no squad re-run — E57 covers that).
 `scratch_xllm/two_pos_ceiling_freshn1000.json` (per target: single-position baseline, full complement
 sweep with both n2000-test and fresh-n1000 metrics, val-selected combo). Run:
 `python -m amortized_ue.two_pos_ceiling_freshn1000 --data_dir /data2/mn1025/stage1` in `se_probes`.
+
+---
+
+## E61 — RQ1 inference-latency benchmark: one amortized proxy forward pass vs. the N=10 sampling + DeBERTa-clustering pipeline it replaces — ✅ measured; ~88× faster per question (bs=1), ~13.7× end-to-end, ~1100× at batch 32
+
+**Question.** The whole point of the amortized proxy is to avoid the multi-sample cost of semantic
+entropy at inference. RQ1 quantifies that: wall-clock per question for the pipeline being replaced
+(canonical answer + 10 high-temp samples + entailment clustering) vs. the deploy proxy (one
+`q_resp_only` forward pass of frozen Llama-3.2-3B + LoRA).
+
+**Setup.** New additive script `amortized_ue/rq1_latency.py` (imports Stage-1/Stage-2 code
+read-only, modifies nothing). Target **Llama-2-7b-chat**, its **200-question held-out test split**
+(the Stage-2 split of the trivia_qa n2000 Stage-1 set: `test_size=0.1`, seed 42, id-sorted — exactly
+`Stage2Data`). One NVIDIA L40, every model loaded once, 10 warm-up passes before timing,
+`torch.cuda.synchronize()` bracketing every timed region, batch size 1 per question across all 200.
+- **Block A** (shared, report once): 1 canonical low-temp (0.1) generation — `HuggingfaceModel.predict`.
+- **Block B** (baseline replaced): 10 high-temp (1.0) samples via the same `predict` + DeBERTa
+  entailment clustering (`get_semantic_ids` → `cluster_assignment_entropy`), the Stage-1 code path
+  verbatim. Llama-2-7b loads in **fp32** here (the pipeline's loader passes no `torch_dtype`).
+- **Block C** (proposed): 1 `q_resp_only` proxy forward pass, deploy checkpoint
+  (`results/deploy_checkpoints/deploy_q_resp_only_seed0.pt`; pooled Set-1 training, bf16 backbone).
+  Text = `"Question: {q}\nAnswer: {canonical response}"`, mean 24 tokens (max 56, `max_seq_len` 256).
+
+**Results — ms per question (mean ± std, median), n=200.**
+
+| Block | ms/question | median | notes |
+|---|---|---|---|
+| **A** — 1 canonical generation | **242.6 ± 67.6** | 237.9 | fp32 Llama-2-7b, short trivia answers hit the stop token fast |
+| **B** — 10 samples + clustering | **3647.1 ± 1054.2** | 3447.9 | the replaced pipeline |
+|   · sampling (10 generations) | 2512.5 ± 614.3 | 2431.3 | |
+|   · DeBERTa clustering | 1134.7 ± 672.1 | 874.4 | ≤45 pairwise entailment calls/question |
+| **C** — 1 proxy forward pass | **41.5 ± 1.1** | 41.5 | frozen Llama-3.2-3B + LoRA, `q_resp_only` |
+
+**Speedups.**
+- **Block B / Block C, bs=1: 87.9×** — replacing just the SE-estimation step (the canonical answer
+  is produced anyway as the model's actual response).
+- **End-to-end (A+B) / (A+C): 13.7×** — the proxy still consumes the canonical answer text, so
+  Block A is common to both; (242.6+3647.1)/(242.6+41.5).
+- **Batched (batch 32) throughput, Block C: 299.9 q/s (3.33 ms/question amortized)** ⇒ ~1100×
+  vs. Block B per question. (Block B is **not** batchable without modifying the frozen Stage-1
+  sampler — `HuggingfaceModel.predict` generates one sequence per call — so its bs=1 figure is the
+  only one the pipeline supports.)
+
+**Sanity.** Block B re-derived `cluster_assignment_entropy` mean 0.570 / n_clusters mean 2.71 on the
+200 test questions, matching the stored Llama-2 trivia n2000 label distribution (≈0.59) — the
+reused clustering path reproduces correctly.
+
+**Caveats.**
+- One L40; absolute ms are hardware-specific — the **ratios** are the result. GPU0 was dedicated to
+  the benchmark (no memory fence; fp32 Llama-2-7b peaks ~33 GB of the 44 GB card) while GPU1 kept
+  running Stage-1 training, so the timed blocks were uncontended.
+- Block B reuses `predict(..., return_latent=True)` exactly as `stage1.py` does; `generate()` runs
+  with `output_hidden_states=True` regardless, so the choice is timing-neutral (~0).
+- fp32 target vs. bf16 proxy is the honest comparison — it is what each pipeline actually costs as
+  built (the Stage-1 datasets were generated with fp32 Llama-2).
+- Mistral-7B-Instruct-v0.2 as a second architecture point was **not run** (deferred to keep the
+  GPU-pause window short); the script takes `--target Mistral-7B-Instruct-v0.2` and its n2000 split
+  exists at `/data2/mn1025/stage1`.
+
+**Artifacts.** `amortized_ue/rq1_latency.py` (the benchmark; `--blocks A,B` in `se_probes`,
+`--blocks C` in `amortized_stage2_v5`, merges into one JSON), `amortized_ue/run_rq1_latency.sh`
+(orchestrator — frees GPU0, runs both env groups, single-shot),
+`amortized_ue/resume_training_queue.sh` (clean watchdog restart used after the run),
+`amortized_ue/results/rq1_latency_Llama-2-7b-chat.json` (per-block stats + per-question arrays).
