@@ -31,17 +31,19 @@ from amortized_ue.stage2.checkpoint import read_meta, _cfg_from_meta, load_check
 REF = "amortized_ue/stage2/runs/REFERENCE_multipos_p1024_5arm_ckpt/checkpoints"
 
 
-def arm_preds(arm, model_name, dataset, num_samples, ckpt_dir=None, data_dir=None):
+def arm_preds(arm, model_name, dataset, num_samples, ckpt_dir=None, data_dir=None, run_name=None):
     """ckpt_dir defaults to REF (the Llama-2-trained REFERENCE proxy); pass e.g. the E22 Mistral
     proxy's checkpoint dir to score a proxy trained on a DIFFERENT source model (E42). data_dir
-    overrides Stage1Config.output_dir (e.g. a node-local /data2 copy) for the target's records."""
+    overrides Stage1Config.output_dir (e.g. a node-local /data2 copy) for the target's records.
+    run_name overrides Stage1Config.run_name (e.g. a "_nothink" build dir, E55/E65)."""
     # "*" prefix tolerates a filename prefix before "{arm}_seed" (e.g. deploy_checkpoints'
     # "deploy_{arm}_seedN.pt" vs REF/E22's bare "{arm}_seedN.pt") without a false match on a
     # longer arm name (e.g. "z_q_seed" never matches the "z_seed" pattern's substring).
     paths = sorted(glob.glob(os.path.join(ckpt_dir or REF, f"*{arm}_seed*.pt")))
     cfg = dataclasses.replace(_cfg_from_meta(read_meta(paths[0])), stage1_model_name=model_name,
                               stage1_dataset=dataset, stage1_num_samples=num_samples, ood_dataset=None, smoke=False,
-                              **({"stage1_output_dir": data_dir} if data_dir else {}))
+                              **({"stage1_output_dir": data_dir} if data_dir else {}),
+                              **({"stage1_run_name": run_name} if run_name else {}))
     data = Stage2Data(cfg)
     rows = data.split_indices("all"); ids = [data.ids[r] for r in rows]
     model, trainer, acc = None, None, np.zeros(len(rows))

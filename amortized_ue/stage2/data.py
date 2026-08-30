@@ -68,6 +68,7 @@ class Stage2Data:
             num_samples=cfg.stage1_num_samples,
             load_source=cfg.stage1_load_source,
             **({"output_dir": cfg.stage1_output_dir} if cfg.stage1_output_dir else {}),
+            **({"run_name": cfg.stage1_run_name} if cfg.stage1_run_name else {}),
         )
         records = load_records(s1)
         self.ids = sorted(records.keys())               # deterministic; join by id

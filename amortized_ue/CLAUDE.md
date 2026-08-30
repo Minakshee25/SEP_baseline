@@ -220,6 +220,30 @@ loss. Infra: `e64_gpu_swap.sh` (E61/E62/E63 pattern, GPU0, interrupted Qwen3.8-2
 attempt + a reload, 0 records lost). Results: `results/e64_{perid_preds,gemma_baserate_reanalysis}.json`.
 Full arc: EXPERIMENTS.md E64.
 
+**⚠️ E65 (2026-08-30, PRELIMINARY — re-run before citing) — 5-fold leave-one-LLM-out `q_resp_only`
+proxy over the 5 big-tier 27B targets** (`Qwen3.5/3.6/3.8-27B`, `gemma-2-27b-it`, `gemma-3-27b-it`).
+Each fold: proxy (frozen Llama-3.2-3B + LoRA, E53/E63 recipe) trained on the other 4 models' pooled
+n2000 trivia (SE z-scored + features scaled PER model), evaluated seed-averaged on the held-out
+model's own **n2000 te split = 200 rows**. **Preliminary result: proxy mean AUROC_incorrect 0.799 /
+Spearman-vs-SE 0.608 ≈ true 10-sample SE (0.781 / —), > val-selected SEP on ρ (0.560, 4/5 folds),
+< white-box per-layer ridge (0.807 / 0.628, needs target states+labels).** Only significant
+paired-bootstrap delta anywhere: **gemma-3-27b-it — proxy beats true SE +0.123\*** (true SE collapses
+there, near-degenerate SE, mean CAE 0.12). gemma-2-27b-it a soft loss to true SE (−0.047, n.s. —
+same direction as E64's gemma-2 answer-text compression). SEP/ridge pick very late layers as always
+(Qwen 27B ≈64 L → TBG/SLT 62–64; gemma-2-27b → 43–45; gemma-3-27b → 58). **NOT FINAL: 200 rows/fold
+⇒ CIs wide, only 1 delta significant. The correct evaluation is the n1000 shared-ID trivia set**
+(`--only_ids shared_n1000_ids.txt`, 5× power + exact cross-model comparison as in E45/E64), still
+generating for the big-tier models (`training_n2000_jobs.txt`; ~2.5 days GPU for the trivia + squad
+n1000 queue). **Action: when `*_trivia_qa_n1000_nothink` + gemma n1000 shared-ID sets are on disk for
+all 5, re-run `e65_bigtier_lolo.py` on them and treat that as E65.** Infra: `e65_run.sh` borrowed
+GPU1 gap-free from its training lane (SIGSTOP → slack-holder `gpu_reserve --retry_secs` → kill+resume
+resumable stage1 child → train/eval → exit-bridge holds the card until the lane's 27B reload retakes
+it). New additive `--retry_secs` flag in `gpu_reserve.py`; 3 additive shared-code changes for the
+`_nothink` run-name dirs (`Stage2Config.stage1_run_name`, `Stage2Data` plumbing,
+`arm_preds(run_name=None)`). Results `results/e65_bigtier_lolo{,_train_curves}.json`, checkpoints
+`stage2/runs/E65_bigtier_lolo_qresp/checkpoints/<held>/` (15), **W&B
+`stage2_ckpts_E65_bigtier_lolo_qresp:v0`** (run `3lg7ycm4`, verified). Full arc: EXPERIMENTS.md E65.
+
 **E62 (2026-08-29) — `q_resp_only` ALONE (reference proxy text arm, no fusion) vs each target's OWN
 supervised SEP, all 4 alignment targets.** New additive `e62_qresp_alone_vs_sep.py` (reuses
 `compute_sep`/`score_block` from `se_fidelity_proxy_vs_sep.py`; `--dry_run` checks the CPU setup).
@@ -1063,6 +1087,18 @@ squad correctness studies could be extended from 2 targets (Llama-2, Mistral) to
 Qwen `_nothink` big-tier queue finishes, the whole Qwen/Gemma small-tier E45-E54 line could in
 principle be re-run on cleaner (non-thinking-contaminated) data — not yet decided whether the
 gain is worth the compute; ask before repointing any existing analysis at `_nothink` dirs.
+
+**⚠️ Opened by E65 — RE-RUN REQUIRED:** E65 (big-tier 5-fold LOLO `q_resp_only` proxy) ran
+2026-08-30 but is **preliminary — evaluated on 200 rows/fold** (each held-out model's own n2000 te
+split). Preliminary: proxy ≈ true SE on AUROC (0.799 vs 0.781), > SEP on SE-fidelity ρ (0.608 vs
+0.560); only significant delta is gemma-3-27b-it proxy > true SE +0.123\*. **The correct evaluation
+is the n1000 shared-ID trivia set** (`--only_ids /data2/mn1025/stage1_meta/shared_n1000_ids.txt`) —
+5× the power and an exact cross-model comparison (all 5 targets scored on the identical 1000 Qs, the
+E45/E64 convention). Those big-tier n1000 sets are generating now (`training_n2000_jobs.txt`:
+`*_trivia_qa_n1000_nothink` for Qwen3.8-27B in progress; gemma-27b n1000 shared-ID + 5 squad n1000
+after; ~2.5 days GPU). **When all 5 big-tier `*_trivia_qa_n1000_nothink` (+ gemma n1000 shared-ID)
+sets are on disk, re-run `e65_bigtier_lolo.py` pointed at them and treat that as the real E65.**
+See EXPERIMENTS.md E65.
 
 **Pending / carried over:**
 3. **(Partly done)** `amortized_ue/RESULTS.md` now holds the **four-model cross-LLM picture (E20–E30)**:
