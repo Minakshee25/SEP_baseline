@@ -3843,3 +3843,91 @@ per-id proxy preds), `amortized_ue/results/e65_bigtier_lolo_train_curves.json` (
 (15 = 5 folds × 3 seeds), W&B artifact `stage2_ckpts_E65_bigtier_lolo_qresp:v0` (run `3lg7ycm4`,
 1.31 GB, 15 files, pushed + verified). 3 additive shared-code changes for the `_nothink` run-name
 dirs: `Stage2Config.stage1_run_name`, `Stage2Data` plumbing, `arm_preds(..., run_name=None)`.
+
+---
+
+## E66 — swap the proxy BACKBONE (Llama-3.2-3B → Qwen2.5-3B) and re-run the thesis experiment — ✅ **the result is a property of the transferable text signal, not Llama-family kinship.** A Qwen2.5-3B `q_resp_only` LOLO proxy (Mistral held out) is statistically identical to the Llama-3.2-3B one (AUROC_incorrect 0.775 vs 0.767, Δ +0.008 CI includes 0), still beats Mistral's own supervised SEP significantly (+0.061\*), and is on par with / slightly edges true 10-sample SE (+0.028 [+0.000, +0.056]).
+
+**Motivation.** E37/E38's headline — a text-only `q_resp_only` proxy, trained on 3 target LLMs,
+predicts the held-out 4th's semantic entropy and catches its wrong answers, beating that model's own
+supervised SEP — was obtained with a **Llama-family reader** (`meta-llama/Llama-3.2-3B`). A reviewer
+objection: does it work *because* the proxy shares pretraining lineage with the Llama-family targets
+(Platonic-Representation kinship), rather than because the text carries a transferable signal? Test:
+swap the frozen backbone to a **different pretraining lineage** (`Qwen/Qwen2.5-3B`, base, Apache-2.0,
+d_model 2048 vs 3072) and re-run ONE leave-one-LLM-out fold.
+
+**Design — identical recipe to E37/E53/E63/E65, only `proxy_model` changes.** Held out =
+**Mistral-7B-Instruct-v0.2** (the canonical clean cross-family fold, most-compared target across
+E27–E42); trained on Llama-2-7b-chat + Meta-Llama-3-8B-Instruct + deepseek-llm-7b-chat (trivia_qa
+n2000 each; SE z-scored PER source model, train-only stats; 4320 pooled train / 1080 val rows).
+arm = `q_resp_only` (text only: `"Question: {q}\nAnswer: {canonical response}"`) — **no hidden
+states, no Procrustes alignment, so no target-LLM layer choice enters the proxy at all**. Frozen
+Qwen2.5-3B + LoRA r16/α32 on q/k/v/o_proj (15.8M trainable, vs Llama-3.2-3B's ~26M — smaller
+d_model), projector_hidden_dim 1024, k=4, 10 epochs, batch 8 × grad_accum 4 (eff 32), 3 seeds.
+`amortized_stage2_v5` (transformers 4.52.4). One-parameter change (`--proxy_model`), one new
+passthrough in `exp2_run.Stage2Config` — nothing else in the pipeline touched.
+
+**Evaluation — Mistral's FRESH shared-ID trivia n1000 (all 1000 rows, disjoint from every training
+pool: n2000 ∩ n1000 = 0, asserted), the E45/E64/E65 5×-power convention.** incorrect_rate 0.351,
+mean_acc 0.649.
+
+| predictor | AUROC_incorrect | AUROC_binarised_SE | Spearman-vs-SE | label-free on Mistral? |
+|---|---|---|---|---|
+| **proxy_qwen25_q_resp_only** | **0.775** | **0.887** | **0.647** | **yes** |
+| proxy_llama32_3b_q_resp_only (E37/E43 LOLO, same fold, identical rows) | 0.767 | 0.874 | 0.635 | yes |
+| true semantic entropy (10-sample) | 0.747 | 1.000 | 1.000 | NO (is the label) |
+| SEP, fixed TBG:31 (E41/E51/E62) | 0.714 | 0.834 | 0.549 | NO |
+| SEP, val-selected (→ TBG:30) | 0.705 | 0.832 | 0.541 | NO |
+| ridge, own hidden states (white-box ceiling, TBG:31, α=1e4) | 0.724 | 0.883 | 0.632 | NO |
+
+**Paired bootstrap (B=10000, shared resample indices), Δ AUROC_incorrect for the Qwen25 proxy:**
+- **vs the Llama-3.2-3B proxy (same fold): +0.008 [−0.009, +0.025] — CI includes 0.** The two
+  backbones are statistically indistinguishable at detecting Mistral's wrong answers. (Spearman-vs-SE
+  0.647 vs 0.635 and AUROC_SE 0.887 vs 0.874 are likewise within noise, both nominally favouring
+  Qwen.)
+- **vs Mistral's own supervised SEP (fixed TBG:31): +0.061 [+0.033, +0.090] — excludes 0.** Same
+  headline as E38: the label-free cross-LLM proxy significantly beats the in-model probe.
+- vs true 10-sample SE: +0.028 [+0.000, +0.056] — the lower bound just touches 0. Read as **on par
+  with sampling with a slight nominal edge**, consistent with E38's "on par" (and note E39: that
+  parity is in-distribution; not claimed OOD).
+
+**Per-seed (val-pool sanity Spearman): [0.696, 0.682, 0.688]** — tight, and in the same band as the
+Llama-3.2-3B proxy's E37 in-dist numbers. Best epochs 1/5/3 of 5/9/7 run; train ~8–14 min/seed.
+
+**Findings.**
+1. **⭐ The thesis is not a Llama-family artifact.** Swapping the reader to an unrelated pretraining
+   lineage moves every metric by ≤ noise. The transferable predictive content is in the
+   question+response **text**, which any competent small LM can extract — not in representational
+   kinship between the proxy and the Llama-family targets.
+2. **Both label-free text proxies beat the white-box ridge ceiling here** (0.775 / 0.767 vs 0.724
+   AUROC_incorrect) — echoing E53's observation that on *correctness* (as opposed to SE-fidelity) the
+   text arm can exceed the same-model hidden-state ridge, because SE-fidelity ≠ wrong-answer
+   detection (E31/E38 #4: the hidden-state pathway over-fits SE fidelity relative to wrongness).
+3. **Qwen2.5-3B is nominally ahead on all three metrics** (AUROC_inc +0.008, AUROC_SE +0.013,
+   Spearman +0.012) but no CI excludes 0 — do not claim it is *better*, only *at least as good*.
+
+**Caveats.** ONE fold (Mistral), 3 seeds — this establishes robustness of the *headline* to the
+backbone, not a full 4-fold table. N=1000 eval (good power; CIs ±0.02–0.03). The Llama-3.2-3B
+comparison arm is the E37/E43 LOLO checkpoint scored on the same n1000 rows via
+`arm_preds_per_seed_prefixed` (never previously run on this eval set — E51's `fresh` row used the
+DEPLOY proxy, which had Mistral in its pool). ~10% correctness-label noise (E32) ⇒ mild
+under-estimates throughout.
+
+**Infra.** `e66_gpu_swap.sh` — borrowed GPU 1 via the E61–E65 SIGSTOP-the-lane pattern (retry-grab
+slack fence + `e63_lane_safety_net.sh` + `e63_gpu_bridge.sh`). Cost to the training queue: the GPU 1
+lane's Qwen3.8-27B trivia n1000 build was killed at ~940/1000 and **resumed to completion**
+(1000/1000) after the swap; the lane then advanced to Qwen3.6-27B squad n1000. Zero records lost,
+one 27B reload. Total borrow ~37 min (train + eval + W&B push).
+
+**Artifacts.** `amortized_ue/e66_qwen25_proxy_lolo.py`, `amortized_ue/e66_gpu_swap.sh`,
+`amortized_ue/results/e66_qwen25_proxy_lolo.json` (all predictors' per-example preds + bootstrap
+deltas), `amortized_ue/results/e66_qwen25_proxy_lolo_train_curves.json` (per-step loss/lr/grad-norm +
+per-epoch train/val for 3 seeds), checkpoints
+`amortized_ue/stage2/runs/E66_qwen25_proxy_lolo/checkpoints/Mistral-7B-Instruct-v0.2/` (3), W&B
+artifact `stage2_ckpts_E66_qwen25_proxy_lolo:v0` (run `44rn7kmf`, 190 MB, 3 files, pushed +
+verified). **No shared code changed** — the backbone swap is a single `Stage2Config(proxy_model=
+"Qwen/Qwen2.5-3B", ...)` in the new script; `exp2_run.train_arm` already round-trips `proxy_model`
+through `cfg.as_dict()` into the checkpoint meta, and `checkpoint._cfg_from_meta` /
+`ProxyModel.__init__` already rebuild the backbone from that name, so eval/`arm_preds` load Qwen
+automatically. `ProxyModel` needed nothing: LoRA target modules `q/k/v/o_proj` exist in Qwen2.5, the
+projector reads `backbone.config.hidden_size` (→ 2048), tokenizer via `AutoTokenizer`.

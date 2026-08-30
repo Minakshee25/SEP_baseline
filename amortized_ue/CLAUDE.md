@@ -220,6 +220,31 @@ loss. Infra: `e64_gpu_swap.sh` (E61/E62/E63 pattern, GPU0, interrupted Qwen3.8-2
 attempt + a reload, 0 records lost). Results: `results/e64_{perid_preds,gemma_baserate_reanalysis}.json`.
 Full arc: EXPERIMENTS.md E64.
 
+**⭐ E66 (2026-08-30) — swap the proxy BACKBONE (Llama-3.2-3B → Qwen2.5-3B) and re-run the thesis
+experiment: the result is backbone-agnostic.** Objection tested: does E37/E38's headline hold
+*because* the proxy shares Llama-family pretraining lineage with the Llama-family targets? Swapped
+the frozen backbone to `Qwen/Qwen2.5-3B` (base, Apache-2.0, d_model 2048, 15.8M LoRA params), ONE
+leave-one-LLM-out fold — **Mistral held out**, trained on Llama-2 + Llama-3 + DeepSeek trivia n2000,
+arm `q_resp_only` (text only, no hidden states / layers / alignment), 3 seeds, recipe identical to
+E37/E53/E63/E65. Eval on Mistral's fresh shared-ID trivia n1000. **Results (AUROC_incorrect /
+Spearman-vs-SE):** Qwen2.5-3B proxy **0.775 / 0.647** vs the Llama-3.2-3B same-fold proxy 0.767 /
+0.635 → **Δ AUROC_inc +0.008 [−0.009, +0.025], CI includes 0 (statistically identical)**; still
+beats Mistral's own supervised SEP (fixed TBG:31) by **+0.061 [+0.033, +0.090]\*** (same headline as
+E38); on par with / slightly edges true 10-sample SE (+0.028 [+0.000, +0.056]); both text proxies
+beat the white-box own-model ridge ceiling (0.724) — SE-fidelity ≠ wrong-answer detection
+(E31/E38 #4). **Conclusion: the transferable predictive content is in the question+response TEXT,
+which any competent small LM extracts — not representational kinship between proxy and targets.**
+**No shared code changed** — backbone swap is one `Stage2Config(proxy_model=...)` in the new script;
+`train_arm` round-trips `proxy_model` via `cfg.as_dict()` into checkpoint meta, `_cfg_from_meta` /
+`ProxyModel.__init__` rebuild it on load; LoRA `q/k/v/o_proj` + projector `backbone.config.hidden_size`
+work unchanged for Qwen2.5. Caveats: ONE fold (not a 4-fold table), 3 seeds; N=1000 eval (CIs
+±0.02–0.03). Infra: `e66_gpu_swap.sh` (E61–E65 SIGSTOP-lane borrow, GPU1, ~37 min, 0 records lost —
+interrupted Qwen3.8-27B trivia n1000 resumed to 1000/1000). Qwen2.5-3B weights cached at
+`/data2/mn1025/hf_cache`. Artifacts: `e66_qwen25_proxy_lolo.py`, `e66_gpu_swap.sh`,
+`results/e66_qwen25_proxy_lolo{,_train_curves}.json`, checkpoints
+`stage2/runs/E66_qwen25_proxy_lolo/checkpoints/Mistral-7B-Instruct-v0.2/` (3), W&B
+`stage2_ckpts_E66_qwen25_proxy_lolo:v0` (run `44rn7kmf`, verified). Full arc: EXPERIMENTS.md E66.
+
 **⚠️ E65 (2026-08-30, PRELIMINARY — re-run before citing) — 5-fold leave-one-LLM-out `q_resp_only`
 proxy over the 5 big-tier 27B targets** (`Qwen3.5/3.6/3.8-27B`, `gemma-2-27b-it`, `gemma-3-27b-it`).
 Each fold: proxy (frozen Llama-3.2-3B + LoRA, E53/E63 recipe) trained on the other 4 models' pooled
