@@ -28,12 +28,27 @@ def main():
     ap.add_argument("--parent_pid", type=int, default=None, help="exit when this pid dies")
     ap.add_argument("--sentinel", default=None, help="exit when this file is removed")
     ap.add_argument("--poll", type=float, default=5.0)
+    ap.add_argument("--retry_secs", type=float, default=0.0,
+                    help=">0: keep retrying (poll every 0.1s) up to this many seconds to grab the "
+                         "FULL --hold_mib before giving up/backing off -- for a gap-free grab the "
+                         "instant a co-tenant frees memory (e.g. a killed sibling job)")
     a = ap.parse_args()
 
     import torch
     torch.cuda.set_device(a.device)
-    hold, x = a.hold_mib, None
-    while hold > 0:                                            # back off if the card is tighter than asked
+
+    x = None
+    if a.retry_secs > 0:                                       # spin for the full amount to appear
+        deadline = time.time() + a.retry_secs
+        while time.time() < deadline:
+            try:
+                x = torch.empty(a.hold_mib * 1024 * 1024, dtype=torch.uint8, device="cuda")
+                break
+            except RuntimeError:
+                torch.cuda.empty_cache()
+                time.sleep(0.1)
+    hold = a.hold_mib
+    while x is None and hold > 0:                              # fallback: back off if still short
         try:
             x = torch.empty(hold * 1024 * 1024, dtype=torch.uint8, device="cuda")
             break
@@ -42,6 +57,7 @@ def main():
     if x is None:
         print("gpu_reserve: nothing to hold (no free memory)", flush=True)
         return
+    hold = x.numel() // (1024 * 1024)
     print(f"gpu_reserve: holding {hold} MiB on cuda:{a.device} (pid {os.getpid()}, parent {a.parent_pid})", flush=True)
 
     running = {"v": True}

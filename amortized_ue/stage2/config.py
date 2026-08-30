@@ -22,6 +22,7 @@ class Stage2Config:
     stage1_num_samples: int = 2000             # big-data run (n2000_full)
     stage1_load_source: str = "local"          # "local" | "wandb"
     stage1_output_dir: str | None = None       # override Stage1Config.output_dir (e.g. a /data2 copy); None -> default
+    stage1_run_name: str | None = None          # override Stage1Config.run_name (e.g. a "_nothink" build dir); None -> auto
 
     # --- OOD evaluation (train on stage1_dataset, eval on a 2nd dataset) ---------
     ood_dataset: str | None = None             # e.g. "squad"; None disables OOD
