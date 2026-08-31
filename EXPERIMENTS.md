@@ -3770,79 +3770,110 @@ Qwen3.8-27B build, **0 records lost** (resumed from 1755/2000). GPU1 / E63 untou
 
 ---
 
-## E65 — leave-one-LLM-out `q_resp_only` proxy over the 5 big-tier 27B targets — ⚠️ **PRELIMINARY / NOT THE FINAL RESULT.** Evaluated on the held-out model's own **n2000 trivia test split = 200 rows/fold**. The correct evaluation is on the **1000-sample shared-ID trivia set** (n1000, `--only_ids shared_n1000_ids.txt`), which is still being generated for the big-tier models (Qwen3.8-27B trivia n1000 in progress; the 5 squad n1000 sets after). **Re-run E65 on the n1000 sets before citing any headline.**
+## E65 — leave-one-LLM-out `q_resp_only` proxy over the 5 big-tier 27B targets — ✅ **the thesis extends to the Qwen-27B family (proxy on par with true SE, beats SEP) but NOT uniformly to Gemma-27B (gemma-2-27b-it a significant loss to sampling).** Final eval on the **1000-sample shared-ID trivia set** (n1000, all 1000 Qs scored per fold, 5× the preliminary power; every target on the identical questions as E45/E64). The preliminary 200-row eval's one "significant" delta (gemma-3-27b-it proxy > true SE +0.123\*) was a small-sample artefact — it collapses to +0.014 n.s. at n1000.
 
 **Goal.** The E37/E53/E63 thesis test, on a fresh tier: train ONE `q_resp_only` proxy (frozen
 Llama-3.2-3B + LoRA, no target hidden states, no target labels, no sampling) on 4 of the 5 big-tier
 27B targets' pooled SE data, hold out the 5th, and ask whether it predicts the held-out model's
 semantic entropy / wrong answers. Targets: `Qwen3.5-27B`, `Qwen3.6-27B`, `Qwen3.8-27B`,
-`gemma-2-27b-it`, `gemma-3-27b-it` (all `_nothink` / `_full` trivia_qa n2000 builds).
+`gemma-2-27b-it`, `gemma-3-27b-it` (all `_nothink` / `_full` trivia_qa builds).
 
-**Method** (`amortized_ue/e65_bigtier_lolo.py`, launched via `e65_run.sh` which borrowed GPU1 from
-its training lane gap-free — SIGSTOP lane → slack-holder `gpu_reserve` → kill+resume the resumable
-stage1 child → train/eval → exit-bridge holds the card until the lane's 27B reload retakes it).
-5 folds. Each fold: pool the other 4 models' n2000 (SE z-scored **per model**, features scaled per
-model), 1440 train / 360 val per source → 5760 train rows; `q_resp_only` proxy, projector 1024,
-k=4, 3 seeds, batch 8 × grad-accum 4, 10 epochs (identical recipe to E53/E63). Evaluate seed-averaged
-on the held-out model's **own n2000 te split (200 rows)** — the E37-consistent split, same 200 rows
-scored for every predictor. Baselines: true 10-sample SE; the held-out model's own val-selected
-single-layer **SEP** (logistic, `best_split`); a leak-free per-layer **ridge** ceiling (fit on the
-held-out model's own train, α∈{1e2…1e4}). Paired bootstrap (10 000 resamples) on AUROC_incorrect.
+**Method** (`amortized_ue/e65_bigtier_lolo.py`). 5 folds. Each fold pools the **other 4 models'
+n2000** trivia (SE z-scored **per model**, features scaled per model), 1440 train / 360 val per
+source → 5760 train rows; `q_resp_only` proxy, projector 1024, k=4, 3 seeds, batch 8 × grad-accum 4,
+10 epochs (identical recipe to E53/E63; the 15 checkpoints from the preliminary run are reused
+unchanged — the training pool does not depend on the eval set). **Final eval** (`--stage eval
+--eval_n 1000`): the seed-averaged proxy is scored on the held-out model's **full n1000 shared-ID
+set (all 1000 rows)**; the supervised SEP + ridge baselines are **fit on that model's own n2000
+train/val and predicted onto the n1000 rows** — leak-free because n2000 ∩ n1000 = 0 (asserted per
+fold). Baselines: true 10-sample SE; val-selected single-layer **SEP** (logistic, `best_split`);
+leak-free per-(pos,layer) **ridge** ceiling (α∈{1…1e4}, layer picked on n2000 val Spearman).
+Paired bootstrap (10 000 resamples) on AUROC_incorrect, shared indices.
 
-**Results** (200 rows/fold; ρ = Spearman vs true SE, AUROC = AUROC_incorrect):
+Infra: `e65_eval_n1000.sh` borrowed GPU1 from its training lane gap-free — poll until all 5 n1000
+sets on disk → SIGSTOP lane → `e63_lane_safety_net.sh` armed → slack-holder `gpu_reserve --retry_secs`
+→ kill the resumable stage1 child → `--stage eval --eval_n 1000` (~40 min, 3B inference only) →
+`e65_bridge.sh` holds the freed card above the lane's 27B-reload budget → SIGCONT lane. Ran
+2026-08-30 21:35→22:17, rc=0, lane resumed clean (one Qwen3.6-27B-squad reload, 0 records lost).
+GPU0's lane untouched throughout.
 
-| held-out target | SE ρ | ridge ρ | SEP ρ | proxy ρ | SE AUROC | ridge AUROC | SEP AUROC | proxy AUROC | SEP pos:L | ridge pos:L |
-|---|---|---|---|---|---|---|---|---|---|---|
-| Qwen3.5-27B | 1.000 | 0.685 | 0.660 | 0.676 | 0.834 | 0.865 | 0.870 | 0.854 | TBG:63 | TBG:63 |
-| Qwen3.6-27B | 1.000 | 0.626 | 0.510 | 0.629 | 0.846 | 0.821 | 0.778 | 0.840 | SLT:62 | SLT:49 |
-| Qwen3.8-27B | 1.000 | 0.744 | 0.698 | 0.718 | 0.854 | 0.851 | 0.838 | 0.855 | TBG:64 | SLT:48 |
-| gemma-2-27b-it | 1.000 | 0.648 | 0.613 | 0.595 | 0.800 | 0.749 | 0.740 | 0.752 | TBG:43 | TBG:45 |
-| gemma-3-27b-it | 1.000 | 0.440 | 0.321 | 0.423 | 0.570 | 0.751 | 0.663 | 0.694 | SLT:58 | TBG:58 |
-| **mean** | — | **0.628** | **0.560** | **0.608** | **0.781** | **0.807** | **0.778** | **0.799** | | |
+### Final results — n1000 shared-ID trivia, all 1000 Qs/fold
 
-Per-fold `best_split` (SE binarisation threshold): 0.814 for all except gemma-3-27b-it (0.328 —
-its SE distribution is near-degenerate, mean CAE 0.12). Incorrect-rate 0.20–0.37 across folds.
+**Spearman vs SE** (SE-fidelity; true SE = 1.000 trivially, it is the label):
 
-**Paired bootstrap deltas** (proxy AUROC_incorrect − baseline; CI excludes 0 marked *):
+| held-out target | proxy ρ (label-free) | SEP ρ | ridge ρ | SEP pos:L | ridge pos:L |
+|---|---|---|---|---|---|
+| Qwen3.5-27B | 0.711 | 0.674 | 0.728 | TBG:63 | TBG:63 |
+| Qwen3.6-27B | 0.690 | 0.629 | 0.699 | SLT:62 | SLT:49 |
+| Qwen3.8-27B | 0.728 | 0.703 | 0.742 | TBG:64 | SLT:48 |
+| gemma-2-27b-it | 0.576 | 0.625 | 0.687 | TBG:43 | TBG:45 |
+| gemma-3-27b-it | 0.424 | 0.403 | 0.484 | SLT:58 | TBG:58 |
+| **mean** | **0.626** | **0.607** | **0.668** | | |
 
-| fold | vs SEP | vs true SE |
-|---|---|---|
-| Qwen3.5-27B | −0.017 [−0.066, +0.030] | +0.020 [−0.033, +0.076] |
-| Qwen3.6-27B | +0.063 [−0.003, +0.129] | −0.006 [−0.066, +0.055] |
-| Qwen3.8-27B | +0.017 [−0.037, +0.074] | +0.001 [−0.049, +0.052] |
-| gemma-2-27b-it | +0.012 [−0.056, +0.080] | −0.047 [−0.103, +0.009] |
-| gemma-3-27b-it | +0.030 [−0.070, +0.132] | **+0.123 [+0.033, +0.213]** * |
+**AUROC_incorrect** (wrong-answer detection):
 
-**Read (preliminary).**
-- **AUROC_incorrect:** proxy mean 0.799 ≈ true SE 0.781 ≈ SEP 0.778, all below the white-box
-  own-model ridge (0.807). No proxy-vs-SEP CI excludes 0 on any fold (widest edge Qwen3.6 +0.063,
-  just touches 0). The only significant delta anywhere is **gemma-3-27b-it: proxy beats true SE by
-  +0.123*** — true SE collapses there (0.570) because its SE has almost no variance; the text proxy
-  still reads its wrong answers.
-- **SE-fidelity (ρ):** proxy mean 0.608 **> SEP 0.560** (better on 4/5 folds) and within ~0.02 of the
-  white-box ridge (0.628) — strong given the proxy is label-free and never saw these targets.
-- **gemma-2-27b-it** is again the soft loss to true SE (−0.047, n.s.) — same direction as E45/E64's
-  gemma-2-9b-it finding (compressed answer-text signal for the gemma-2 line).
-- SEP / ridge both select **very late layers** (Qwen 27B ≈ 64 layers → TBG/SLT 62–64; gemma-2-27b
-  ≈ 46 → 43–45; gemma-3-27b → 58), the usual late-layer SEP pattern; all ridges chose max α.
+| held-out target | proxy (label-free) | true SE | SEP | ridge | Δ proxy−SEP [95%] | Δ proxy−true SE [95%] |
+|---|---|---|---|---|---|---|
+| Qwen3.5-27B | 0.782 | 0.784 | 0.764 | 0.770 | +0.018 [−0.005, +0.042] | −0.002 [−0.024, +0.021] |
+| Qwen3.6-27B | 0.778 | 0.780 | 0.733 | 0.762 | **+0.045 [+0.019, +0.071] \*** | −0.002 [−0.026, +0.022] |
+| Qwen3.8-27B | 0.799 | 0.817 | 0.766 | 0.779 | **+0.033 [+0.011, +0.056] \*** | −0.018 [−0.040, +0.005] |
+| gemma-2-27b-it | 0.710 | 0.766 | 0.720 | 0.742 | −0.010 [−0.041, +0.020] | **−0.056 [−0.087, −0.026] \*** |
+| gemma-3-27b-it | 0.666 | 0.652 | 0.699 | 0.719 | −0.033 [−0.072, +0.005] | +0.014 [−0.022, +0.050] |
+| **mean** | **0.747** | **0.760** | **0.736** | **0.754** | | |
 
-**Why this is not final.** 200 rows/fold → every bootstrap CI is wide (E37's known caveat) and only
-one delta reaches significance. The E37/E53/E63 headline claims ("proxy on par with true SE on
-correctness, significantly beats SEP") need the **fresh n1000 shared-ID trivia set** — 5× the
-evaluation power, and the shared IDs make the cross-model comparison exact (every target scored on
-the identical 1000 questions, as in E45/E64). Those datasets are queued in
-`/data2/mn1025/stage1_meta/training_n2000_jobs.txt` and generating now (~0.8 q/min for the Qwen 27B
-`_nothink` builds, ~1.5 q/min for gemma-27b; ~2.5 days of GPU time to clear the trivia + squad
-n1000 queue). **Action: once `*_trivia_qa_n1000_nothink` (+ the gemma n1000 shared-ID sets) are on
-disk for all 5 big-tier models, re-run `e65_bigtier_lolo.py` pointed at them and treat that as E65.**
+AUROC vs binarised-SE means: proxy 0.876, SEP 0.868, ridge 0.902, true SE 1.000. Per-fold
+`best_split` 0.814 for all except gemma-3-27b-it (0.328 — near-degenerate SE, low mean CAE).
+Incorrect-rate 0.24–0.37. SEP/ridge pick very late layers as always (Qwen 27B ≈ 64 L → TBG/SLT
+62–64; gemma-2-27b ≈ 46 → 43–45; gemma-3-27b → 58); all ridges chose max α = 1e4.
 
-**Artifacts.** `amortized_ue/e65_bigtier_lolo.py`, `amortized_ue/e65_run.sh`,
-`amortized_ue/e65_bridge.sh`, `amortized_ue/results/e65_bigtier_lolo.json` (5 folds + `_summary` +
-per-id proxy preds), `amortized_ue/results/e65_bigtier_lolo_train_curves.json` (per-seed loss curves
-+ val-pool sanity), checkpoints `amortized_ue/stage2/runs/E65_bigtier_lolo_qresp/checkpoints/<held>/`
-(15 = 5 folds × 3 seeds), W&B artifact `stage2_ckpts_E65_bigtier_lolo_qresp:v0` (run `3lg7ycm4`,
-1.31 GB, 15 files, pushed + verified). 3 additive shared-code changes for the `_nothink` run-name
-dirs: `Stage2Config.stage1_run_name`, `Stage2Data` plumbing, `arm_preds(..., run_name=None)`.
+**Read (final).**
+- **Qwen-27B family — thesis holds.** For all 3 Qwen-27B targets the **label-free** proxy is
+  **statistically on par with true 10-sample SE** on wrong-answer detection (Δ CIs all include 0)
+  and **significantly beats the supervised SEP on 2/3** (Qwen3.6 +0.045\*, Qwen3.8 +0.033\*; Qwen3.5
+  +0.018 n.s.) — no sampling, no target hidden states, no target labels, never saw the target.
+- **Gemma-27B family — thesis does NOT extend uniformly.** **gemma-2-27b-it is a *significant* loss
+  to true SE (−0.056\*)** — the same direction and now the same significance as E45/E64's
+  gemma-2-9b-it finding (compressed answer-text signal for the gemma-2 line), confirmed at 27B with
+  proper power. **gemma-3-27b-it is weak across the board** (proxy 0.666, below both SEP 0.699 and
+  ridge 0.719, though none significant): its SE is near-degenerate so every SE-derived predictor
+  struggles, and the proxy loses its SE-fidelity edge there too (ρ 0.424).
+- **SE-fidelity (ρ):** proxy mean **0.626 > SEP 0.607** (better on 4/5 folds; loses only on
+  gemma-2-27b-it) and within ~0.04 of the white-box ridge (0.668). The proxy is **never
+  significantly worse than SEP** on AUROC on any fold.
+- **vs the white-box ridge ceiling:** ridge mean 0.754 ≥ proxy 0.747 on AUROC and 0.668 > 0.626 on
+  ρ — the ridge (needs the target's own hidden states + labels) stays ahead, as in E8–E10, but the
+  gap the label-free proxy gives up is small.
+
+**Correction to the preliminary (200-row) run.** The preliminary read "proxy mean 0.799 ≈ true SE
+0.781, only significant delta gemma-3-27b-it proxy > true SE +0.123\*". At n1000: (1) proxy mean
+drops to 0.747, now nominally **below** true SE (0.760) rather than above; (2) the gemma-3 delta
+collapses to **+0.014 n.s.** — the 200-row true-SE AUROC there (0.570) was a small-sample artefact,
+0.652 at n1000; (3) the proxy-vs-SEP edge that only *touched* 0 at 200 rows now **clears 0
+significantly on 2 folds**; (4) gemma-2-27b-it's soft −0.047 loss to true SE becomes a **significant
+−0.056**. Net: a more sober result — the thesis is family-dependent, not universal at the 27B tier.
+
+**Caveats.** 3 seeds; the proxy pool is 4 models (Llama-3.2-3B backbone reads text only, so the
+architecture/vendor of the 27B targets never enters); gemma-3-27b-it's near-degenerate SE makes its
+fold noisy for all predictors; SEP uses val-selection (no E41-style CV layer picked for the big
+tier yet).
+
+**Artifacts.** `amortized_ue/e65_bigtier_lolo.py` (now takes `--eval_n`: `2000` = the preliminary
+own-n2000-te-split path → `results/e65_bigtier_lolo.json`; `1000` = this final path → separate
+`results/e65_bigtier_lolo_n1000.json`; new `--stage check_eval`),
+`amortized_ue/e65_eval_n1000.sh` (the GPU1-borrow wrapper), `amortized_ue/e65_run.sh` +
+`e65_bridge.sh` + `e63_lane_safety_net.sh`. Results:
+`amortized_ue/results/e65_bigtier_lolo_n1000.json` (5 folds + `_summary` + per-id proxy preds / true
+SE / SEP preds / incorrect labels / ids), `..._train_curves.json` (unchanged, preliminary run).
+Checkpoints `amortized_ue/stage2/runs/E65_bigtier_lolo_qresp/checkpoints/<held>/` (15 = 5 folds × 3
+seeds; reused, not retrained), W&B `stage2_ckpts_E65_bigtier_lolo_qresp:v0` (run `3lg7ycm4`, 1.31 GB,
+verified). Shared-code changes (all additive, backward-compatible): `Stage2Config.stage1_run_name`,
+`Stage2Data` plumbing, `arm_preds(..., run_name=None)`, `gpu_reserve.py --retry_secs`,
+`e65_bigtier_lolo.do_eval(eval_n=...)` + `do_check(require_manifest=...)`.
+
+**Preliminary (200 rows/fold, SUPERSEDED — do not cite).** Own-n2000-te-split eval, `results/e65_bigtier_lolo.json`:
+proxy mean AUROC 0.799 / ρ 0.608, true SE 0.781, SEP 0.778 / 0.560, ridge 0.807 / 0.628; only
+significant delta gemma-3-27b-it proxy − true SE +0.123\*. Wide CIs (200 rows), no proxy-vs-SEP CI
+cleared 0. The n1000 table above replaces every number here.
 
 ---
 
