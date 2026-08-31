@@ -4034,3 +4034,98 @@ through `cfg.as_dict()` into the checkpoint meta, and `checkpoint._cfg_from_meta
 `ProxyModel.__init__` already rebuild the backbone from that name, so eval/`arm_preds` load Qwen
 automatically. `ProxyModel` needed nothing: LoRA target modules `q/k/v/o_proj` exist in Qwen2.5, the
 projector reads `backbone.config.hidden_size` (→ 2048), tokenizer via `AutoTokenizer`.
+
+## E67 — MILESTONE: canonical eval-only baseline vs. RAW frozen cross-LLM transfer of the single-model 5-arm proxies, ID + OOD — ✅ **`z`, `z_q`, `z_q_resp` are DEAD ENDS for cross-LLM transfer; `q_only` transfers but is strictly dominated by `q_resp_only`. `q_resp_only` is the one arm to carry forward.**
+
+**What.** First consolidated head-to-head, on the same held-out rows, of (a) each of the 4 original
+target LLMs' OWN uncertainty estimators and (b) the RAW frozen transfer of the single-model 5-arm
+proxies across an LLM swap — with NO retraining, refitting, layer-selection, Procrustes alignment,
+target labels, or pooled/LOLO checkpoints. Pure eval of the existing `REFERENCE` (Llama-2) and `E22`
+(Mistral) checkpoints (5 arms × 5 seeds each), scored per seed then averaged (mean ± std; the
+prediction-ensemble metric is reported separately in the JSON, never as the headline).
+
+**Regime.**
+- **Own estimators** (per target): True 10-sample SE; supervised **SEP** at the E36/E41 fixed CV
+  layer (Llama-2 TBG:30 / Mistral TBG:31 / Llama-3 TBG:31 / DeepSeek TBG:28), fit on that target's
+  own trivia n2000 train split; own single-layer **Ridge** at the same fixed layer (α on val
+  Spearman); and — for Llama-2 & Mistral only — that target's OWN single-model 5-arm proxy.
+- **Transfer** (source → target, all 5 arms): Mistral→Llama-2, Llama-2→Mistral, Llama-2→Llama-3,
+  Llama-2→DeepSeek. The source checkpoint's own (position, layer, z_inputs, k, target-SE
+  standardize transform) are used unchanged on the target's hidden states + text.
+- **Both regimes**: ID = fresh TriviaQA n1000 (id-disjoint from any n2000), OOD = SQuAD n1000.
+  `incorrect = accuracy < 0.5`. Metrics: Spearman(pred, continuous target SE) and
+  AUROC(pred, incorrect).
+
+**Sanity (hard-gated; the eval script `raise SystemExit`s if these miss by >0.05).** E23 fresh-n1000
+Spearman means reproduced to ≤0.002 on both known transfers (Mistral→Llama-2: z .032/.031,
+q_resp_only .524/.523; Llama-2→Mistral: z_q_resp .122/.124, q_resp_only .530/.531). E50 q_resp_only
+prediction-ensemble AUROC reproduced to ≤0.0004 (0.7200 vs 0.7197; 0.7249 vs 0.7253).
+
+**Results — cross-LLM transfer, mean ± std over 5 seeds (Spearman-vs-SE / AUROC_incorrect):**
+
+| source → target | z | z_q | z_q_resp | q_only | **q_resp_only** |
+|---|---|---|---|---|---|
+| Mistral → Llama-2 (ID)  | 0.032 / 0.504 | 0.013 / 0.493 | 0.042 / 0.524 | 0.478 / 0.683 | **0.524 / 0.696** |
+| Mistral → Llama-2 (OOD) | 0.017 / 0.508 | −0.015 / 0.479 | 0.018 / 0.506 | 0.286 / 0.605 | **0.472 / 0.675** |
+| Llama-2 → Mistral (ID)  | 0.014 / 0.503 | 0.074 / 0.521 | 0.122 / 0.544 | 0.475 / 0.660 | **0.530 / 0.705** |
+| Llama-2 → Mistral (OOD) | −0.036 / 0.481 | 0.043 / 0.506 | 0.088 / 0.538 | 0.275 / 0.607 | **0.405 / 0.672** |
+| Llama-2 → Llama-3 (ID)  | −0.022 / 0.487 | 0.083 / 0.526 | 0.097 / 0.533 | 0.484 / 0.659 | **0.518 / 0.678** |
+| Llama-2 → Llama-3 (OOD) | 0.073 / 0.521 | 0.004 / 0.495 | 0.115 / 0.533 | 0.326 / 0.593 | **0.398 / 0.610** |
+| Llama-2 → DeepSeek (ID) | 0.018 / 0.505 | 0.082 / 0.518 | 0.143 / 0.564 | 0.515 / 0.690 | **0.614 / 0.737** |
+| Llama-2 → DeepSeek (OOD)| 0.000 / 0.497 | 0.061 / 0.505 | 0.097 / 0.521 | 0.295 / 0.598 | **0.375 / 0.645** |
+
+**Findings.**
+1. **⭐ `z` / `z_q` / `z_q_resp` are dead ends for cross-LLM.** On every model swap, both regimes:
+   `z` is chance (Spearman ≈ 0, |ρ| ≤ 0.07; AUROC 0.48–0.52). Bolting text onto the hidden-state
+   arm does **not** rescue it — `z_q` and `z_q_resp` stay at chance-to-weak (ρ ≤ 0.14, AUROC ≤ 0.56)
+   and `z_q_resp` carries huge seed variance (std up to ±0.22): the aligned-free hidden state is
+   **noise, not signal**, once the reader is a different model. This closes the "does the raw
+   hidden state transfer?" question opened at E20 — definitively no, and no amount of text
+   concatenation fixes it without an explicit alignment step (E24–E27 Procrustes is a separate line).
+2. **⭐ `q_only` transfers but is strictly dominated by `q_resp_only`.** `q_only` ≥ `q_resp_only`
+   on **0 of 8** (source,target,regime) cells; the gap is small ID (~0.03–0.10 AUROC) and **widens
+   sharply OOD** (q_only ρ collapses to 0.28–0.33 / AUROC 0.59–0.61, vs q_resp_only 0.38–0.47 /
+   0.61–0.68). The **response text is the transferable channel**; the question alone is a weaker
+   proxy that craters under a dataset shift (consistent with E39). `q_only` is therefore also a
+   dead end as a *standalone* arm — kept only as an ablation control.
+3. **`q_resp_only` is the arm to carry forward.** It transfers usefully on all 4 target pairs:
+   ID ρ 0.52–0.61 / AUROC 0.68–0.74; even under the compound model+dataset shift it holds
+   ρ 0.38–0.47 / AUROC 0.61–0.68, and stays above each target's own supervised **SEP OOD** on
+   3 of 4 targets (Llama-2 0.675 vs SEP 0.621; Mistral 0.672 vs 0.669; DeepSeek 0.645 vs 0.582;
+   Llama-3 0.610 vs 0.612 — the one tie).
+4. **Ceiling context (do not overclaim).** Raw single-source transfer does **not** beat a target's
+   own white-box estimators in-distribution (own Ridge ID ρ 0.60–0.66, own self-proxy z ID ρ
+   0.56–0.63 — all higher than the transferred q_resp_only). Its value is that it is the *only*
+   thing that runs cross-model with zero refitting; the white-box probes structurally cannot. It is
+   also below true 10-sample SE (AUROC 0.72–0.80) — a cheap one-pass amortization, not a sampling
+   replacement, especially OOD. The **stronger deployable form is the pooled/LOLO-trained
+   `q_resp_only`** (E37/E38: statistically on par with true SE in-distribution), which is the same
+   arm — this milestone establishes *which arm*, not the final training recipe.
+
+**Milestone status / what's a dead end.** `z`, `z_q`, `z_q_resp`, and standalone `q_only` are
+retired as cross-LLM predictors. All further cross-LLM work builds on **`q_resp_only`** (pooling
+more source LLMs, backbone swaps — E63/E66 already on this track — and OOD hardening).
+
+**Infra.** Zero NFS dependency: the 2.9 GB × 2 source checkpoint dirs were mirrored to
+`/data2/mn1025/stage2_checkpoints/`, backbone from `/data2/mn1025/hf_cache` (`HF_HUB_OFFLINE=1`),
+data from `/data2/mn1025/stage1`, env the `/data2` venv `amortized_stage2_v5` — verified by
+inspecting the running process's memory maps (0 `/vol/bitbucket` entries, 1024 `/data2`). GPU
+borrowed twice via the E61–E66 SIGSTOP-the-lane pattern (`cross_llm_5arm_gpu_swap.sh`, GPU 1); the
+Qwen3.6-27B squad n1000 build was killed at ~601/1000 and resumed clean each time, 0 records lost.
+
+**Artifacts.**
+- `amortized_ue/cross_llm_5arm_eval.py` — canonical eval (ID trivia + OOD squad, 4 pairs, 5 arms,
+  5 seeds, per-seed metrics + hard E23/E50 sanity gate).
+- `amortized_ue/cross_llm_5arm_gpu_swap.sh` — NFS-free GPU borrow wrapper.
+- `amortized_ue/eval_samemodel_5arm.py` + `amortized_ue/eval_5arm_gpu_swap.sh` — the same-model
+  5-arm proxy eval (own-target column; reproduces E23 ID + E12/E18 Llama-2 OOD Spearman exactly).
+- `amortized_ue/baseline_table_freshn1000.py` / `baseline_table_squad_ood.py` +
+  `fit_save_baselines.py` — True SE / SEP / Ridge on fresh n1000 and squad n1000; the SEP+Ridge
+  fits are **saved** to `amortized_ue/checkpoints/baselines/<model>/` (scaler + model + threshold +
+  alpha + split ids) and reloaded for the OOD eval with no refit.
+- `amortized_ue/build_cross_llm_combined_table.py` → **`amortized_ue/results/cross_llm_5arm_combined_table.{json,csv}`**
+  (32 rows: 4 targets × (3 baseline + 5 proxy arms); own vs transfer, ID + OOD, mean/std).
+- Result JSONs: `cross_llm_5arm_fresh_n1000_correctness.json` (8 entries: 4 pairs × {trivia,squad}),
+  `samemodel_5arm_id_ood.json`, `baseline_table_freshn1000.json`,
+  `baseline_table_squad_ood_n1000.json`, `fit_save_baselines_id_eval.json`.
+- Source checkpoints mirrored: `/data2/mn1025/stage2_checkpoints/{REFERENCE_multipos_p1024_5arm_ckpt,E22_Mistral_proxy_p1024_5arm_ckpt}/`.

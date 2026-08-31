@@ -1,0 +1,139 @@
+{
+  "_meta": {
+    "description": "Baseline table (True SE / SEP / own-model single-layer Ridge) on the clean fresh trivia_qa n1000 eval sets, fixed CV-picked TBG layers, NO new training.",
+    "fit": "trivia_qa n2000 (existing train/val split from linear_ceiling_probe.splits)",
+    "eval": "trivia_qa n1000 (fresh, id-disjoint from fit -- asserted)",
+    "incorrect_definition": "incorrect = (canonical.accuracy < 0.5)",
+    "sep": "correctness_eval.sep_single_fixed_layer (LogisticRegression on train-side best_split-binarised SE, trained on the n2000 train split only)",
+    "ridge": "linear_ceiling_probe.fit_probe (Ridge -> continuous SE, alpha chosen on n2000 val Spearman), single fixed layer, own model only",
+    "not_used": [
+      "aligned_z_ridge",
+      "pooled_ridge",
+      "procrustes",
+      "TBG+SLT_stacked_ridge",
+      "val_selected_layers"
+    ],
+    "generated_by": "amortized_ue/baseline_table_freshn1000.py"
+  },
+  "layers": {
+    "Llama-2-7b-chat": "TBG:30",
+    "Mistral-7B-Instruct-v0.2": "TBG:31",
+    "Meta-Llama-3-8B-Instruct": "TBG:31",
+    "deepseek-llm-7b-chat": "TBG:28"
+  },
+  "rows": [
+    {
+      "model": "Llama-2-7b-chat",
+      "layer": "TBG:30",
+      "layer_int": 30,
+      "N": 1000,
+      "n_fit": 2000,
+      "fit_split_sizes": [
+        1440,
+        360,
+        200
+      ],
+      "incorrect_rate": 0.391,
+      "data_dir": "/data2/mn1025/stage1",
+      "SE_spearman": 0.9999999999999998,
+      "SE_auroc_incorrect": 0.7602459274564399,
+      "SEP_spearman": 0.5231100960697028,
+      "SEP_auroc_incorrect": 0.6808654496281271,
+      "SEP_auroc_se_binarised": 0.7794958923912276,
+      "SEP_train_binarise_threshold": 0.6977530682422675,
+      "SEP_choice": [
+        "TBG",
+        30
+      ],
+      "Ridge_spearman": 0.5956268551858268,
+      "Ridge_auroc_incorrect": 0.7087926624922833,
+      "ridge_alpha": 10000.0,
+      "ridge_val_spearman": 0.6099345293619975
+    },
+    {
+      "model": "Mistral-7B-Instruct-v0.2",
+      "layer": "TBG:31",
+      "layer_int": 31,
+      "N": 1000,
+      "n_fit": 2000,
+      "fit_split_sizes": [
+        1440,
+        360,
+        200
+      ],
+      "incorrect_rate": 0.351,
+      "data_dir": "/data2/mn1025/stage1",
+      "SE_spearman": 1.0,
+      "SE_auroc_incorrect": 0.7465704414856957,
+      "SEP_spearman": 0.548499439048831,
+      "SEP_auroc_incorrect": 0.713550103380612,
+      "SEP_auroc_se_binarised": 0.8341291013202385,
+      "SEP_train_binarise_threshold": 0.8140452462659786,
+      "SEP_choice": [
+        "TBG",
+        31
+      ],
+      "Ridge_spearman": 0.6322504818552885,
+      "Ridge_auroc_incorrect": 0.7235325879393676,
+      "ridge_alpha": 10000.0,
+      "ridge_val_spearman": 0.6441458920787324
+    },
+    {
+      "model": "Meta-Llama-3-8B-Instruct",
+      "layer": "TBG:31",
+      "layer_int": 31,
+      "N": 1000,
+      "n_fit": 2000,
+      "fit_split_sizes": [
+        1440,
+        360,
+        200
+      ],
+      "incorrect_rate": 0.349,
+      "data_dir": "/data2/mn1025/stage1",
+      "SE_spearman": 1.0,
+      "SE_auroc_incorrect": 0.7426331101809427,
+      "SEP_spearman": 0.5962280409147271,
+      "SEP_auroc_incorrect": 0.7149107170366067,
+      "SEP_auroc_se_binarised": 0.843328259766616,
+      "SEP_train_binarise_threshold": 0.6977530682422675,
+      "SEP_choice": [
+        "TBG",
+        31
+      ],
+      "Ridge_spearman": 0.6352252640131721,
+      "Ridge_auroc_incorrect": 0.7163763925017277,
+      "ridge_alpha": 10000.0,
+      "ridge_val_spearman": 0.713157021691787
+    },
+    {
+      "model": "deepseek-llm-7b-chat",
+      "layer": "TBG:28",
+      "layer_int": 28,
+      "N": 1000,
+      "n_fit": 2000,
+      "fit_split_sizes": [
+        1440,
+        360,
+        200
+      ],
+      "incorrect_rate": 0.473,
+      "data_dir": "/data2/mn1025/stage1",
+      "SE_spearman": 1.0,
+      "SE_auroc_incorrect": 0.7954314781904033,
+      "SEP_spearman": 0.582731554090542,
+      "SEP_auroc_incorrect": 0.7156287735035363,
+      "SEP_auroc_se_binarised": 0.8046294626018793,
+      "SEP_train_binarise_threshold": 0.8140452462659786,
+      "SEP_choice": [
+        "TBG",
+        28
+      ],
+      "Ridge_spearman": 0.6632427027076566,
+      "Ridge_auroc_incorrect": 0.7326865138744579,
+      "ridge_alpha": 10000.0,
+      "ridge_val_spearman": 0.6634883597057477
+    }
+  ],
+  "comparison_mismatches": []
+}

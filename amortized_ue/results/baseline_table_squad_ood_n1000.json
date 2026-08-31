@@ -1,0 +1,189 @@
+{
+  "_meta": {
+    "description": "SQuAD n1000 OOD eval of the EXACT TriviaQA-trained baseline SEP+Ridge checkpoints. No refit / no tuning / no alpha or layer selection / no re-thresholding on SQuAD. All SQuAD n1000 rows evaluated.",
+    "checkpoint_root": "amortized_ue/checkpoints/baselines",
+    "loaded_via": "amortized_ue.fit_save_baselines.{load_ckpts, eval_saved}",
+    "id_counterpart": "amortized_ue/results/baseline_table_freshn1000.json",
+    "generated_by": "amortized_ue/baseline_table_squad_ood.py"
+  },
+  "rows": [
+    {
+      "model": "Llama-2-7b-chat",
+      "eval_dataset": "squad",
+      "N": 1000,
+      "layer": "TBG:30",
+      "incorrect_rate": 0.764,
+      "SE_spearman": 1.0,
+      "SE_auroc_incorrect": 0.7837319194249712,
+      "SEP_spearman": 0.2364007197666684,
+      "SEP_auroc_incorrect": 0.6214282545035053,
+      "Ridge_spearman": 0.2686623622500009,
+      "Ridge_auroc_incorrect": 0.6308290442807702,
+      "ridge_alpha": 10000.0
+    },
+    {
+      "model": "Mistral-7B-Instruct-v0.2",
+      "eval_dataset": "squad",
+      "N": 1000,
+      "layer": "TBG:31",
+      "incorrect_rate": 0.772,
+      "SE_spearman": 1.0,
+      "SE_auroc_incorrect": 0.7742563176074904,
+      "SEP_spearman": 0.42542961644973404,
+      "SEP_auroc_incorrect": 0.6692800654485955,
+      "Ridge_spearman": 0.5343106435137366,
+      "Ridge_auroc_incorrect": 0.7284621852558859,
+      "ridge_alpha": 10000.0
+    },
+    {
+      "model": "Meta-Llama-3-8B-Instruct",
+      "eval_dataset": "squad",
+      "N": 1000,
+      "layer": "TBG:31",
+      "incorrect_rate": 0.726,
+      "SE_spearman": 1.0,
+      "SE_auroc_incorrect": 0.7204208642496632,
+      "SEP_spearman": 0.4149359733261895,
+      "SEP_auroc_incorrect": 0.6115099233878265,
+      "Ridge_spearman": 0.48271106579078754,
+      "Ridge_auroc_incorrect": 0.6398473788984738,
+      "ridge_alpha": 10000.0
+    },
+    {
+      "model": "deepseek-llm-7b-chat",
+      "eval_dataset": "squad",
+      "N": 1000,
+      "layer": "TBG:28",
+      "incorrect_rate": 0.791,
+      "SE_spearman": 1.0,
+      "SE_auroc_incorrect": 0.7398726099238443,
+      "SEP_spearman": 0.2683467690409478,
+      "SEP_auroc_incorrect": 0.5823831501521302,
+      "Ridge_spearman": 0.37803149979617046,
+      "Ridge_auroc_incorrect": 0.6170918043298108,
+      "ridge_alpha": 10000.0
+    }
+  ],
+  "table": [
+    {
+      "model": "Llama-2-7b-chat",
+      "method": "True SE",
+      "layer": "TBG:30",
+      "ridge_alpha": null,
+      "spearman_vs_se": 1.0,
+      "auroc_incorrect": 0.7837319194249712,
+      "N": 1000,
+      "incorrect_rate": 0.764
+    },
+    {
+      "model": "Llama-2-7b-chat",
+      "method": "SEP",
+      "layer": "TBG:30",
+      "ridge_alpha": null,
+      "spearman_vs_se": 0.2364007197666684,
+      "auroc_incorrect": 0.6214282545035053,
+      "N": 1000,
+      "incorrect_rate": 0.764
+    },
+    {
+      "model": "Llama-2-7b-chat",
+      "method": "Ridge",
+      "layer": "TBG:30",
+      "ridge_alpha": 10000.0,
+      "spearman_vs_se": 0.2686623622500009,
+      "auroc_incorrect": 0.6308290442807702,
+      "N": 1000,
+      "incorrect_rate": 0.764
+    },
+    {
+      "model": "Mistral-7B-Instruct-v0.2",
+      "method": "True SE",
+      "layer": "TBG:31",
+      "ridge_alpha": null,
+      "spearman_vs_se": 1.0,
+      "auroc_incorrect": 0.7742563176074904,
+      "N": 1000,
+      "incorrect_rate": 0.772
+    },
+    {
+      "model": "Mistral-7B-Instruct-v0.2",
+      "method": "SEP",
+      "layer": "TBG:31",
+      "ridge_alpha": null,
+      "spearman_vs_se": 0.42542961644973404,
+      "auroc_incorrect": 0.6692800654485955,
+      "N": 1000,
+      "incorrect_rate": 0.772
+    },
+    {
+      "model": "Mistral-7B-Instruct-v0.2",
+      "method": "Ridge",
+      "layer": "TBG:31",
+      "ridge_alpha": 10000.0,
+      "spearman_vs_se": 0.5343106435137366,
+      "auroc_incorrect": 0.7284621852558859,
+      "N": 1000,
+      "incorrect_rate": 0.772
+    },
+    {
+      "model": "Meta-Llama-3-8B-Instruct",
+      "method": "True SE",
+      "layer": "TBG:31",
+      "ridge_alpha": null,
+      "spearman_vs_se": 1.0,
+      "auroc_incorrect": 0.7204208642496632,
+      "N": 1000,
+      "incorrect_rate": 0.726
+    },
+    {
+      "model": "Meta-Llama-3-8B-Instruct",
+      "method": "SEP",
+      "layer": "TBG:31",
+      "ridge_alpha": null,
+      "spearman_vs_se": 0.4149359733261895,
+      "auroc_incorrect": 0.6115099233878265,
+      "N": 1000,
+      "incorrect_rate": 0.726
+    },
+    {
+      "model": "Meta-Llama-3-8B-Instruct",
+      "method": "Ridge",
+      "layer": "TBG:31",
+      "ridge_alpha": 10000.0,
+      "spearman_vs_se": 0.48271106579078754,
+      "auroc_incorrect": 0.6398473788984738,
+      "N": 1000,
+      "incorrect_rate": 0.726
+    },
+    {
+      "model": "deepseek-llm-7b-chat",
+      "method": "True SE",
+      "layer": "TBG:28",
+      "ridge_alpha": null,
+      "spearman_vs_se": 1.0,
+      "auroc_incorrect": 0.7398726099238443,
+      "N": 1000,
+      "incorrect_rate": 0.791
+    },
+    {
+      "model": "deepseek-llm-7b-chat",
+      "method": "SEP",
+      "layer": "TBG:28",
+      "ridge_alpha": null,
+      "spearman_vs_se": 0.2683467690409478,
+      "auroc_incorrect": 0.5823831501521302,
+      "N": 1000,
+      "incorrect_rate": 0.791
+    },
+    {
+      "model": "deepseek-llm-7b-chat",
+      "method": "Ridge",
+      "layer": "TBG:28",
+      "ridge_alpha": 10000.0,
+      "spearman_vs_se": 0.37803149979617046,
+      "auroc_incorrect": 0.6170918043298108,
+      "N": 1000,
+      "incorrect_rate": 0.791
+    }
+  ]
+}
