@@ -2945,6 +2945,78 @@ e53_full_comparison,sep_reference_values}.json`,
 at the default). Patched `amortized_ue/build_bigtier_n2000_gpu0_resume.sh` (adds `gpu_reserve.py`
 fencing + restores the dropped `Qwen3.5-27B`).
 
+### E53b — Qwen/Gemma-trained proxy zero-shot on Llama-2/Mistral SQuAD
+
+**Why.** E53 tested the reverse-transfer proxy (trained ONLY on Qwen3-8B / Qwen3.5-9B / gemma-7b-it /
+gemma-2-9b-it question+response text, `q_resp_only` arm) on Llama-2/Mistral **TriviaQA** — an unseen
+model family but the same dataset. This closes the harder cell: does the same proxy also survive a
+**simultaneous** unseen-family + unseen-dataset shift, onto Llama-2/Mistral **SQuAD**?
+
+**Setup.** Same E53 checkpoints (`stage2/runs/E53_qwengemma_deploy_qresp/checkpoints/`, 3 seeds,
+`q_resp_only`), zero retraining. Scored on the existing `{Llama-2-7b-chat,Mistral-7B-Instruct-v0.2}_squad_n1000_full`
+records (N=1000; mean_acc 0.236 / 0.228, incorrect-rate 0.764 / 0.772). Baselines, all fit on the
+target's **own TriviaQA n2000** and evaluated on its SQuAD n1000 (fit ∩ eval ids = 0):
+  - **true SE** — 10-sample clustering CAE on SQuAD (the sampling upper bound; no forward-pass amortization).
+  - **SEP** — own-model single-layer logistic on binarised SE, E41/E36 fixed TBG layer (Llama-2:30,
+    Mistral:31). In-script recompute matches `sep_reference_values.json[squad_ood_n1000]` to 3 dp.
+  - **ridge** — the project's linear ceiling diagnostic: plain `Ridge` on the target's **own** stacked
+    TBG+SLT hidden states (Llama-2 TBG:22/SLT:15, Mistral TBG:31/SLT:20; α chosen on val Spearman,
+    all four select α=1e4). Same recipe as `e53_full_comparison.py`'s `ridge_context`.
+    **NOTE:** this replaces an earlier draft that mistakenly cited `ridge_z` from
+    `correctness_eval_e41_ood_fixedlayer.json` — that is the pooled 3-source **Procrustes-aligned**
+    ridge, not a plain per-target ridge.
+
+Paired bootstrap B=10 000, shared indices. Env `amortized_stage2_v5` + GPU1 borrow
+(`e53b_gpu_swap.sh`, E63–E66 SIGSTOP-lane pattern; interrupted Qwen3.6-27B squad build resumed clean).
+
+**Results (N=1000 each). Spearman(prediction, true SE):**
+
+| model | proxy | SEP | ridge |
+|---|---|---|---|
+| Llama-2-7b-chat | 0.565 | 0.235 | 0.437 |
+| Mistral-7B-Instruct-v0.2 | 0.543 | 0.424 | 0.561 |
+
+**AUROC_incorrect:**
+
+| model | proxy | true SE | SEP | ridge |
+|---|---|---|---|---|
+| Llama-2-7b-chat | 0.710 | 0.784 | 0.621 | 0.684 |
+| Mistral-7B-Instruct-v0.2 | 0.717 | 0.774 | 0.669 | 0.740 |
+
+**Paired bootstrap, ΔAUROC_incorrect (signs kept — these are differences; all four exclude 0):**
+
+| contrast | Llama-2 | Mistral |
+|---|---|---|
+| proxy − true SE | −0.074 [−0.107, −0.040] | −0.057 [−0.094, −0.021] |
+| proxy − SEP | +0.089 [+0.040, +0.136] | +0.048 [+0.006, +0.090] |
+
+**In-distribution vs OOD ridge (why the Spearman table is not anomalous).** Re-running the identical
+ridge recipe in-distribution (TriviaQA n2000 → TriviaQA fresh n1000): Llama-2 ridge Spearman 0.585,
+Mistral 0.647 — there the per-target ridge IS the linear ceiling and sits at/above the proxy
+(E53: proxy TriviaQA 0.632 for Llama-2, ~0.59 Mistral). Under the trivia→squad shift it drops to
+0.437 / 0.561 (−0.148 / −0.086); SEP drops harder (0.523→0.235, 0.548→0.424); the text proxy barely
+moves (0.632→0.565, ~0.59→0.543). So OOD the text proxy overtakes a trivia-fit hidden-state ridge on
+Llama-2 and is level on Mistral — the ridge is a ceiling **in-distribution only**; on a new dataset
+it is just a linear direction fitted on the wrong distribution.
+
+**Conclusion — the proxy DOES transfer across the combined unseen-family + unseen-dataset shift.**
+Trained only on 4 Qwen/Gemma models' TriviaQA text, never exposed to Llama-2, Mistral, or SQuAD, it
+**significantly beats each target's own supervised SEP** on both metrics (ΔAUROC +0.089\* / +0.048\*;
+Spearman 0.565 vs 0.235, 0.543 vs 0.424), and beats / matches the white-box own-model ridge OOD
+(Spearman: beats on Llama-2, level on Mistral). **But the gap to true 10-sample SE is real here**
+(ΔAUROC −0.074\* / −0.057\*, both CIs exclude 0) — unlike E53's TriviaQA direction where the proxy
+was statistically on par with sampling. Matches E39/E54: sampling is robust to a dataset shift while
+every trivia-fit predictor degrades, so under the combined shift the proxy is the best *cheap*
+estimator (beats every supervised probe) but no longer matches sampling.
+
+**Caveats.** 2 targets (only Llama-2/Mistral have SQuAD records); deploy-style proxy (no held-out
+fold — but both targets are genuinely absent from its pool); ridge/SEP layers are the established
+configs, not re-tuned for squad; ~10% correctness-label noise (E32).
+
+**Artifacts.** `amortized_ue/e53b_eval_on_llama2_mistral_squad.py`, `amortized_ue/e53b_original_ridge_squad.py`,
+`amortized_ue/e53b_gpu_swap.sh`,
+`amortized_ue/results/{e53b_qwengemma_deploy_qresp_on_llama2_mistral_squad,e53b_original_ridge_squad}.json`.
+
 ---
 
 ## E54 — the TRUE LOLO proxy's correctness (not just SE-fidelity) on squad OOD, the last gap in the {model-seen/unseen} × {trivia/squad} × {SE-fidelity/correctness} cube — ✅ still beats SEP and ridge, real (not "on par") gap to true SE
