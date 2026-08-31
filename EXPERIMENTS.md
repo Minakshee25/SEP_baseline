@@ -4061,7 +4061,48 @@ Spearman means reproduced to ≤0.002 on both known transfers (Mistral→Llama-2
 q_resp_only .524/.523; Llama-2→Mistral: z_q_resp .122/.124, q_resp_only .530/.531). E50 q_resp_only
 prediction-ensemble AUROC reproduced to ≤0.0004 (0.7200 vs 0.7197; 0.7249 vs 0.7253).
 
-**Results — cross-LLM transfer, mean ± std over 5 seeds (Spearman-vs-SE / AUROC_incorrect):**
+**Results — FULL combined table** (each entry = `Spearman-vs-SE / AUROC_incorrect`; proxy-arm rows
+are the 5-seed mean, std in the CSV/JSON). `Own` = the target's own estimator (self-proxy for the
+arm rows; Llama-3 / DeepSeek have no own single-model proxy). `Xfer` = raw frozen transfer from
+`Src`. `ID` = fresh TriviaQA n1000, `OOD` = SQuAD n1000. Machine-readable:
+`amortized_ue/results/cross_llm_5arm_combined_table.{csv,json}` (32 rows, with per-seed std).
+
+| Target | Method | Src | Own ID ρ/AUC | Own OOD ρ/AUC | Xfer ID ρ/AUC | Xfer OOD ρ/AUC |
+|---|---|:--:|---|---|---|---|
+| Llama-2 | True SE | — | 1.000/0.760 | 1.000/0.784 | — | — |
+|  | SEP | — | 0.523/0.681 | 0.236/0.621 | — | — |
+|  | Ridge | — | 0.596/0.709 | 0.269/0.631 | — | — |
+|  | z | Mistral | 0.562/0.698 | 0.368/0.665 | 0.032/0.504 | 0.017/0.508 |
+|  | z_q | Mistral | 0.561/0.696 | 0.402/0.671 | 0.013/0.493 | -0.015/0.479 |
+|  | z_q_resp | Mistral | 0.545/0.685 | 0.398/0.663 | 0.042/0.524 | 0.018/0.506 |
+|  | q_only | Mistral | 0.489/0.677 | 0.259/0.598 | 0.478/0.683 | 0.286/0.605 |
+|  | **q_resp_only** | Mistral | 0.558/0.694 | 0.399/0.656 | **0.524/0.696** | **0.472/0.675** |
+| Mistral | True SE | — | 1.000/0.747 | 1.000/0.774 | — | — |
+|  | SEP | — | 0.548/0.714 | 0.425/0.669 | — | — |
+|  | Ridge | — | 0.632/0.724 | 0.534/0.728 | — | — |
+|  | z | Llama-2 | 0.628/0.730 | 0.537/0.708 | 0.014/0.503 | -0.036/0.481 |
+|  | z_q | Llama-2 | 0.604/0.710 | 0.531/0.712 | 0.074/0.521 | 0.043/0.506 |
+|  | z_q_resp | Llama-2 | 0.620/0.722 | 0.547/0.721 | 0.122/0.544 | 0.088/0.538 |
+|  | q_only | Llama-2 | 0.487/0.676 | 0.309/0.616 | 0.475/0.660 | 0.275/0.607 |
+|  | **q_resp_only** | Llama-2 | 0.572/0.733 | 0.486/0.703 | **0.530/0.705** | **0.405/0.672** |
+| Llama-3 | True SE | — | 1.000/0.743 | 1.000/0.720 | — | — |
+|  | SEP | — | 0.596/0.715 | 0.415/0.612 | — | — |
+|  | Ridge | — | 0.635/0.716 | 0.483/0.640 | — | — |
+|  | z | Llama-2 | — | — | -0.022/0.487 | 0.073/0.521 |
+|  | z_q | Llama-2 | — | — | 0.083/0.526 | 0.004/0.495 |
+|  | z_q_resp | Llama-2 | — | — | 0.097/0.533 | 0.115/0.533 |
+|  | q_only | Llama-2 | — | — | 0.484/0.659 | 0.326/0.593 |
+|  | **q_resp_only** | Llama-2 | — | — | **0.518/0.678** | **0.398/0.610** |
+| DeepSeek | True SE | — | 1.000/0.795 | 1.000/0.740 | — | — |
+|  | SEP | — | 0.583/0.716 | 0.268/0.582 | — | — |
+|  | Ridge | — | 0.663/0.733 | 0.378/0.617 | — | — |
+|  | z | Llama-2 | — | — | 0.018/0.505 | 0.000/0.497 |
+|  | z_q | Llama-2 | — | — | 0.082/0.518 | 0.061/0.505 |
+|  | z_q_resp | Llama-2 | — | — | 0.143/0.564 | 0.097/0.521 |
+|  | q_only | Llama-2 | — | — | 0.515/0.690 | 0.295/0.598 |
+|  | **q_resp_only** | Llama-2 | — | — | **0.614/0.737** | **0.375/0.645** |
+
+**Same, compact — cross-LLM transfer only, mean ± std over 5 seeds (Spearman-vs-SE / AUROC_incorrect):**
 
 | source → target | z | z_q | z_q_resp | q_only | **q_resp_only** |
 |---|---|---|---|---|---|
