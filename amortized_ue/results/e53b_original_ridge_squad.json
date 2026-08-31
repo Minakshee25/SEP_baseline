@@ -1,0 +1,70 @@
+{
+  "Llama-2-7b-chat": {
+    "same_as_sep_TBG": {
+      "spearman_vs_se": 0.2686623622500009,
+      "auroc_incorrect": 0.6308290442807702,
+      "layers": [
+        [
+          "TBG",
+          30
+        ]
+      ],
+      "alpha": 10000.0,
+      "n_fit": 2000,
+      "n_eval": 1000,
+      "id_overlap_fit_eval": 0
+    },
+    "reference_ceiling_TBG+SLT": {
+      "spearman_vs_se": 0.43739745778707,
+      "auroc_incorrect": 0.6839670778241193,
+      "layers": [
+        [
+          "TBG",
+          22
+        ],
+        [
+          "SLT",
+          15
+        ]
+      ],
+      "alpha": 10000.0,
+      "n_fit": 2000,
+      "n_eval": 1000,
+      "id_overlap_fit_eval": 0
+    }
+  },
+  "Mistral-7B-Instruct-v0.2": {
+    "same_as_sep_TBG": {
+      "spearman_vs_se": 0.5343106435137366,
+      "auroc_incorrect": 0.7284621852558859,
+      "layers": [
+        [
+          "TBG",
+          31
+        ]
+      ],
+      "alpha": 10000.0,
+      "n_fit": 2000,
+      "n_eval": 1000,
+      "id_overlap_fit_eval": 0
+    },
+    "reference_ceiling_TBG+SLT": {
+      "spearman_vs_se": 0.5610875633273268,
+      "auroc_incorrect": 0.7396373056994818,
+      "layers": [
+        [
+          "TBG",
+          31
+        ],
+        [
+          "SLT",
+          20
+        ]
+      ],
+      "alpha": 10000.0,
+      "n_fit": 2000,
+      "n_eval": 1000,
+      "id_overlap_fit_eval": 0
+    }
+  }
+}
