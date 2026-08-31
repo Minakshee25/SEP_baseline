@@ -68,6 +68,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CKPT_ROOT = os.path.join(_HERE, "stage2", "runs", "E65_bigtier_lolo_qresp", "checkpoints")
 RESULTS_DIR = os.path.join(_HERE, "results")
 OUT_MAIN = os.path.join(RESULTS_DIR, "e65_bigtier_lolo.json")
+OUT_MAIN_N1000 = os.path.join(RESULTS_DIR, "e65_bigtier_lolo_n1000.json")   # the correct eval (shared-ID n1000)
 OUT_CURVES = os.path.join(RESULTS_DIR, "e65_bigtier_lolo_train_curves.json")
 WANDB_ARTIFACT = "stage2_ckpts_E65_bigtier_lolo_qresp"
 
@@ -86,12 +87,15 @@ def fold_ckpt_dir(held):
 
 
 # ------------------------------------------------------------------- check ----
-def do_check(data_dir, verbose=True):
-    """True iff every big-tier model has a complete n2000 trivia record set on disk."""
+def do_check(data_dir, n=TRAIN_N, verbose=True, require_manifest=False):
+    """True iff every big-tier model has a complete n{n} trivia record set on disk.
+    n=TRAIN_N (2000): the training data.  n=1000: the shared-ID eval set (the correct E65).
+    require_manifest: also demand the write-once manifest.json (the eval path reads it via
+    load_accuracy, so a .pt-count-only gate could fire in the gap before it is written)."""
     ok = True
     rows = []
     for m in BIGTIER:
-        cfg = s1cfg(m, TRAIN_N, data_dir)
+        cfg = s1cfg(m, n, data_dir)
         rd = cfg.records_dir()
         n_pt = len(glob.glob(os.path.join(rd, "*.pt"))) if os.path.isdir(rd) else 0
         man = cfg.manifest_path()
@@ -100,14 +104,14 @@ def do_check(data_dir, verbose=True):
             with open(man) as f:
                 d = json.load(f)
             n_man = len(d.get("records", {}))
-        done = n_pt >= TRAIN_N
+        done = n_pt >= n and (not require_manifest or (n_man is not None and n_man >= n))
         ok &= done
-        rows.append((m, run_name(m, TRAIN_N), n_pt, n_man, done))
+        rows.append((m, run_name(m, n), n_pt, n_man, done))
     if verbose:
         print(f"{'model':16s}{'run_name':40s}{'n_pt':>7s}{'n_manifest':>12s}   ready")
         for m, rn, n_pt, n_man, done in rows:
             print(f"{m:16s}{rn:40s}{n_pt:>7d}{str(n_man):>12s}   {'YES' if done else 'no'}")
-        print(f"\nALL 5 READY: {ok}")
+        print(f"\nALL 5 READY (n{n}): {ok}")
     return ok
 
 
@@ -198,7 +202,15 @@ def boot_ci(fn, n, B=10000, seed=0):
             "hi95": float(np.percentile(v, 97.5))}
 
 
-def do_eval(data_dir, bootstrap):
+def do_eval(data_dir, bootstrap, eval_n=TRAIN_N):
+    """eval_n == TRAIN_N (2000, default): the preliminary E65 — each held-out model scored on its
+    OWN n2000 test split (200 rows), written to OUT_MAIN. This reproduces the committed result.
+
+    eval_n != TRAIN_N (use 1000): THE CORRECT E65 — the proxy is scored on the held-out model's
+    FULL shared-ID n{eval_n} trivia set (all rows, disjoint from every training pool: n2000 ∩
+    n1000 = 0, verified), 5x the power + an exact cross-model comparison. The supervised SEP /
+    ridge baselines are FIT on the held-out model's own n2000 train/val and PREDICTED onto the
+    n{eval_n} rows (leak-free by the same disjointness). Written to OUT_MAIN_N1000."""
     import torch  # noqa: F401  (arm_preds needs it)
     from sklearn.metrics import roc_auc_score
     from amortized_ue.procrustes_e27_rank_fusion import arm_preds
@@ -207,10 +219,11 @@ def do_eval(data_dir, bootstrap):
         load_accuracy, sep_single_val_selected, paired_bootstrap_auc, ci)
     from amortized_ue.linear_ceiling_probe import fit_probe
 
+    out_path = OUT_MAIN if eval_n == TRAIN_N else OUT_MAIN_N1000
     os.makedirs(RESULTS_DIR, exist_ok=True)
     out = {}
-    if os.path.isfile(OUT_MAIN):
-        with open(OUT_MAIN) as f:
+    if os.path.isfile(out_path):
+        with open(out_path) as f:
             out = json.load(f)
 
     for held in BIGTIER:
@@ -218,54 +231,73 @@ def do_eval(data_dir, bootstrap):
         if len(glob.glob(os.path.join(ck, f"*{ARM}_seed*.pt"))) < len(SEEDS):
             print(f"[{held}] checkpoints missing -> skip (run --stage train first)")
             continue
-        print(f"\n{'#' * 88}\n# E65 LOLO — held out {held}  (proxy trained on the other 4 big-tier)\n{'#' * 88}")
+        print(f"\n{'#' * 88}\n# E65 LOLO — held out {held}  (proxy trained on the other 4 big-tier)"
+              f"  [eval on own n{eval_n}{' te-split' if eval_n == TRAIN_N else ' FULL shared-ID set'}]\n{'#' * 88}")
 
-        cfg = s1cfg(held, TRAIN_N, data_dir)
-        recs = load_records(cfg)
-        all_ids = sorted(recs.keys())
-        tr, va, te = splits(len(all_ids))
-        te_ids = [all_ids[i] for i in te]
+        # baselines always FIT on the held-out model's own n2000 train/val
+        fit_cfg = s1cfg(held, TRAIN_N, data_dir)
+        fit_recs = load_records(fit_cfg)
+        fit_ids = sorted(fit_recs.keys())
+        tr, va, te = splits(len(fit_ids))
 
-        se_all = np.array([recs[i]["labels"]["cluster_assignment_entropy"] for i in all_ids], dtype=float)
-        se_te = se_all[te]
-        acc_map = load_accuracy(cfg)
-        acc = np.array([acc_map[i] for i in te_ids], dtype=float)
+        # rows the proxy + every baseline are SCORED on
+        if eval_n == TRAIN_N:
+            eval_cfg, eval_recs, eval_ids = fit_cfg, fit_recs, [fit_ids[i] for i in te]
+        else:
+            eval_cfg = s1cfg(held, eval_n, data_dir)
+            eval_recs = load_records(eval_cfg)
+            eval_ids = sorted(eval_recs.keys())
+            assert not (set(fit_ids) & set(eval_ids)), \
+                f"{held}: n{TRAIN_N} train pool overlaps the n{eval_n} eval set — not leak-free"
+
+        se_eval = np.array([eval_recs[i]["labels"]["cluster_assignment_entropy"] for i in eval_ids], dtype=float)
+        acc_map = load_accuracy(eval_cfg)
+        acc = np.array([acc_map[i] for i in eval_ids], dtype=float)
         incorrect = (acc < 0.5).astype(int)
         pos_rate = float(incorrect.mean())
 
-        # ---- proxy (q_resp_only), 3 seeds seed-averaged, on the held-out model's te rows -------
-        mp = arm_preds(ARM, held, "trivia_qa", TRAIN_N, ckpt_dir=ck, data_dir=data_dir,
-                       run_name=run_name(held, TRAIN_N))
-        proxy_te = np.array([mp[i] for i in te_ids], dtype=float)
+        # ---- proxy (q_resp_only), 3 seeds seed-averaged, on the scored rows -------------------
+        mp = arm_preds(ARM, held, "trivia_qa", eval_n, ckpt_dir=ck, data_dir=data_dir,
+                       run_name=run_name(held, eval_n))
+        proxy_te = np.array([mp[i] for i in eval_ids], dtype=float)
 
         # ---- supervised in-model SEP (leak-free val-selected) + ridge ceiling on own states ---
-        hid, y_lm, ids_lm = load_matrix(cfg, ["TBG", "SLT"])
-        assert ids_lm == all_ids, "load_matrix id order != manifest order"
-        assert float(np.max(np.abs(y_lm[te].astype(float) - se_te))) < 1e-5, "te SE mismatch"
+        # fit hidden = the held-out model's n2000 (tr/va); eval hidden = the scored rows.
+        hid_fit, y_fit, ids_fit = load_matrix(fit_cfg, ["TBG", "SLT"])
+        assert ids_fit == fit_ids, "load_matrix id order != manifest order (fit)"
+        if eval_n == TRAIN_N:
+            hid_eval, y_eval_mat, eval_rows = hid_fit, y_fit, te
+        else:
+            hid_eval, y_eval_mat, ids_eval = load_matrix(eval_cfg, ["TBG", "SLT"])
+            assert ids_eval == eval_ids, "load_matrix id order != manifest order (eval)"
+            eval_rows = np.arange(len(eval_ids))
+        assert float(np.max(np.abs(y_eval_mat[eval_rows].astype(float) - se_eval))) < 1e-5, "eval SE mismatch"
+
         sep_p, sep_au_se, sep_choice, thr, ybe, _ = sep_single_val_selected(
-            hid, y_lm, tr, va, hid, y_lm, te)
-        sep_te = sep_p[te]
+            hid_fit, y_fit, tr, va, hid_eval, y_eval_mat, eval_rows)
+        sep_te = sep_p[eval_rows]
 
         # supervised linear ceiling (context, NOT a fair opponent): per-(pos,layer) ridge on
         # the held-out model's OWN hidden state (canonical linear_ceiling_probe method:
         # StandardScaler + Ridge, alpha on va), the layer picked LEAK-FREE by val Spearman,
         # prediction reported on te.
-        rbest = (-np.inf, None, None)   # (val_spearman, (pos,layer,alpha), te_pred)
+        rbest = (-np.inf, None, None)   # (val_spearman, (pos,layer,alpha), eval_pred)
         for pos in ("TBG", "SLT"):
-            for L in range(hid[pos].shape[0]):
-                X = hid[pos][L]
-                m, sc, alpha, val_s = fit_probe(X, y_lm.astype(float), tr, va)
+            for L in range(hid_fit[pos].shape[0]):
+                m, sc, alpha, val_s = fit_probe(hid_fit[pos][L], y_fit.astype(float), tr, va)
                 if val_s > rbest[0]:
                     rbest = (val_s, (pos, int(L), float(alpha)),
-                             m.predict(sc.transform(X[te])))
+                             m.predict(sc.transform(hid_eval[pos][L][eval_rows])))
         ridge_te = rbest[2]
         ridge_choice, ridge_val = rbest[1], float(rbest[0])
-        del hid
+        del hid_fit
+        if eval_n != TRAIN_N:
+            del hid_eval
 
         # ---- score ---------------------------------------------------------------------------
-        yb_te = ybe[te]
+        yb_te = ybe[eval_rows]
         v = yb_te >= 0
-        preds = {"proxy_q_resp_only": proxy_te, "true_semantic_entropy": se_te,
+        preds = {"proxy_q_resp_only": proxy_te, "true_semantic_entropy": se_eval,
                  "sep_single_val_selected": sep_te, "ridge_own_model_TBG": ridge_te}
         label_free = {"proxy_q_resp_only": True, "true_semantic_entropy": False,
                       "sep_single_val_selected": False, "ridge_own_model_TBG": False}
@@ -275,8 +307,8 @@ def do_eval(data_dir, bootstrap):
             au_inc = float(roc_auc_score(incorrect, s)) if len(np.unique(incorrect)) == 2 else float("nan")
             au_se = float(roc_auc_score(yb_te[v], s[v])) if len(np.unique(yb_te[v])) == 2 else float("nan")
             metrics[name] = {"auroc_incorrect": au_inc, "auroc_binarised_se": au_se,
-                             "spearman_se": rho(s, se_te), "label_free_on_target": label_free[name]}
-            print(f"  {name:26s}{au_inc:>11.3f}{au_se:>10.3f}{rho(s, se_te):>9.3f}"
+                             "spearman_se": rho(s, se_eval), "label_free_on_target": label_free[name]}
+            print(f"  {name:26s}{au_inc:>11.3f}{au_se:>10.3f}{rho(s, se_eval):>9.3f}"
                   f"  {'yes' if label_free[name] else 'NO'}")
 
         boot = paired_bootstrap_auc(preds, incorrect, B=bootstrap)
@@ -290,21 +322,22 @@ def do_eval(data_dir, bootstrap):
 
         out[held] = {
             "held_out": held, "sources": [m for m in BIGTIER if m != held],
-            "n_test": len(te_ids), "positive_rate_incorrect": pos_rate,
+            "eval_n": eval_n, "eval_set": f"n{eval_n}" + ("_te_split" if eval_n == TRAIN_N else "_full_shared_id"),
+            "n_test": len(eval_ids), "positive_rate_incorrect": pos_rate,
             "mean_accuracy": float(acc.mean()), "best_split": float(thr),
             "sep_choice": list(sep_choice), "sep_auroc_vs_se": float(sep_au_se),
             "ridge_choice_pos_layer_alpha": list(ridge_choice), "ridge_val_spearman": ridge_val,
             "bootstrap_resamples": bootstrap, "metrics": metrics,
             "bootstrap_delta_auroc_incorrect_vs": vs,
             "proxy_te_preds": [float(x) for x in proxy_te],
-            "true_se_te": [float(x) for x in se_te],
+            "true_se_te": [float(x) for x in se_eval],
             "sep_te_preds": [float(x) for x in sep_te],
             "incorrect_te": [int(x) for x in incorrect],
-            "te_ids": te_ids,
+            "te_ids": list(eval_ids),
         }
-        with open(OUT_MAIN, "w") as f:
+        with open(out_path, "w") as f:
             json.dump(out, f, indent=1)
-        print(f"  -> saved {len([k for k in out if not k.startswith('_')])} fold(s) to {OUT_MAIN}")
+        print(f"  -> saved {len([k for k in out if not k.startswith('_')])} fold(s) to {out_path}")
 
     # ---- cross-fold summary ----------------------------------------------------------------
     folds = [k for k in out if not k.startswith("_")]
@@ -324,9 +357,9 @@ def do_eval(data_dir, bootstrap):
                           "label_free_on_target": all(out[h]["metrics"][n]["label_free_on_target"] for h in folds)}
             print(f"{n:26s}" + "".join(f"{x:>12.3f}" for x in vals) + f"{np.nanmean(vals):>9.3f}")
         out["_summary"] = summary
-        with open(OUT_MAIN, "w") as f:
+        with open(out_path, "w") as f:
             json.dump(out, f, indent=1)
-        print(f"\nwrote {OUT_MAIN}")
+        print(f"\nwrote {out_path}")
 
 
 # ---------------------------------------------------------------- wandb push ---
@@ -355,16 +388,21 @@ def do_push_wandb():
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--stage", choices=["check", "train", "eval", "all", "push_wandb"], default="all")
+    p.add_argument("--stage", choices=["check", "check_eval", "train", "eval", "all", "push_wandb"], default="all")
     p.add_argument("--data_dir", default=DEFAULT_DATA_DIR)
     p.add_argument("--seeds", type=int, nargs="+", default=SEEDS)
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--grad_accum", type=int, default=4)
     p.add_argument("--bootstrap", type=int, default=10000)
+    p.add_argument("--eval_n", type=int, default=TRAIN_N,
+                   help="rows to score the proxy on: TRAIN_N (2000, default) = own n2000 te-split "
+                        "(the preliminary E65); 1000 = full shared-ID n1000 set (the correct E65).")
     args = p.parse_args()
 
     if args.stage == "check":
         raise SystemExit(0 if do_check(args.data_dir) else 1)
+    if args.stage == "check_eval":                       # are the n{eval_n} shared-ID eval sets on disk?
+        raise SystemExit(0 if do_check(args.data_dir, n=args.eval_n, require_manifest=True) else 1)
     if args.stage == "push_wandb":
         do_push_wandb()
         return
@@ -373,7 +411,9 @@ def main():
             raise SystemExit("STOP: not all 5 big-tier n2000 datasets are ready (see table above).")
         do_train(args.data_dir, args.seeds, args.batch_size, args.grad_accum)
     if args.stage in ("eval", "all"):
-        do_eval(args.data_dir, args.bootstrap)
+        if args.eval_n != TRAIN_N and not do_check(args.data_dir, n=args.eval_n, require_manifest=True):
+            raise SystemExit(f"STOP: not all 5 big-tier n{args.eval_n} eval sets are ready (see table above).")
+        do_eval(args.data_dir, args.bootstrap, eval_n=args.eval_n)
 
 
 if __name__ == "__main__":
