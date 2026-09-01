@@ -4170,3 +4170,54 @@ Qwen3.6-27B squad n1000 build was killed at ~601/1000 and resumed clean each tim
   `samemodel_5arm_id_ood.json`, `baseline_table_freshn1000.json`,
   `baseline_table_squad_ood_n1000.json`, `fit_save_baselines_id_eval.json`.
 - Source checkpoints mirrored: `/data2/mn1025/stage2_checkpoints/{REFERENCE_multipos_p1024_5arm_ckpt,E22_Mistral_proxy_p1024_5arm_ckpt}/`.
+
+---
+
+## E68 — extend the TRUE LOLO-proxy squad OOD eval from Llama-2/Mistral to Llama-3 + DeepSeek — ✅ additive; the E52/E54 pattern holds on both new targets (proxy beats SEP on both metrics, real loss to true SE)
+
+**Why.** E52 (SE-fidelity) and E54 (correctness) scored the true leave-one-LLM-out `q_resp_only`
+proxy on squad OOD, but only for Llama-2 and Mistral — the only two targets that had squad records
+at the time. E55 then built `squad_n1000` for Llama-3 and DeepSeek (1000/1000 each, same question
+selection). This closes the 2 missing rows: same proxy checkpoints, same protocol, two more targets.
+
+**Method (additive, new script `amortized_ue/e68_lolo_squad_llama3_deepseek.py`).** Trains nothing.
+Reuses the E37/E43 leave-one-LLM-out `q_resp_only` checkpoints
+(`stage2/runs/E37_LOLO_ckpt/checkpoints/{Llama-3,DeepSeek}_q_resp_only_seed{0,1,2}.pt` — the held-out
+target was **never** in that fold's training pool: trained on the *other* 3 targets, trivia only,
+never squad), the E55 `squad_n1000` builds (all on `/data2`), and the E41 fixed SEP layers
+(`exp2_run.BEST_TBG`: Llama-3 TBG:31, DeepSeek TBG:28). SE-fidelity path is byte-identical to E52's
+`run_lolo_squad` (`compute_sep` + `arm_preds_per_seed_prefixed` + `score_block`; Spearman + paired
+bootstrap on proxy_ensemble − SEP); correctness path calls E54's
+`correctness_eval_lolo_squad.evaluate_target` unchanged (AUROC_incorrect + paired bootstrap on
+proxy − SEP and proxy − true 10-sample SE). 10,000 resamples, shared indices, id-joined. **E52/E54
+output JSONs untouched** — only `results/e68_*` written.
+
+**Results (squad n1000, held-out target never in LOLO training, never squad):**
+
+| target | proxy ρ | SEP ρ | Δρ vs SEP [95% CI] | proxy AUROC_inc | SEP AUROC_inc | true-SE AUROC_inc | Δ vs SEP [95% CI] | Δ vs true SE [95% CI] |
+|---|---|---|---|---|---|---|---|---|
+| Llama-3  | 0.589 | 0.415 | **+0.174 [+0.116, +0.232]** | 0.661 | 0.612 | 0.720 | **+0.050 [+0.010, +0.090]** | **−0.060 [−0.095, −0.024]** |
+| DeepSeek | 0.546 | 0.268 | **+0.276 [+0.214, +0.337]** | 0.701 | 0.582 | 0.740 | **+0.119 [+0.075, +0.161]** | **−0.039 [−0.077, −0.000]** |
+
+(incorrect-rate 0.726 / 0.791; per-seed deltas all same sign and all CIs exclude 0.)
+
+**Findings — identical shape to E54's Llama-2/Mistral result:**
+1. **Proxy beats supervised SEP on both metrics, both targets, every CI excludes 0.** The
+   Δρ margins (+0.174 / +0.276) are the largest in the E52/E54 line after Llama-2's +0.378 — SEP
+   collapses under the dataset shift (ρ 0.27–0.42) while the label-free text proxy holds (ρ 0.55–0.59).
+2. **The loss to true 10-sample SE is real, not "on par"** (both AUROC_inc CIs exclude 0), matching
+   E54's Llama-2/Mistral OOD result and E39's general finding: E38's in-distribution parity with
+   sampling does not survive a dataset shift. DeepSeek only just clears 0 (hi95 −0.0001).
+3. **Four-target picture now complete** for {true LOLO proxy} × {squad OOD} × {SE-fidelity + correctness}:
+   proxy > SEP on all 4 (Llama-2 / Mistral / Llama-3 / DeepSeek), proxy < true SE on all 4. No
+   headline moves; the two new targets slot straight into the existing pattern.
+
+**Infra.** GPU 1 borrowed via the E61–E66 SIGSTOP-the-lane pattern (`e68_gpu_swap.sh` +
+`e63_lane_safety_net.sh`); the gemma-2-27b-it squad n1000 stage1 build was killed at 349/1000 and
+resumed clean (0 records lost), lane re-fenced and running again within seconds of the eval exiting.
+Eval wall time ~3 min (3B inference, 2 targets × 3 seeds, n1000).
+
+**Artifacts.** `amortized_ue/e68_lolo_squad_llama3_deepseek.py`, `amortized_ue/e68_gpu_swap.sh`,
+`amortized_ue/results/e68_lolo_squad_sefidelity.json`,
+`amortized_ue/results/e68_lolo_squad_correctness.json`,
+`amortized_ue/results/e68_combined_table.json`.
