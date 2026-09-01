@@ -319,12 +319,20 @@ each on its own 200-q held-out test split, one L40, bs=1, 10 warm-ups, `torch.cu
 bracketing. **ms/question (Llama-2 / Mistral):** Block A (1 canonical fp32 gen) 242.6 / 281.0 ·
 Block B (10 samples + DeBERTa clustering) **3647 / 4104** (sampling 2513/3093, clustering 1135/1012) ·
 Block C (1 `q_resp_only` proxy pass, deploy ckpt, bf16 Llama-3.2-3B) **41.5 / 40.1**; batched bs=32
-Block C ~299 q/s both. **Speedups: B/C bs=1 87.9× / 102.5× · end-to-end (A+B)/(A+C) 13.7× both ·
-batched ~1100× / ~1225×** — architecture barely moves the ratio; proxy cost is ~40 ms/q regardless of
-target. Sanity: Block B re-derived CAE/n_clusters 0.570/2.71 (Llama-2), 0.465/2.33 (Mistral) — match
+Block C ~299 q/s both. **Speedups: B/C bs=1 87.9× / 102.5× · end-to-end (A+B)/(A+C) 13.7× both.**
+Sanity: Block B re-derived CAE/n_clusters 0.570/2.71 (Llama-2), 0.465/2.33 (Mistral) — match
 stored labels. Absolute ms are L40-specific — ratios are the result; fp32 target vs bf16 proxy is the
 honest as-built comparison. Results: `results/rq1_latency_{Llama-2-7b-chat,Mistral-7B-Instruct-v0.2}.json`.
-Full arc: EXPERIMENTS.md E61. **Infra lesson:** stop the training WATCHDOG (not just the lane) before
+Full arc: EXPERIMENTS.md E61.
+**⚠️ E61-efficiency addendum (2026-09-01) — see EXPERIMENTS.md.** Audited all E61 arithmetic (reproduces
+exactly). **Reporting fix:** the "~1100×/~1225× at batch 32" figure is Block-B(bs=1) ÷ batched-proxy —
+an SE-step ratio pairing an un-batched baseline with a batched proxy, **NOT end-to-end**. True
+end-to-end with the batched proxy = (A+B)/(A+C_batched) = **15.8× / 15.4×**. Added token counts (input
+~160, generated ~3/gen, DeBERTa ~32 fwd/q, proxy 24 tok), **estimated FLOPs** (baseline ÷ proposed
+~11.5×; 2·P·T model, documented), proxy peak mem 6259 MiB (bf16 3B), fwd-only ≈ tok+fwd (tokenizer adds
+~0). Caveats documented: Block C pre-tokenizes outside timed region (≈0 ms impact), Block B uses 2
+warm-ups not 10, fp32 targets vs bf16 proxy, Block B = as-built Stage-1 sampler not an optimal SE
+sampler. New: `e61_efficiency.py`, `e61_eff_gpu_swap.sh`, `results/e61_efficiency_*.json`. **Infra lesson:** stop the training WATCHDOG (not just the lane) before
 benchmarking on a shared card — it resurrects the GPU lane mid-run; a memory fence can't help (fp32
 7B peaks ~33GB of the 44GB card).
 

@@ -1,0 +1,281 @@
+{
+  "_note": "Corrects the E61 write-up: the ~1100x/~1225x figure is Block-B (bs=1 sampler + clustering) divided by the BATCHED-proxy per-question latency \u2014 an SE-ESTIMATION-STEP ratio that pairs an un-batched baseline with a batched proxy. It is NOT an end-to-end speedup. True end-to-end with the batched proxy is (A+B)/(A+C_batched), reported below.",
+  "targets": {
+    "Llama-2-7b-chat": {
+      "block_ms": {
+        "A_canonical_gen": 242.56330827251077,
+        "B_10samples_plus_clustering_bs1": 3647.1345076244324,
+        "B_sampling": 2512.4740067869425,
+        "B_deberta_clustering": 1134.66050083749,
+        "C_proxy_fwd_bs1": 41.51893169153482,
+        "C_proxy_fwd_batched_bs32": 3.334920243360102
+      },
+      "speedups": {
+        "SE_step__B_over_C_bs1": 87.84268667413802,
+        "SE_step__B_over_C_batched": 1093.6197094626043,
+        "end_to_end__A+B_over_A+C_bs1": 13.692154132511899,
+        "end_to_end__A+B_over_A+C_batched": 15.818323862572653
+      },
+      "tokens": {
+        "n_questions": 200,
+        "input_tokens_per_question": {
+          "mean": 159.39,
+          "std": 9.490428926346278,
+          "median": 157.5,
+          "min": 146.0,
+          "max": 196.0,
+          "n": 200
+        },
+        "generated_tokens_canonical": {
+          "mean": 2.905,
+          "std": 1.590162913179735,
+          "median": 3.0,
+          "min": 1.0,
+          "max": 12.0,
+          "n": 200
+        },
+        "generated_tokens_per_sample": {
+          "mean": 2.98,
+          "std": 1.3833903441260191,
+          "median": 2.9,
+          "min": 1.0,
+          "max": 9.8,
+          "n": 200
+        },
+        "model_max_new_tokens": 50,
+        "num_generations": 10,
+        "deberta_forward_passes_per_question": {
+          "mean": 32.93,
+          "std": 19.16852266885825,
+          "median": 25.0,
+          "min": 18.0,
+          "max": 90.0,
+          "n": 200
+        },
+        "are_equivalent_calls_per_question": {
+          "mean": 16.465,
+          "std": 9.584261334429126,
+          "median": 12.5,
+          "min": 9.0,
+          "max": 45.0,
+          "n": 200
+        },
+        "deberta_pair_token_len": {
+          "mean": 48.7843542114873,
+          "std": 19.45734629049034,
+          "median": 45.326592517694635,
+          "min": 18.458333333333332,
+          "max": 121.66666666666667,
+          "n": 200
+        },
+        "n_clusters_per_question": {
+          "mean": 2.64,
+          "std": 2.1029770713952325,
+          "median": 2.0,
+          "min": 1.0,
+          "max": 10.0,
+          "n": 200
+        },
+        "proxy_input_tokens": {
+          "mean": 24.16,
+          "std": 8.23611363685543,
+          "median": 23.0,
+          "min": 12.0,
+          "max": 56.0,
+          "n": 200
+        },
+        "proxy_input_tokens_capped_at_max_seq_len": {
+          "mean": 24.16,
+          "std": 8.23611363685543,
+          "median": 23.0,
+          "min": 12.0,
+          "max": 56.0,
+          "n": 200
+        },
+        "max_seq_len": 256,
+        "target_generations_per_question": {
+          "baseline": 11,
+          "proposed": 1,
+          "note": "baseline = 1 canonical (low-temp) + 10 high-temp samples; proposed = 1 canonical (the proxy consumes its answer text) + 0 extra target generations."
+        }
+      },
+      "flops_estimated_per_question": {
+        "canonical_generation": 2187087419999.9998,
+        "ten_sample_generation": 21880981199999.996,
+        "deberta_clustering": 2846662685574.538,
+        "proxy_forward": 155252160000.0,
+        "baseline_pipeline_total": 26914731305574.535,
+        "proposed_pipeline_total": 2342339580000.0
+      },
+      "flops_ratio_baseline_over_proposed": 11.490533454408235,
+      "proxy_latency": {
+        "n_questions": 200,
+        "gpu_name": "NVIDIA L40",
+        "dtype": "bf16 backbone (fp32 projector/head)",
+        "forward_only_ms": {
+          "mean": 36.18802915792912,
+          "std": 1.7908269170075906,
+          "median": 35.76750960201025,
+          "min": 34.787640906870365,
+          "max": 55.9664536267519,
+          "n": 200000
+        },
+        "tokenize_plus_forward_ms": {
+          "mean": 36.24082961585373,
+          "std": 0.7539504524704006,
+          "median": 36.02895000949502,
+          "min": 35.07233504205942,
+          "max": 39.914497174322605,
+          "n": 200000
+        },
+        "tokenizer_overhead_ms_mean": 0.0528004579245997,
+        "peak_gpu_mem_forward_bytes": 6563083776,
+        "peak_gpu_mem_forward_MiB": 6259.04443359375
+      },
+      "target_generation_peak_mem": {
+        "note": "not cleanly measurable under current GPU contention (both cards ~41/46 GB used by Stage-1 data-gen). Reported: fp32 parameter-memory lower bound + E61's observed value.",
+        "fp32_param_bytes": 26952000000,
+        "fp32_param_GiB": 25.101006031036377,
+        "e61_observed_peak_GiB_fp32_7B": 33.0
+      }
+    },
+    "Mistral-7B-Instruct-v0.2": {
+      "block_ms": {
+        "A_canonical_gen": 281.0094354348257,
+        "B_10samples_plus_clustering_bs1": 4104.323988887481,
+        "B_sampling": 3092.735832943581,
+        "B_deberta_clustering": 1011.5881559439003,
+        "C_proxy_fwd_bs1": 40.05115502048284,
+        "C_proxy_fwd_batched_bs32": 3.3515012310817838
+      },
+      "speedups": {
+        "SE_step__B_over_C_bs1": 102.47704433963168,
+        "SE_step__B_over_C_batched": 1224.6225514775372,
+        "end_to_end__A+B_over_A+C_bs1": 13.658896652819628,
+        "end_to_end__A+B_over_A+C_batched": 15.421715358444562
+      },
+      "tokens": {
+        "n_questions": 200,
+        "input_tokens_per_question": {
+          "mean": 163.935,
+          "std": 9.210043403670117,
+          "median": 162.0,
+          "min": 151.0,
+          "max": 201.0,
+          "n": 200
+        },
+        "generated_tokens_canonical": {
+          "mean": 3.215,
+          "std": 2.4430755392439796,
+          "median": 3.0,
+          "min": 1.0,
+          "max": 24.0,
+          "n": 200
+        },
+        "generated_tokens_per_sample": {
+          "mean": 3.6845,
+          "std": 2.6130922304857758,
+          "median": 3.0,
+          "min": 1.0,
+          "max": 19.4,
+          "n": 200
+        },
+        "model_max_new_tokens": 50,
+        "num_generations": 10,
+        "deberta_forward_passes_per_question": {
+          "mean": 31.37,
+          "std": 18.49468482657033,
+          "median": 18.0,
+          "min": 18.0,
+          "max": 90.0,
+          "n": 200
+        },
+        "are_equivalent_calls_per_question": {
+          "mean": 15.685,
+          "std": 9.247342413285166,
+          "median": 9.0,
+          "min": 9.0,
+          "max": 45.0,
+          "n": 200
+        },
+        "deberta_pair_token_len": {
+          "mean": 49.599875405063074,
+          "std": 19.2469385608635,
+          "median": 45.78,
+          "min": 21.444444444444443,
+          "max": 122.0,
+          "n": 200
+        },
+        "n_clusters_per_question": {
+          "mean": 2.365,
+          "std": 1.967518907981911,
+          "median": 1.5,
+          "min": 1.0,
+          "max": 10.0,
+          "n": 200
+        },
+        "proxy_input_tokens": {
+          "mean": 24.535,
+          "std": 8.282012658064566,
+          "median": 23.0,
+          "min": 12.0,
+          "max": 56.0,
+          "n": 200
+        },
+        "proxy_input_tokens_capped_at_max_seq_len": {
+          "mean": 24.535,
+          "std": 8.282012658064566,
+          "median": 23.0,
+          "min": 12.0,
+          "max": 56.0,
+          "n": 200
+        },
+        "max_seq_len": 256,
+        "target_generations_per_question": {
+          "baseline": 11,
+          "proposed": 1,
+          "note": "baseline = 1 canonical (low-temp) + 10 high-temp samples; proposed = 1 canonical (the proxy consumes its answer text) + 0 extra target generations."
+        }
+      },
+      "flops_estimated_per_question": {
+        "canonical_generation": 2420666300000.0,
+        "ten_sample_generation": 24274655990000.004,
+        "deberta_clustering": 2757140018061.5005,
+        "proxy_forward": 157661910000.0,
+        "baseline_pipeline_total": 29452462308061.504,
+        "proposed_pipeline_total": 2578328210000.0
+      },
+      "flops_ratio_baseline_over_proposed": 11.423085002844344,
+      "proxy_latency": {
+        "n_questions": 200,
+        "gpu_name": "NVIDIA L40",
+        "dtype": "bf16 backbone (fp32 projector/head)",
+        "forward_only_ms": {
+          "mean": 37.66550247557461,
+          "std": 16.223147969003534,
+          "median": 36.13680135458708,
+          "min": 34.967959858477116,
+          "max": 264.4592244178057,
+          "n": 200000
+        },
+        "tokenize_plus_forward_ms": {
+          "mean": 36.6250114236027,
+          "std": 1.1301638498029927,
+          "median": 36.264436319470406,
+          "min": 35.387614741921425,
+          "max": 43.38627774268389,
+          "n": 200000
+        },
+        "tokenizer_overhead_ms_mean": -1.0404910519719104,
+        "peak_gpu_mem_forward_bytes": 6563083776,
+        "peak_gpu_mem_forward_MiB": 6259.04443359375
+      },
+      "target_generation_peak_mem": {
+        "note": "not cleanly measurable under current GPU contention (both cards ~41/46 GB used by Stage-1 data-gen). Reported: fp32 parameter-memory lower bound + E61's observed value.",
+        "fp32_param_bytes": 28964000000,
+        "fp32_param_GiB": 26.97482705116272,
+        "e61_observed_peak_GiB_fp32_7B": 33.0
+      }
+    }
+  }
+}

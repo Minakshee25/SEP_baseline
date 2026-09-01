@@ -3489,7 +3489,14 @@ sweep with both n2000-test and fresh-n1000 metrics, val-selected combo). Run:
 
 ---
 
-## E61 — RQ1 inference-latency benchmark: one amortized proxy forward pass vs. the N=10 sampling + DeBERTa-clustering pipeline it replaces — ✅ measured on Llama-2-7b-chat + Mistral-7B-Instruct-v0.2; ~88–103× faster per question (bs=1), ~13.7× end-to-end, ~1100–1200× at batch 32
+## E61 — RQ1 inference-latency benchmark: one amortized proxy forward pass vs. the N=10 sampling + DeBERTa-clustering pipeline it replaces — ✅ measured on Llama-2-7b-chat + Mistral-7B-Instruct-v0.2; ~88–103× faster per question (bs=1), ~13.7× end-to-end (~15.4–15.8× with the proxy batched); the SE-estimation step alone is ~1094–1225× when the proxy is batched
+
+> **⚠️ Reporting correction (2026-09-01, see the E61-efficiency addendum below).** The original
+> headline "~1100–1200× at batch 32" and the "Block B / Block C batched" table row are **not an
+> end-to-end speedup** — they divide Block B (the bs=1 sampler + clustering) by the *batched* proxy's
+> per-question latency, i.e. an SE-estimation-step ratio that pairs an un-batched baseline with a
+> batched proxy. The **true end-to-end** speedup with the batched proxy is (A+B)/(A+C_batched) =
+> **15.8× (Llama-2) / 15.4× (Mistral)**. All other original E61 numbers verified correct.
 
 **Question.** The whole point of the amortized proxy is to avoid the multi-sample cost of semantic
 entropy at inference. RQ1 quantifies that: wall-clock per question for the pipeline being replaced
@@ -3533,7 +3540,8 @@ larger std — it generates longer, more variable completions (one hit the token
 |---|---|---|
 | **Block B / Block C, bs=1** — replace just the SE-estimation step | **87.9×** | **102.5×** |
 | **End-to-end (A+B) / (A+C)** — proxy still consumes the canonical answer | **13.7×** | **13.7×** |
-| **Block B / Block C batched (bs=32)** | ~1100× | ~1225× |
+| **Block B / Block C batched (bs=32)** — SE-step only, un-batched baseline ÷ batched proxy, **NOT end-to-end** | ~1094× | ~1225× |
+| **End-to-end (A+B) / (A+C batched)** — the honest batched-proxy end-to-end number | **15.8×** | **15.4×** |
 
 Block B is **not** batchable without modifying the frozen Stage-1 sampler
 (`HuggingfaceModel.predict` generates one sequence per call), so its bs=1 figure is the only one the
@@ -3566,6 +3574,101 @@ target; the pipeline's cost scales with the target's generation speed and verbos
 `run_rq1_latency_mistral.sh` + `run_rq1_mistral_driver.sh` (orchestrators),
 `resume_training_queue.sh` (clean watchdog restart), `results/rq1_latency_Llama-2-7b-chat.json` +
 `results/rq1_latency_Mistral-7B-Instruct-v0.2.json` (per-block stats + per-question arrays).
+
+---
+
+### E61-efficiency addendum (2026-09-01) — arithmetic audit + token/FLOPs/memory analysis; reporting correction
+
+**Additive. Old E61 files/results untouched.** New: `amortized_ue/e61_efficiency.py`,
+`amortized_ue/e61_eff_gpu_swap.sh`, `results/e61_efficiency_{Llama-2-7b-chat,Mistral-7B-Instruct-v0.2}.json`,
+`results/e61_efficiency_summary.json`.
+
+**1. Arithmetic audit of `rq1_latency.py` + the two saved JSONs — all block/sub-block means and the
+87.9×/102.5× and 13.7×/13.7× speedups reproduce exactly.** The one **reporting error**: the "~1100×"
+/ "~1225×" figure (and the original headline "~1100–1200× at batch 32") is **Block B (bs=1 sampler +
+DeBERTa clustering) ÷ Block C batched-proxy per-question latency** — an SE-estimation-step ratio that
+compares an un-batched baseline against a batched proxy, **not** an end-to-end speedup. Corrected:
+
+| per question (n=200, one L40) | Llama-2-7b-chat | Mistral-7B-Instruct-v0.2 |
+|---|---|---|
+| Block A — 1 canonical generation | 242.6 ms | 281.0 ms |
+| Block B — 10 samples + DeBERTa clustering (bs=1) | 3647.1 ms | 4104.3 ms |
+| Block C — proxy forward, bs=1 | 41.5 ms | 40.1 ms |
+| Block C — proxy forward, batched bs=32 | 3.33 ms/q | 3.35 ms/q |
+| **SE-step ratio** B ÷ C(bs=1) | 87.9× | 102.5× |
+| **SE-step ratio** B ÷ C(batched) — *un-batched baseline ÷ batched proxy, NOT end-to-end* | 1094× | 1225× |
+| **End-to-end** (A+B) ÷ (A+C, bs=1) | 13.7× | 13.7× |
+| **End-to-end** (A+B) ÷ (A+C, batched) — *the honest batched-proxy end-to-end number* | **15.8×** | **15.4×** |
+
+**2. Token counts (exact, same 200 test ids per target).** Input = full Stage-1 prompt (5-shot
+brief + question), target tokenizer. Generated = `len(token_log_likelihoods)` (one entry per
+generated token — no regeneration).
+
+| per question | Llama-2 | Mistral |
+|---|---|---|
+| input tokens (prompt) | 159.4 (med 158, max 196) | 163.9 (med 162, max 201) |
+| generated tokens — canonical | 2.90 | 3.21 |
+| generated tokens — per high-temp sample (×10) | 2.98 | 3.68 |
+| **target-LLM generations / question — baseline** | 11 (1 canonical + 10 samples) | 11 |
+| **target-LLM generations / question — proposed** | 1 (canonical only; proxy reads its text) | 1 |
+| DeBERTa entailment forward passes / question | 32.9 | 31.4 |
+| DeBERTa pair length (tokens) | 48.8 | 49.6 |
+| proxy input tokens (`q_resp_only` text) | 24.2 (max 56, `max_seq_len` 256 never hit) | 24.5 (max 56) |
+
+DeBERTa forward count is obtained by *replaying* `get_semantic_ids`'s control flow on the stored
+`semantic_id`s (its branching depends only on pairwise-equivalence outcomes) — no model inference.
+
+**3. Estimated FLOPs / question** — model: dense forward ≈ `2·P·T`; generation of `G` tokens from a
+`T_in` prompt with KV cache ≈ `2·P·(T_in+G)`; 10-sample gen = `10 · 2·P_target·(T_in+G_sample)`
+(Stage-1 re-runs the prefill per sample — no prefix-KV sharing); DeBERTa clustering =
+`n_fwd · 2·P_deberta·T_pair`; proxy = `2·P_proxy·T_proxy` (regression head, no vocab projection).
+`P` = total params (Llama-2 6.74e9, Mistral 7.24e9, DeBERTa-v2-xlarge 0.89e9, proxy Llama-3.2-3B
+3.21e9). Attention `QK^T`/`·V` term (~`4·L·T²·H`) is **<0.7 %** of canonical-gen FLOPs here —
+reported, not added. Input-embedding gather treated as ~0 FLOPs, so `2·P·T` is a slight upper bound.
+**Labelled "estimated FLOPs"** — assumptions echoed into the JSON (`flops_assumptions`).
+
+| estimated FLOPs / question | Llama-2 | Mistral |
+|---|---|---|
+| canonical generation | 2.19e12 | 2.42e12 |
+| 10-sample generation | 2.19e13 | 2.43e13 |
+| DeBERTa clustering | 2.85e12 | 2.76e12 |
+| proxy forward | 1.55e11 | 1.58e11 |
+| **baseline pipeline total** | **2.69e13** | **2.95e13** |
+| **proposed pipeline total** (canonical + proxy) | **2.34e12** | **2.58e12** |
+| ratio baseline ÷ proposed | **11.5×** | **11.4×** |
+
+The FLOPs ratio (~11×) is much smaller than the latency ratio (~14–16× end-to-end, ~90–100× on the
+SE step) because trivia answers are ~3 tokens — Block B's wall-clock is dominated by 10 serial
+short-decode launches + a 32-pass DeBERTa loop (per-call overhead), not arithmetic.
+
+**4. Peak GPU memory.** Proxy forward (bf16 Llama-3.2-3B, bs=1): **6259 MiB** (`max_memory_allocated`,
+clean — process-local). Target fp32 generation peak is **not cleanly measurable** now (both cards
+~41/46 GB used by Stage-1 data-gen); fp32 parameter memory alone is 25.1 GiB (Llama-2) / 27.0 GiB
+(Mistral), consistent with E61's observed ~33 GB.
+
+**5. Proxy latency — forward-only vs tokenizer+forward** (re-measured, GPU fenced to 13.5 GB):
+fwd-only 36.2 ms / tok+fwd 36.2 ms (Llama-2); 37.7 ms / 36.6 ms (Mistral). **Tokenization of the
+~24-token text adds ≈0 ms (<0.15 % of the forward)** — so E61's Block C, which pre-tokenizes outside
+the timed region, is **not** meaningfully optimistic from that. (These ~36 ms sit slightly under
+E61's 40–42 ms Block C, measured under different GPU load — same ballpark, not a correction.)
+
+**Audited caveats (documented, not fixed — they are properties of the as-built benchmark):**
+1. **Block C pre-tokenizes outside the timed region; Blocks A/B tokenize inside `predict`.**
+   Quantified above: the difference is ≈0 ms for 24-token text.
+2. **Block B warm-up asymmetry:** `run_block_B` uses `wu = max(1, warmup//5)` → **2** full warm-up
+   questions (≈20 generations + 2 clustering passes) when `--warmup 10`, vs 10 warm-ups for A and C.
+   Adequate for a ~3.6 s op but an inconsistency; the per-question std already absorbs it.
+3. **fp32 targets vs bf16 proxy** — the as-built comparison (Stage-1 datasets were generated with
+   fp32 targets); a bf16 target would cut Block A/B roughly ~2× but is not what the pipeline ran.
+4. **Block B benchmarks the existing Stage-1 sampler, not an optimal SE sampler:** 10 independent
+   `generate()` calls, no batched sampling, no shared-prefix KV cache across the 10 samples,
+   `output_hidden_states=True` always on. An optimised sampler (batched, single shared prefill)
+   would shrink both the latency and the FLOPs gap — the benchmark measures the pipeline as it
+   exists, which is the relevant number for "what does amortization save *today*".
+
+**Infra.** Token/FLOPs stage is CPU-only. Proxy stage borrowed GPU 1 for ~2 min via the standard
+SIGSTOP-the-lane pattern (`e61_eff_gpu_swap.sh`); gemma-2-27b-it squad build paused at 489/1000 and
+resumed clean, 0 records lost.
 
 ## E62 — `q_resp_only` ALONE (the reference proxy's text arm, no fusion) vs each target's OWN supervised SEP, all 4 alignment targets — ✅ the label-free text proxy is on par with or beats the matched SEP on SE-fidelity: significantly better on Llama-2 + DeepSeek, statistical tie on Mistral + Llama-3, never significantly worse
 
