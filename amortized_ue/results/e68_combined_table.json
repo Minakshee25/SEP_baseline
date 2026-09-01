@@ -1,0 +1,70 @@
+{
+  "experiment": "E68",
+  "targets": [
+    {
+      "target": "Llama-3",
+      "n_test": 1000,
+      "incorrect_rate": 0.726,
+      "sep_layer": [
+        "TBG",
+        31
+      ],
+      "proxy_spearman": 0.5885487259915899,
+      "sep_spearman": 0.4149359733261895,
+      "delta_rho_vs_sep": {
+        "mean": 0.17366512525792524,
+        "lo95": 0.11643137523137524,
+        "hi95": 0.2317329112329112,
+        "ci_excludes_zero": true
+      },
+      "proxy_auroc_incorrect": 0.6607448070619936,
+      "sep_auroc_incorrect": 0.6115099233878265,
+      "true_se_auroc_incorrect": 0.7204208642496632,
+      "delta_auroc_vs_sep": {
+        "mean": 0.049540505348683574,
+        "lo95": 0.010150901466282456,
+        "hi95": 0.0897901745776989,
+        "ci_excludes_zero": true
+      },
+      "delta_auroc_vs_true_se": {
+        "mean": -0.05958726145846679,
+        "lo95": -0.09454563873479678,
+        "hi95": -0.02393799562347696,
+        "ci_excludes_zero": true
+      }
+    },
+    {
+      "target": "DeepSeek",
+      "n_test": 1000,
+      "incorrect_rate": 0.791,
+      "sep_layer": [
+        "TBG",
+        28
+      ],
+      "proxy_spearman": 0.5464002292728503,
+      "sep_spearman": 0.2683467690409478,
+      "delta_rho_vs_sep": {
+        "mean": 0.2758607253083253,
+        "lo95": 0.21411839481839484,
+        "hi95": 0.33741707871707866,
+        "ci_excludes_zero": true
+      },
+      "proxy_auroc_incorrect": 0.7010023046352809,
+      "sep_auroc_incorrect": 0.5823831501521302,
+      "true_se_auroc_incorrect": 0.7398726099238443,
+      "delta_auroc_vs_sep": {
+        "mean": 0.11862004809534506,
+        "lo95": 0.07499903019986563,
+        "hi95": 0.1611210191150879,
+        "ci_excludes_zero": true
+      },
+      "delta_auroc_vs_true_se": {
+        "mean": -0.03856747363381987,
+        "lo95": -0.07696207125457354,
+        "hi95": -0.00012367420767236503,
+        "ci_excludes_zero": true
+      }
+    }
+  ],
+  "note": "true LOLO q_resp_only proxy on squad OOD; E52 protocol for Spearman, E54 protocol for AUROC_incorrect. Held-out target excluded from LOLO training. No retraining."
+}

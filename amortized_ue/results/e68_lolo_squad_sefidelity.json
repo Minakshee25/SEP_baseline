@@ -1,0 +1,204 @@
+{
+  "Llama-3": {
+    "n": 1000,
+    "n_valid_se_binary": 1000,
+    "sep_choice": [
+      "TBG",
+      31
+    ],
+    "sep_selection": "E41 fixed TBG:31",
+    "metrics": {
+      "sep": {
+        "spearman": 0.4149359733261895,
+        "auroc_se": 0.7343354439630727
+      },
+      "proxy_ensemble": {
+        "spearman": 0.5885487259915899,
+        "auroc_se": 0.7947251796373926
+      },
+      "proxy_seed0": {
+        "spearman": 0.49459662885028494,
+        "auroc_se": 0.7555352872736628
+      },
+      "proxy_seed1": {
+        "spearman": 0.5975179565542214,
+        "auroc_se": 0.8079385403329065
+      },
+      "proxy_seed2": {
+        "spearman": 0.547832279990098,
+        "auroc_se": 0.7626330836826689
+      }
+    },
+    "bootstrap_vs_sep": {
+      "proxy_ensemble": {
+        "spearman_delta": {
+          "mean": 0.17366512525792524,
+          "lo95": 0.11643137523137524,
+          "hi95": 0.2317329112329112,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        },
+        "auroc_se_delta": {
+          "mean": 0.060579800095112796,
+          "lo95": 0.019350403603850787,
+          "hi95": 0.10233195594565364,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        }
+      },
+      "proxy_seed0": {
+        "spearman_delta": {
+          "mean": 0.07995802404682403,
+          "lo95": 0.018677279777279822,
+          "hi95": 0.14239022629022632,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        },
+        "auroc_se_delta": {
+          "mean": 0.021429673307559623,
+          "lo95": -0.022071292390157274,
+          "hi95": 0.06574570040902405,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": false
+        }
+      },
+      "proxy_seed1": {
+        "spearman_delta": {
+          "mean": 0.18264530373170373,
+          "lo95": 0.12467381207381206,
+          "hi95": 0.24175285195285193,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        },
+        "auroc_se_delta": {
+          "mean": 0.0738512086842914,
+          "lo95": 0.032117800025588165,
+          "hi95": 0.11613699162760625,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        }
+      },
+      "proxy_seed2": {
+        "spearman_delta": {
+          "mean": 0.13311821792981796,
+          "lo95": 0.07357363417363415,
+          "hi95": 0.19329033699033701,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        },
+        "auroc_se_delta": {
+          "mean": 0.028415786542411434,
+          "lo95": -0.013866996757923838,
+          "hi95": 0.07123531679859182,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": false
+        }
+      }
+    },
+    "bootstrap_resamples": 10000,
+    "target": "Llama-3",
+    "target_full": "Meta-Llama-3-8B-Instruct",
+    "proxy_provenance": "E37/E43 LOLO q_resp_only (trained on the OTHER 3 models' trivia_qa, never this target's data OR squad) -> squad OOD"
+  },
+  "DeepSeek": {
+    "n": 1000,
+    "n_valid_se_binary": 1000,
+    "sep_choice": [
+      "TBG",
+      28
+    ],
+    "sep_selection": "E41 fixed TBG:28",
+    "metrics": {
+      "sep": {
+        "spearman": 0.2683467690409478,
+        "auroc_se": 0.6656908665105385
+      },
+      "proxy_ensemble": {
+        "spearman": 0.5464002292728503,
+        "auroc_se": 0.7934297905104103
+      },
+      "proxy_seed0": {
+        "spearman": 0.5215470027511032,
+        "auroc_se": 0.7898607680215585
+      },
+      "proxy_seed1": {
+        "spearman": 0.47721693821048344,
+        "auroc_se": 0.737857303262648
+      },
+      "proxy_seed2": {
+        "spearman": 0.5059675246390691,
+        "auroc_se": 0.7824099323088768
+      }
+    },
+    "bootstrap_vs_sep": {
+      "proxy_ensemble": {
+        "spearman_delta": {
+          "mean": 0.2758607253083253,
+          "lo95": 0.21411839481839484,
+          "hi95": 0.33741707871707866,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        },
+        "auroc_se_delta": {
+          "mean": 0.1274809492481279,
+          "lo95": 0.07635791743184248,
+          "hi95": 0.17753785379180553,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        }
+      },
+      "proxy_seed0": {
+        "spearman_delta": {
+          "mean": 0.25107489672849675,
+          "lo95": 0.1871825900825901,
+          "hi95": 0.31426039006039,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        },
+        "auroc_se_delta": {
+          "mean": 0.12381193223171244,
+          "lo95": 0.07279952473311446,
+          "hi95": 0.1735949025208817,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        }
+      },
+      "proxy_seed1": {
+        "spearman_delta": {
+          "mean": 0.20702005210405208,
+          "lo95": 0.14092734442734448,
+          "hi95": 0.2718026835026835,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        },
+        "auroc_se_delta": {
+          "mean": 0.07197160358936909,
+          "lo95": 0.017095698799308293,
+          "hi95": 0.126729750562878,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        }
+      },
+      "proxy_seed2": {
+        "spearman_delta": {
+          "mean": 0.23583811696291695,
+          "lo95": 0.1717458847458847,
+          "hi95": 0.29936363396363397,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        },
+        "auroc_se_delta": {
+          "mean": 0.1165063928095137,
+          "lo95": 0.06340718300581816,
+          "hi95": 0.16870300721043763,
+          "n_valid_resamples": 10000,
+          "ci_excludes_zero": true
+        }
+      }
+    },
+    "bootstrap_resamples": 10000,
+    "target": "DeepSeek",
+    "target_full": "deepseek-llm-7b-chat",
+    "proxy_provenance": "E37/E43 LOLO q_resp_only (trained on the OTHER 3 models' trivia_qa, never this target's data OR squad) -> squad OOD"
+  }
+}

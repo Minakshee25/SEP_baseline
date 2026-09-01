@@ -157,6 +157,17 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
+## Current state (updated 2026-09-01)
+
+**E68 (2026-09-01) — extend the TRUE LOLO-proxy squad OOD eval (E52/E54) from Llama-2/Mistral to
+Llama-3 + DeepSeek.** Same E37/E43 LOLO `q_resp_only` checkpoints (held-out target never in that
+fold's training pool), E55's `squad_n1000` builds, E41 fixed SEP layers. No retraining; new additive
+script + outputs (`e68_lolo_squad_llama3_deepseek.py`, `results/e68_*`), E52/E54 JSONs untouched.
+**Result: identical shape to E54.** Proxy beats SEP on both metrics, both targets (Δρ Llama-3
++0.174\*/DeepSeek +0.276\*; Δauroc_inc +0.050\*/+0.119\*); loses to true 10-sample SE, a real gap not
+"on par" (−0.060\*/−0.039\*, both CIs exclude 0). All 4 targets now cover this cell: proxy > SEP
+always, proxy < true SE always. See EXPERIMENTS.md E68.
+
 ## Current state (updated 2026-08-29)
 
 **E63 (2026-08-29) — leave-TWO-out cross-model test: a `q_resp_only` proxy trained on 6 target LLMs,
