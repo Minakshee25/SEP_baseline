@@ -4466,8 +4466,14 @@ gemma-3-27b-it's SE is near-degenerate so its rows are noisy for every method.
 
 **Infra.** CPU only (`amortized_stage2` env, `CUDA_VISIBLE_DEVICES=""`), ~4 min wall. Per-model
 `load_matrix` peaks ~5 GB transient (all layers, freed after layer selection). No GPU, no lane
-borrow, no checkpoint (sklearn PCA/Procrustes/Ridge are re-fit deterministically from the script).
+borrow. Numbers reproduce exactly on a re-run (PCA `random_state=0`). The fitted sklearn objects
+**are saved** (`--push_wandb` stage; `se_probes` env — no proxy stack needed after inlining `ecdf`):
+5 `aligner_<model>.pkl` (PCA + Procrustes W + centers + val-selected layers) + 5 `fold_<held>.pkl`
+(pooled Ridge + scaler + held-out feature-standardisation stats + α).
 
 **Artifacts.** `amortized_ue/e70_bigtier_lolo_aligned_ridge.py`,
 `amortized_ue/results/e70_bigtier_lolo_aligned_ridge.json` (5 folds × {ID, OOD}, per-fold metrics +
-bootstrap deltas + `aligned_ridge` per-id preds + `_summary`), `amortized_ue/e70_eval.log`.
+bootstrap deltas + `aligned_ridge` per-id preds + `_summary`), `amortized_ue/e70_eval.log`,
+checkpoints `amortized_ue/stage2/runs/E70_bigtier_lolo_aligned_ridge/checkpoints/` (10 pkls,
+gitignored) + **W&B `e70_bigtier_lolo_aligned_ridge_bundles:v0`** (run `x5j9i9z9`, 10 files, 229 MB,
+verified by fetch).
