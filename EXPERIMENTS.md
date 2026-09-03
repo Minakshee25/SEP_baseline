@@ -4477,3 +4477,94 @@ bootstrap deltas + `aligned_ridge` per-id preds + `_summary`), `amortized_ue/e70
 checkpoints `amortized_ue/stage2/runs/E70_bigtier_lolo_aligned_ridge/checkpoints/` (10 pkls,
 gitignored) + **W&B `e70_bigtier_lolo_aligned_ridge_bundles:v0`** (run `x5j9i9z9`, 10 files, 229 MB,
 verified by fetch).
+
+---
+
+## E71 — the E70 comparison for the small-tier Qwen/Gemma "set 2" (LOLO proxy + aligned-ridge, ID + OOD) — ✅ set 2 REPRODUCES set 1: proxy > aligned_ridge, and `fuse` does NOT help — which retro-confirms that E70's big-tier convergence was a near-identical-Qwen-sibling artefact
+
+**Why.** E70 ran the aligned pooled ridge + late fusion for the big tier and found `aligned_ridge ≈
+q_resp_only` alone with `fuse` the best predictor — *different* from set 1 (E37/E38: proxy beat the
+ridge by +0.06–0.07). The aligned-ridge had **never** been run for the small-tier Qwen/Gemma set
+(`Qwen3-8B`, `Qwen3.5-9B`, `gemma-7b-it`, `gemma-2-9b-it` — the E44–E54 line; E45 flagged the missing
+z-arm, never done). E71 builds BOTH a leave-one-of-4-out `q_resp_only` proxy (no clean small-tier
+LOLO proxy existed — E45/E51 used the deploy proxy with the target in its own pool) AND the aligned
+ridge, and evaluates proxy + aligned_ridge + fuse + SEP + true SE, ID + OOD — the exact E70 protocol,
+one tier down.
+
+**Method (new `amortized_ue/e71_settwo_lolo_aligned_ridge.py`).**
+- `--stage train`: 4-fold LOLO `q_resp_only`, frozen Llama-3.2-3B + LoRA, E37/E53/E63/E65 recipe
+  (3 seeds, batch 8 × grad_accum 4 = eff 32, projector 1024, k=4, 10 epochs). Trains by patching
+  `e65_bigtier_lolo`'s module constants (`BIGTIER`/`SUFFIX`/`DEFAULT_CKPT_ROOT`/`OUT_CURVES`) and
+  reusing its `do_train` (`load_pool` + `train_arm`) verbatim — the recipe path is not re-implemented.
+- `--stage eval`: aligned_ridge = E70's `ModelAligner` (per-model PCA(512) → orthogonal Procrustes
+  into a **Qwen3-8B** anchor frame, label-free, PCA + W fit on trivia-n2000 train) pooled LOLO;
+  proxy preds via `arm_preds` on the E71 checkpoints; SEP via leak-free val-selected layer on the
+  held-out model's own trivia n2000; true SE + `incorrect` from the records. Scored on trivia n1000
+  (ID) and squad n1000 (OOD, E49 builds), 10k paired bootstrap. `fuse` = label-free rank-fusion
+  (empirical-CDF average) of aligned_ridge ⊕ q_resp_only.
+- All 4 set-2 models share question ids exactly on trivia n2000 / trivia n1000 / squad n1000
+  (asserted); trivia n2000 ∩ {n1000, squad} = 0 (leak-free). Qwen 8B/9B use the E55 `_nothink`
+  builds (as E70's big-tier Qwen), gemma-7b/9b use `_full`. All records on `/data2`.
+
+**Results — MEAN over the 4 held-out set-2 models (AUROC_incorrect / AUROC_binarised_SE / Spearman-vs-SE):**
+
+| predictor | ID trivia n1000 | OOD squad n1000 |
+|---|---|---|
+| **`q_resp_only`** (LOLO proxy) | **0.791 / 0.876 / 0.697** | **0.678 / 0.762 / 0.537** |
+| `fuse` = rank-fusion(aligned_ridge ⊕ proxy) | 0.780 / 0.880 / 0.702 | 0.678 / 0.769 / 0.546 |
+| `aligned_ridge` (label-free) | 0.741 / 0.849 / 0.643 | 0.637 / 0.711 / 0.425 |
+| SEP probe (val-selected, own trivia n2000) | 0.714 / 0.830 / 0.602 | 0.634 / 0.692 / 0.407 |
+| true 10-sample SE | 0.785 / — / — | 0.738 / — / — |
+
+**Per-fold AUROC_incorrect (proxy / aligned_ridge / fuse / SEP / true SE):**
+
+| held-out | ID | OOD |
+|---|---|---|
+| Qwen3-8B | 0.832 / 0.775 / 0.819 / 0.721 / 0.796 | 0.689 / 0.662 / 0.696 / 0.615 / 0.722 |
+| Qwen3.5-9B | 0.787 / 0.752 / 0.782 / 0.756 / 0.805 | 0.679 / 0.615 / 0.661 / 0.662 / 0.751 |
+| gemma-7b-it | 0.847 / 0.745 / 0.815 / 0.694 / 0.771 | 0.689 / 0.692 / 0.724 / 0.614 / 0.737 |
+| gemma-2-9b-it | 0.698 / 0.692 / 0.703 / 0.686 / 0.769 | 0.655 / 0.577 / 0.629 / 0.647 / 0.740 |
+
+**Findings.**
+1. **⭐ Set 2 reproduces the set-1 ordering: `q_resp_only` > `aligned_ridge`.** ID: the proxy beats
+   the aligned ridge significantly on 3/4 folds (Qwen3-8B +0.057\*, Qwen3.5-9B +0.035\*, gemma-7b-it
+   +0.102\*), ties on gemma-2-9b-it. OOD: significantly on 2/4 (Qwen3.5-9B +0.064\*, gemma-2-9b-it
+   +0.077\*), ties the other 2. Mean gap +0.050 ID / +0.041 OOD AUROC, +0.054 / +0.112 ρ — the same
+   direction and rough magnitude as E37/E38's set-1 gap (+0.057 ρ / +0.072 AUROC).
+2. **⭐ `fuse` does NOT beat the proxy on set 2 — the opposite of E70's big tier.** ID: `fuse − proxy`
+   ≤ 0 on all 4 folds (significantly worse on Qwen3-8B −0.014\* and gemma-7b-it −0.032\*); mean
+   0.780 < proxy 0.791. OOD: mixed per fold (gemma-7b-it +0.035\*, gemma-2-9b-it −0.025\*), mean
+   exactly tied (0.678). Adding the aligned hidden state to the text proxy is redundant-to-harmful
+   here — **E33's "z_aligned is not worth its cost given q_resp_only" holds for set 2.**
+3. **⭐ This retro-confirms the E70 explanation.** E70's big-tier `proxy ≈ ridge` + `fuse` wins was
+   driven by the **3 near-identical Qwen3.5/3.6/3.8-27B siblings** (same architecture, 3 checkpoints)
+   — holding one out leaves the ridge training on 2 near-clones, i.e. almost in-distribution for a
+   hidden-state probe. Set 2 has 4 genuinely distinct models (2 Qwen generations + 2 gemma
+   generations), no clone effect, so the aligned ridge reverts to the weaker CKA-gated signal the
+   text proxy beats — exactly as in set 1. **Model-set composition, not tier.**
+4. **gemma-2-9b-it is again the weak fold.** Proxy 0.698 ID (vs 0.79–0.85 for the other 3), and the
+   only fold where true SE significantly leads the proxy ID (−0.071\*). Matches E45/E64/E65's gemma-2
+   answer-text compression — now confirmed at 9B in a leave-one-out setting.
+5. **OOD: everything loses to true 10-sample SE.** Proxy −0.060 mean; per-fold `proxy − true SE` CI
+   excludes 0 on 3/4 (Qwen3-8B just includes). Same shift pattern as E39 / E69 / E70.
+6. **SEP probe is the weakest SE-derived predictor**, both metrics, both splits (OOD ρ 0.407). Proxy
+   > SEP on the mean everywhere; per fold significant on 2/4 ID (Qwen3-8B +0.112\*, gemma-7b-it
+   +0.153\*), near-tie on Qwen3.5-9B (whose SEP is unusually strong, 0.756) and gemma-2-9b-it.
+
+**Caveats.** Alignment is PCA(512)→orthogonal Procrustes (same method extension as E70), Qwen3-8B
+anchor, `pca_dim` unswept. 3 seeds. Qwen 8B/9B eval on the `_nothink` builds — not directly
+comparable to E45's `_full` zero-shot numbers. gemma-2-9b-it's wrong-answer separation is weak for
+every text/state method (E64).
+
+**Infra.** GPU 0, `amortized_stage2` env. Training ~2 h (4 folds × 3 seeds); the interactive session
+dropped mid-run but the `nohup`'d process survived and ran straight through (resumable per fold, but
+nothing needed re-running). Eval ~20 min (aligned-ridge CPU + `arm_preds` GPU passes over 12
+checkpoints + bootstraps). Both GPUs were free (training lane long dead) — no borrow.
+
+**Artifacts.** `amortized_ue/e71_settwo_lolo_aligned_ridge.py`,
+`amortized_ue/results/e71_settwo_lolo_aligned_ridge.json` (4 folds × {ID, OOD}: metrics, bootstrap
+deltas, per-id `aligned_ridge`/`proxy`/`sep`/`true_se`/`incorrect`, `_summary`),
+`amortized_ue/results/e71_settwo_lolo_train_curves.json`, `amortized_ue/e71_run.log`. Checkpoints:
+`stage2/runs/E71_settwo_lolo_qresp/checkpoints/` (12 `.pt`) + `stage2/runs/E71_settwo_aligned_ridge/checkpoints/`
+(4 aligner + 4 fold pkls), both gitignored; **W&B `e71_settwo_lolo_qresp_ckpts:v0` (12 files, 1.05 GB)
++ `e71_settwo_aligned_ridge_bundles:v0` (8 files, 139 MB)**, both verified by fetch.

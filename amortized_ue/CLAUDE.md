@@ -159,6 +159,22 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 
 ## Current state (updated 2026-09-03)
 
+**E71 (2026-09-03) — the E70 comparison for the small-tier Qwen/Gemma "set 2"** (`Qwen3-8B`,
+`Qwen3.5-9B`, `gemma-7b-it`, `gemma-2-9b-it`). Built BOTH a leave-one-of-4-out `q_resp_only` proxy
+(GPU, ~2 h; no clean small-tier LOLO proxy existed) AND the aligned ridge (E70's PCA(512)→Procrustes,
+Qwen3-8B anchor); evaluated proxy + aligned_ridge + fuse + SEP + true SE, ID + OOD. New
+`e71_settwo_lolo_aligned_ridge.py` + `results/e71_settwo_lolo_aligned_ridge.json`; checkpoints + W&B
+`e71_settwo_lolo_qresp_ckpts:v0` / `e71_settwo_aligned_ridge_bundles:v0` (verified).
+**Result (MEAN AUROC_incorrect / Spearman, ID / OOD):** proxy 0.791/0.697 / 0.678/0.537 · fuse
+0.780/0.702 / 0.678/0.546 · aligned_ridge 0.741/0.643 / 0.637/0.425 · SEP 0.714/0.602 / 0.634/0.407 ·
+true SE 0.785 / 0.738. **⭐ Set 2 reproduces the set-1 (E37/E38) ordering — proxy > aligned_ridge
+(ID +0.050 AUROC mean, sig. on 3/4 folds) — and `fuse` does NOT beat the proxy** (ID fuse−proxy ≤ 0
+on all 4). This is the OPPOSITE of E70's big tier (proxy≈ridge, fuse wins) and **retro-confirms the
+E70 explanation**: the big-tier convergence was driven by the 3 near-identical Qwen-27B siblings
+making LOLO ≈ in-distribution for the hidden-state ridge; set 2's 4 genuinely distinct models behave
+like set 1. gemma-2-9b-it again the weak fold (proxy 0.698 ID, only fold true SE sig. leads);
+everything loses to true SE OOD (E39/E69/E70 pattern); SEP weakest throughout. See EXPERIMENTS.md E71.
+
 **E70 (2026-09-03) — big-tier 5×27B LOLO ALIGNED-RIDGE (label-free), ID + OOD.** Closes the other
 half of the E37 thesis experiment for the big tier (E65/E69 did only the `q_resp_only` text arm).
 Dimension wall (Qwen 5120 / gemma-2 4608 / gemma-3 5376, none 4096) fixed with per-model **PCA(512)
@@ -1185,14 +1201,11 @@ round (degenerate SE). Proxy/true-SE/SEP/ridge means AUROC 0.747 / 0.760 / 0.736
 aligned_ridge ≈ q_resp_only alone, label-free `fuse` of the two is best (ID 0.764 ≈ true SE, OOD
 0.715 > either arm & > SEP, still < true SE OOD). `results/e70_bigtier_lolo_aligned_ridge.json`.
 
-**⏳ NEXT (user-requested 2026-09-03) — E71: the E70 comparison for the small-tier Qwen/Gemma set 2**
-(`Qwen3-8B`, `Qwen3.5-9B`, `gemma-7b-it`, `gemma-2-9b-it`). The aligned-ridge has NEVER been run for
-this set (E45 flagged it, never done). Plan: (1) train a **leave-one-of-the-4-out `q_resp_only`
-proxy** for set 2 (GPU; no clean small-tier LOLO proxy exists — E45/E51 used the deploy proxy with
-the target in-pool); (2) run the **E70 aligned-ridge** for set 2 (PCA→Procrustes; note Qwen3-8B and
-Qwen3.5-9B are natively 4096-dim so square Procrustes works for them, gemma-7b-it 3072 / gemma-2-9b-it
-3584 need PCA); (3) evaluate proxy + aligned_ridge + `fuse` + SEP + true SE, **ID (trivia n1000) and
-OOD (squad n1000)** — squad n1000 built for all 4 in E49. Data all on `/data2`.
+**✅ E71 DONE (2026-09-03) — the E70 comparison for the small-tier Qwen/Gemma set 2.** LOLO
+`q_resp_only` proxy + aligned_ridge + fuse + SEP + true SE, ID + OOD. **Set 2 reproduces set 1**
+(proxy > aligned_ridge; fuse doesn't help) — opposite of E70's big tier, confirming that E70's
+convergence was a near-identical-Qwen-27B-sibling artefact. `results/e71_settwo_lolo_aligned_ridge.json`,
+W&B `e71_settwo_lolo_qresp_ckpts:v0` + `e71_settwo_aligned_ridge_bundles:v0`.
 
 **Pending / carried over:**
 3. **(Partly done)** `amortized_ue/RESULTS.md` now holds the **four-model cross-LLM picture (E20–E30)**:
