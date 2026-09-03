@@ -4388,3 +4388,86 @@ env, ~40 min (3B inference only, 5 folds × 3 seeds, n1000).
 **Artifacts.** `amortized_ue/e69_bigtier_lolo_squad_ood.py`,
 `amortized_ue/results/e69_bigtier_lolo_squad_ood.json` (5 folds + `_summary` + per-id preds),
 `amortized_ue/e69_eval.log`.
+
+---
+
+## E70 — big-tier (5×27B) leave-one-LLM-out ALIGNED-RIDGE, label-free, ID + OOD — ✅ the E37 aligned-ridge method extended to 27B; aligned-ridge ≈ q_resp_only alone, **label-free fusion of the two is the best predictor** (ID ≈ true SE, OOD > either arm and > SEP but still < true SE)
+
+**Why.** E65/E69 ran only the text arm (`q_resp_only`) LOLO over the 5 big-tier targets. The E37
+thesis experiment for the original 4 targets *also* compared the **aligned pooled ridge** (label-free
+Procrustes → pooled ridge on aligned hidden states) and the **late fusion** of the two — that half
+had never been run for the big tier. User asked to close it and evaluate ID + OOD.
+
+**Dimension wall + fix.** `exp2_run.py` uses square `orthogonal_procrustes`, which needs every model
+at the anchor's hidden dim (true for the original-4 @ 4096). The big-tier dims all differ —
+Qwen3.5/3.6/3.8-27B **5120**, gemma-2-27b-it **4608**, gemma-3-27b-it **5376**. Fix (user-chosen):
+per-model **PCA to a common dim** (512; fit on that model's trivia-n2000 train split), then
+orthogonal Procrustes between PCA scores on the shared anchor questions. **Anchor frame
+(user-chosen): Qwen3.5-27B.** E34 established the shared uncertainty direction lives in the top
+~50–100 PCs, so 512 is generous.
+
+**Method (additive, new `amortized_ue/e70_bigtier_lolo_aligned_ridge.py`, CPU only, no GPU, no proxy
+stack).** All 5 big-tier models share question ids exactly on trivia n2000, trivia n1000 and squad
+n1000 (asserted); trivia n2000 ∩ n1000 = 0. Per model: val-selected best TBG + best SLT layer
+(leak-free ridge val-Spearman) → PCA(512) fit on trivia-n2000 train → orthogonal Procrustes
+PCA(m) → PCA(Qwen3.5-27B) on the shared n2000-train rows (label-free; anchor W = I). LOLO: for
+held-out h, pool the other 4 models' aligned z (per-model feature-standardised + per-model SE
+z-scored, on each model's own train rows) → one Ridge (α on pooled val) = `aligned_ridge`; predict
+h's aligned z on **trivia n1000 (ID)** and **squad n1000 (OOD)** — W_h applied, never fit there,
+h's SE labels never used. `fuse` = label-free rank-fusion (empirical-CDF average) of
+`aligned_ridge` ⊕ `q_resp_only`. **Baselines (`q_resp_only`, true 10-sample SE, SEP, `incorrect`)
+are reloaded per-id from the E65 (ID) and E69 (OOD) JSONs — no recompute.** 10k paired bootstrap.
+
+**Results — MEAN over the 5 held-out models (AUROC_incorrect / AUROC_binarised_SE / Spearman-vs-SE):**
+
+| predictor | ID trivia n1000 | OOD squad n1000 |
+|---|---|---|
+| `aligned_ridge` (label-free) | 0.748 / 0.871 / 0.617 | 0.684 / 0.759 / 0.498 |
+| `q_resp_only` (E65/E69) | 0.747 / 0.876 / 0.626 | 0.694 / 0.766 / 0.520 |
+| **`fuse` = rank-fusion(aligned_ridge ⊕ q_resp_only)** | **0.764 / 0.899 / 0.666** | **0.715 / 0.800 / 0.582** |
+| true 10-sample SE | 0.760 / — / — | 0.765 / — / — |
+| SEP (val-selected, own trivia n2000) | 0.736 / 0.868 / 0.607 | 0.670 / 0.726 / 0.435 |
+
+**Per-fold AUROC_incorrect (aligned_ridge / q_resp_only / fuse / true SE):**
+
+| held-out | ID | OOD |
+|---|---|---|
+| Qwen3.5-27B | 0.774 / 0.782 / 0.789 / 0.784 | 0.683 / 0.721 / 0.726 / 0.768 |
+| Qwen3.6-27B | 0.755 / 0.778 / 0.779 / 0.780 | 0.715 / 0.676 / 0.722 / 0.746 |
+| Qwen3.8-27B | 0.793 / 0.799 / 0.813 / 0.817 | 0.713 / 0.701 / 0.737 / 0.786 |
+| gemma-2-27b-it | 0.739 / 0.710 / 0.749 / 0.766 | 0.779 / 0.725 / 0.782 / 0.794 |
+| gemma-3-27b-it | 0.679 / 0.666 / 0.688 / 0.652 | **0.530** / 0.646 / 0.606 / 0.729 |
+
+**Findings.**
+1. **`aligned_ridge` alone ≈ `q_resp_only` alone — neither dominates.** ID mean 0.748 vs 0.747; OOD
+   0.684 vs 0.694. Per fold the aligned ridge beats the text arm on gemma-2 (both splits, OOD
+   +0.054\*) and Qwen3.6-OOD (+0.039\*), loses small on Qwen3.6-ID (−0.023\*), and **collapses on
+   gemma-3-OOD** (0.530, ρ 0.124, −0.116\* vs text) — the Procrustes alignment fails badly exactly
+   for the model whose SE is near-degenerate (E65/E69: gemma-3 best_split 0.328, every SE-derived
+   predictor weak). So the E37 "z tracks CKA / alignment quality" story holds at 27B: alignment pays
+   off where the target aligns well, hurts where it doesn't.
+2. **⭐ Label-free `fuse` is the best predictor and replicates the E37 headline at the 27B tier.**
+   ID: `fuse` 0.764 — the top ID number, statistically on par with true 10-sample SE (0.760) and
+   significantly above `q_resp_only` on 3/5 folds (Qwen3.8 +0.013\*, gemma-2 +0.039\*, gemma-3
+   +0.022\*) and on Spearman (0.666 vs 0.626). OOD: `fuse` 0.715 — clearly above either arm alone
+   (aligned_ridge 0.684, q_resp_only 0.694) and above SEP (0.670), beats `q_resp_only` on 3/5 OOD
+   folds (Qwen3.6/3.8/gemma-2, all \*), loses only on gemma-3 (−0.039\*). Late fusion of a label-free
+   aligned-hidden-state ridge + text ≥ everything label-free, no target labels / sampling.
+3. **Everything still loses to true 10-sample SE OOD** (fuse −0.05 mean; per-fold Δ(fuse − true SE)
+   CIs exclude 0 on 2/5, include 0 on 3/5). ID parity does not extend to the dataset shift —
+   consistent with E39 / E69.
+4. **`fuse` and `aligned_ridge` both beat the val-selected SEP** on the mean, both splits; SEP is the
+   weakest SE-derived predictor here (OOD ρ 0.435).
+
+**Caveats.** Alignment is PCA(512)→orthogonal Procrustes, not the native square Procrustes of E37 —
+a method extension, validated only by the results. One anchor (Qwen3.5-27B); `pca_dim` not swept.
+SEP is val-selected (no E41 CV layer for the big tier). `q_resp_only` is 3-seed (from E65/E69).
+gemma-3-27b-it's SE is near-degenerate so its rows are noisy for every method.
+
+**Infra.** CPU only (`amortized_stage2` env, `CUDA_VISIBLE_DEVICES=""`), ~4 min wall. Per-model
+`load_matrix` peaks ~5 GB transient (all layers, freed after layer selection). No GPU, no lane
+borrow, no checkpoint (sklearn PCA/Procrustes/Ridge are re-fit deterministically from the script).
+
+**Artifacts.** `amortized_ue/e70_bigtier_lolo_aligned_ridge.py`,
+`amortized_ue/results/e70_bigtier_lolo_aligned_ridge.json` (5 folds × {ID, OOD}, per-fold metrics +
+bootstrap deltas + `aligned_ridge` per-id preds + `_summary`), `amortized_ue/e70_eval.log`.
