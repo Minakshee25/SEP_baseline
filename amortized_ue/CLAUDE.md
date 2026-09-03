@@ -159,6 +159,21 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 
 ## Current state (updated 2026-09-03)
 
+**E70 (2026-09-03) — big-tier 5×27B LOLO ALIGNED-RIDGE (label-free), ID + OOD.** Closes the other
+half of the E37 thesis experiment for the big tier (E65/E69 did only the `q_resp_only` text arm).
+Dimension wall (Qwen 5120 / gemma-2 4608 / gemma-3 5376, none 4096) fixed with per-model **PCA(512)
+→ orthogonal Procrustes** into a **Qwen3.5-27B** anchor frame (user-chosen). Label-free: PCA + W fit
+on each model's trivia-n2000 train, pooled ridge on the other 4 models' aligned z, held-out model
+scored on trivia n1000 (ID) + squad n1000 (OOD); baselines reloaded per-id from E65/E69. New
+`e70_bigtier_lolo_aligned_ridge.py` (CPU, ~4 min) + `results/e70_bigtier_lolo_aligned_ridge.json`.
+**Result (MEAN AUROC_incorrect, ID / OOD):** `aligned_ridge` 0.748 / 0.684 · `q_resp_only` 0.747 /
+0.694 · **`fuse` = rank-fusion(aligned_ridge ⊕ q_resp_only) 0.764 / 0.715** · true SE 0.760 / 0.765 ·
+SEP 0.736 / 0.670. (1) aligned-ridge alone ≈ text arm alone — neither dominates; aligned-ridge
+**collapses on gemma-3-OOD** (0.530, alignment fails for the near-degenerate-SE outlier). (2) ⭐
+**label-free `fuse` is the best predictor** — E37's late-fusion headline replicates at 27B: best ID
+number (on par with true SE, sig. > text on 3/5), OOD clearly > either arm and > SEP (sig. > text on
+3/5) but **still < true 10-sample SE OOD** (consistent with E39/E69). See EXPERIMENTS.md E70.
+
 **E69 (2026-09-03) — the squad OOD counterpart of E65 (big-tier 5×27B LOLO `q_resp_only` proxy).**
 E65's flagged open item. Same 15 `E65_bigtier_lolo_qresp` checkpoints (held-out target never in the
 fold's pool, trivia only), scored on each held-out model's `squad_n1000` (E55 builds, finished
@@ -1166,6 +1181,9 @@ round (degenerate SE). Proxy/true-SE/SEP/ridge means AUROC 0.747 / 0.760 / 0.736
 **Still open (optional):** an E41-style CV layer pick for the big tier (SEP currently val-selected).
 **✅ E65-OOD done (E69, 2026-09-03):** proxy < true SE on all 5 folds (CIs exclude 0), > SEP on 3/5,
 < own-model ridge on all 5; E65-final family split holds. `results/e69_bigtier_lolo_squad_ood.json`.
+**✅ Aligned-ridge LOLO done (E70, 2026-09-03):** PCA(512)→Procrustes into a Qwen3.5-27B anchor;
+aligned_ridge ≈ q_resp_only alone, label-free `fuse` of the two is best (ID 0.764 ≈ true SE, OOD
+0.715 > either arm & > SEP, still < true SE OOD). `results/e70_bigtier_lolo_aligned_ridge.json`.
 
 **Pending / carried over:**
 3. **(Partly done)** `amortized_ue/RESULTS.md` now holds the **four-model cross-LLM picture (E20–E30)**:
