@@ -1185,6 +1185,15 @@ round (degenerate SE). Proxy/true-SE/SEP/ridge means AUROC 0.747 / 0.760 / 0.736
 aligned_ridge ≈ q_resp_only alone, label-free `fuse` of the two is best (ID 0.764 ≈ true SE, OOD
 0.715 > either arm & > SEP, still < true SE OOD). `results/e70_bigtier_lolo_aligned_ridge.json`.
 
+**⏳ NEXT (user-requested 2026-09-03) — E71: the E70 comparison for the small-tier Qwen/Gemma set 2**
+(`Qwen3-8B`, `Qwen3.5-9B`, `gemma-7b-it`, `gemma-2-9b-it`). The aligned-ridge has NEVER been run for
+this set (E45 flagged it, never done). Plan: (1) train a **leave-one-of-the-4-out `q_resp_only`
+proxy** for set 2 (GPU; no clean small-tier LOLO proxy exists — E45/E51 used the deploy proxy with
+the target in-pool); (2) run the **E70 aligned-ridge** for set 2 (PCA→Procrustes; note Qwen3-8B and
+Qwen3.5-9B are natively 4096-dim so square Procrustes works for them, gemma-7b-it 3072 / gemma-2-9b-it
+3584 need PCA); (3) evaluate proxy + aligned_ridge + `fuse` + SEP + true SE, **ID (trivia n1000) and
+OOD (squad n1000)** — squad n1000 built for all 4 in E49. Data all on `/data2`.
+
 **Pending / carried over:**
 3. **(Partly done)** `amortized_ue/RESULTS.md` now holds the **four-model cross-LLM picture (E20–E30)**:
    reference single-LLM arms, cross-LLM transfer, alignment recovery/CKA/increment, and the full-power
