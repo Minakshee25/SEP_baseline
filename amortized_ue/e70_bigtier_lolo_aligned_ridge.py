@@ -45,7 +45,6 @@ from amortized_ue.loaders import load_records
 from amortized_ue.linear_ceiling_probe import load_matrix, splits, fit_probe, rho
 from amortized_ue.correctness_eval import (
     load_accuracy, paired_bootstrap_auc, ci)
-from amortized_ue.procrustes_e27_rank_fusion import ecdf
 from amortized_ue.stage2.data import best_split, binarize_entropy
 from amortized_ue.e69_bigtier_lolo_squad_ood import run_name_ds, s1cfg_ds, BIGTIER
 
@@ -59,6 +58,13 @@ CKPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "stage2", "runs", "E70_bigtier_lolo_aligned_ridge", "checkpoints")
 E65_JSON = os.path.join(RESULTS_DIR, "e65_bigtier_lolo_n1000.json")
 E69_JSON = os.path.join(RESULTS_DIR, "e69_bigtier_lolo_squad_ood.json")
+
+
+def ecdf(train_vals):
+    """Empirical-CDF transform (value -> normalized rank), fit on the given values. Label-free.
+    Verbatim from procrustes_e27_rank_fusion.ecdf; inlined so this script needs no proxy stack."""
+    s = np.sort(np.asarray(train_vals, dtype=float))
+    return lambda x: np.searchsorted(s, np.asarray(x, dtype=float), side="right") / len(s)
 
 
 # --------------------------------------------------------------------------- per-model alignment ---
@@ -194,13 +200,42 @@ def se_map(data_dir, model, dataset, n):
     return {i: float(recs[i]["labels"]["cluster_assignment_entropy"]) for i in recs}
 
 
+WANDB_ARTIFACT = "e70_bigtier_lolo_aligned_ridge_bundles"
+
+
+def do_push_wandb():
+    import glob
+    import wandb
+    paths = sorted(glob.glob(os.path.join(CKPT_DIR, "*.pkl")))
+    assert len(paths) == 2 * len(BIGTIER), f"expected {2 * len(BIGTIER)} pkls, found {len(paths)}"
+    run = wandb.init(project="amortized_ue_stage2", entity=os.environ.get("WANDB_ENT"),
+                     name=WANDB_ARTIFACT, job_type="checkpoint",
+                     config={"experiment": "E70", "anchor": ANCHOR, "pca_dim": PCA_DIM,
+                             "design": "big-tier 5x27B LOLO aligned-ridge, label-free, PCA->Procrustes"})
+    art = wandb.Artifact(WANDB_ARTIFACT, type="model",
+                         metadata={"bigtier": BIGTIER, "anchor": ANCHOR, "pca_dim": PCA_DIM,
+                                   "contents": "5 aligner_<model>.pkl (PCA+W+centers+layers) + "
+                                               "5 fold_<held>.pkl (pooled ridge+scaler+held feat stats)"})
+    art.add_dir(CKPT_DIR)
+    run.log_artifact(art)
+    run.finish()
+    a = wandb.Api().artifact(
+        f"{os.environ['WANDB_ENT']}/amortized_ue_stage2/{WANDB_ARTIFACT}:latest")
+    print(f"pushed + verified {WANDB_ARTIFACT}:{a.version}  size={a.size} bytes  "
+          f"n_files={len(list(a.files()))}")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--push_wandb", action="store_true", help="push saved bundles as a W&B artifact and exit")
     p.add_argument("--data_dir", default=DATA2)
     p.add_argument("--anchor", default=ANCHOR, choices=BIGTIER)
     p.add_argument("--pca_dim", type=int, default=PCA_DIM)
     p.add_argument("--bootstrap", type=int, default=10000)
     args = p.parse_args()
+    if args.push_wandb:
+        do_push_wandb()
+        return
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     print(f"E70 — big-tier LOLO aligned-ridge | anchor={args.anchor} | pca_dim={args.pca_dim}")
