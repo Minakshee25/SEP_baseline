@@ -4324,3 +4324,67 @@ Eval wall time ~3 min (3B inference, 2 targets × 3 seeds, n1000).
 `amortized_ue/results/e68_lolo_squad_sefidelity.json`,
 `amortized_ue/results/e68_lolo_squad_correctness.json`,
 `amortized_ue/results/e68_combined_table.json`.
+
+---
+
+## E69 — the squad OOD counterpart of E65 (big-tier 5×27B leave-one-LLM-out `q_resp_only` proxy) — ✅ additive; the OOD pattern (proxy > SEP, real loss to true SE) holds, and the E65-final family split holds too
+
+**Why.** E65 scored the 5-fold LOLO `q_resp_only` proxy over the 5 big-tier 27B targets
+(`Qwen3.5/3.6/3.8-27B`, `gemma-2-27b-it`, `gemma-3-27b-it`) only on each held-out model's shared-ID
+**trivia** n1000 set — in-distribution. E65's own to-do flagged "E65-OOD on the squad n1000 sets
+once they finish generating". Those `squad_n1000` builds (E55 scope) completed 2026-09-03 (all 5,
+1000/1000 records + manifests). This closes the OOD row — the big-tier analogue of E68 (which did
+the same for the small-tier Llama-3/DeepSeek).
+
+**Method (additive, new script `amortized_ue/e69_bigtier_lolo_squad_ood.py`).** Trains nothing.
+Reuses the 15 `E65_bigtier_lolo_qresp` checkpoints (5 folds × 3 seeds; the held-out target was
+NEVER in that fold's training pool — trained on the OTHER 4 big-tier models, trivia only, never
+squad). Eval body is E65's `do_eval` `eval_n != TRAIN_N` branch with the eval dataset swapped to
+squad: proxy (3 seeds, seed-averaged) scored on the held-out model's `squad_n1000`; supervised
+baselines FIT on that model's own **trivia** n2000 tr/va and PREDICTED onto the squad rows —
+`sep_single_val_selected` (leak-free val-selected layer, the E51/E53 Qwen/Gemma convention — no CV
+layer picked for the big tier yet) and an own-model TBG+SLT ridge ceiling (context, not a fair
+opponent). AUROC_incorrect + Spearman-vs-SE, 10k paired bootstrap on (proxy − SEP) and
+(proxy − true 10-sample SE), shared resample indices, id-joined. **E65's output JSONs untouched.**
+
+**Results (squad n1000, held-out target never in LOLO training, never squad):**
+
+| held-out | incorr. rate | proxy AUROC_inc | SEP | true-SE | ridge | Δ vs SEP [95% CI] | Δ vs true SE [95% CI] | proxy ρ | SEP ρ |
+|---|---|---|---|---|---|---|---|---|---|
+| Qwen3.5-27B   | 0.693 | 0.721 | 0.679 | 0.768 | 0.733 | **+0.043 [+0.004, +0.082]** | **−0.046 [−0.080, −0.013]** | 0.556 | 0.473 |
+| Qwen3.6-27B   | 0.671 | 0.676 | 0.668 | 0.746 | 0.723 | +0.008 [−0.029, +0.043] | **−0.069 [−0.103, −0.035]** | 0.516 | 0.477 |
+| Qwen3.8-27B   | 0.691 | 0.701 | 0.644 | 0.786 | 0.724 | **+0.056 [+0.018, +0.095]** | **−0.085 [−0.118, −0.053]** | 0.577 | 0.371 |
+| gemma-2-27b-it| 0.762 | 0.725 | 0.746 | 0.794 | 0.785 | −0.021 [−0.059, +0.018] | **−0.069 [−0.106, −0.032]** | 0.505 | 0.489 |
+| gemma-3-27b-it| 0.681 | 0.646 | 0.611 | 0.729 | 0.709 | +0.035 [−0.009, +0.078] | **−0.083 [−0.121, −0.044]** | 0.448 | 0.365 |
+| **MEAN**      |  —    | **0.694** | 0.670 | **0.765** | 0.735 | +0.024 | −0.070 | 0.520 | 0.435 |
+
+**Findings.**
+1. **Proxy loses to true 10-sample SE on all 5 folds, every CI excludes 0** (−0.046 to −0.085).
+   Same shape as E39 / E52 / E54 / E68: E38's in-distribution parity with sampling does **not**
+   survive a dataset shift. On trivia (E65-final) the big-tier proxy was on par with true SE for the
+   3 Qwen targets; under the squad shift that parity is gone for every target.
+2. **Proxy beats the supervised in-model SEP on 3/5 folds** (Qwen3.5 +0.043\*, Qwen3.8 +0.056\*
+   significant; gemma-3 +0.035 n.s.), ties on 2 (Qwen3.6 +0.008; gemma-2 −0.021, nominally behind —
+   the one fold where SEP's val-selected layer, TBG:43, happens to transfer well). Proxy beats SEP
+   on Spearman on all 5 (mean 0.520 vs 0.435). Consistent with E68's "proxy > SEP OOD" but weaker
+   margins than the small tier (E68 Δ +0.050\*/+0.119\*) — SEP degrades less catastrophically here
+   than it did for small-tier Llama-3/DeepSeek.
+3. **Proxy stays below the own-model ridge ceiling on all 5** (mean 0.694 vs 0.735) — the ridge
+   needs the target's own hidden states + SE labels and cannot run label-free, so this is context,
+   not a fair loss.
+4. **The E65-final family split is not contradicted.** The gemma-2-27b-it fold is again the softest
+   for the proxy relative to SEP (only fold where Δ vs SEP is negative), echoing E45/E64/E65's
+   gemma-2 answer-text compression; gemma-3-27b-it stays weak across the board (proxy 0.646, lowest).
+   No headline moves.
+
+**Caveats.** 3 seeds; SEP is val-selected not CV-selected for the big tier (an E41-style layer pick
+is still open); squad is a hard shift for these targets (incorrect rate 0.67–0.76). All ridges max
+α=1e4, late layers (Qwen TBG/SLT 62–64, gemma-2 43–45, gemma-3 58) — same as E65.
+
+**Infra.** Both GPUs were free (the training lane + watchdog were killed after the last `squad_n1000`
+build finished), so no SIGSTOP-lane borrow was needed — ran directly on GPU 0, `amortized_stage2`
+env, ~40 min (3B inference only, 5 folds × 3 seeds, n1000).
+
+**Artifacts.** `amortized_ue/e69_bigtier_lolo_squad_ood.py`,
+`amortized_ue/results/e69_bigtier_lolo_squad_ood.json` (5 folds + `_summary` + per-id preds),
+`amortized_ue/e69_eval.log`.

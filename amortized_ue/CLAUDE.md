@@ -157,7 +157,20 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (updated 2026-09-01)
+## Current state (updated 2026-09-03)
+
+**E69 (2026-09-03) — the squad OOD counterpart of E65 (big-tier 5×27B LOLO `q_resp_only` proxy).**
+E65's flagged open item. Same 15 `E65_bigtier_lolo_qresp` checkpoints (held-out target never in the
+fold's pool, trivia only), scored on each held-out model's `squad_n1000` (E55 builds, finished
+2026-09-03); SEP/ridge fit on that model's own trivia n2000. New additive
+`e69_bigtier_lolo_squad_ood.py` + `results/e69_bigtier_lolo_squad_ood.json`; E65 outputs untouched.
+**Result (MEAN AUROC_incorrect):** proxy 0.694 · true SE 0.765 · SEP 0.670 · own-model ridge 0.735.
+Proxy **loses to true 10-sample SE on all 5 folds, every CI excludes 0** (−0.046 to −0.085) — same
+OOD pattern as E39/E52/E54/E68; E65-final's trivia parity with sampling does not survive the shift.
+Proxy **beats supervised SEP on 3/5** (Qwen3.5 +0.043\*/Qwen3.8 +0.056\* sig., gemma-3 +0.035 n.s.),
+ties Qwen3.6, nominally behind on gemma-2 (−0.021 n.s.); beats SEP on Spearman on all 5 (0.520 vs
+0.435). Below the own-model ridge ceiling on all 5 (context, not label-free). The E65-final family
+split holds: gemma-2 softest vs SEP, gemma-3 weakest overall. See EXPERIMENTS.md E69.
 
 **E68 (2026-09-01) — extend the TRUE LOLO-proxy squad OOD eval (E52/E54) from Llama-2/Mistral to
 Llama-3 + DeepSeek.** Same E37/E43 LOLO `q_resp_only` checkpoints (held-out target never in that
@@ -1150,8 +1163,9 @@ fails for gemma-2-27b-it (sig. loss to true SE −0.056\*, matching E45/E64), ge
 round (degenerate SE). Proxy/true-SE/SEP/ridge means AUROC 0.747 / 0.760 / 0.736 / 0.754, ρ 0.626 /
 — / 0.607 / 0.668. Preliminary 200-row numbers superseded (its gemma-3 "+0.123\*" was an artefact →
 +0.014 n.s.). Results `results/e65_bigtier_lolo_n1000.json`. Full write-up: EXPERIMENTS.md E65.
-**Still open (optional):** an E41-style CV layer pick for the big tier (SEP currently val-selected);
-E65-OOD on the squad n1000 sets once they finish generating.
+**Still open (optional):** an E41-style CV layer pick for the big tier (SEP currently val-selected).
+**✅ E65-OOD done (E69, 2026-09-03):** proxy < true SE on all 5 folds (CIs exclude 0), > SEP on 3/5,
+< own-model ridge on all 5; E65-final family split holds. `results/e69_bigtier_lolo_squad_ood.json`.
 
 **Pending / carried over:**
 3. **(Partly done)** `amortized_ue/RESULTS.md` now holds the **four-model cross-LLM picture (E20–E30)**:
