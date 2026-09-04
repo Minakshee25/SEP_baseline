@@ -159,6 +159,19 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 
 ## Current state (updated 2026-09-04)
 
+**E73 (2026-09-04) — E72 for the small-tier Qwen/Gemma "set 2" (`Qwen3-8B`, `Qwen3.5-9B`,
+`gemma-7b-it`, `gemma-2-9b-it`): per-model INDIVIDUAL proxy vs ridge vs SEP, ID + OOD.** Exact analog
+of E72 one tier down; same 2-position input per model on **E71's `aligned_ridge` layer picks**
+(Qwen3-8B 34/23, Qwen3.5-9B 31/31, gemma-7b-it 27/18, gemma-2-9b-it 41/28). New
+`e73_settwo_individual.py` (adapted from E72; **per-model curve files → fixes the E72 race**).
+**Result (MEAN AUROC / ρ, ID | OOD):** ridge 0.760/0.705 | 0.702/0.604 · proxy 0.747/0.691 |
+0.689/0.587 · SEP 0.739/0.644 | 0.658/0.496 · true SE 0.785 | 0.738. **⭐ Reproduces E72: ridge ≥
+proxy ≥ SEP everywhere, `proxy − ridge` never positive (sig-loses 4/8, ties rest)** → E15–E17 holds
+for set 2. Everything < true SE (gap wider than E72's big tier). **New nuance:** E71's cross-model
+*text* LOLO proxy (0.791 ID AUROC) beats the per-model *hidden-state* methods ID — the answer-text
+channel is that strong for small Qwen/Gemma (E45–E53) — but per-model ridge still wins OOD and ID ρ.
+Checkpoints (12 + 4 bundles) + W&B `e73_settwo_individual_ckpts:v0`. See EXPERIMENTS.md E73.
+
 **E72 (2026-09-04) — big-tier 5×27B PER-MODEL (individual, not LOLO) supervised ceiling: proxy vs
 ridge vs SEP, ID + OOD.** The complement to E65/E69/E70 (all cross-model). For each big-tier model,
 train its OWN proxy / ridge / SEP on its OWN trivia n2000, all on the **identical** input

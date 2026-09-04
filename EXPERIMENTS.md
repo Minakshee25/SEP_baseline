@@ -4654,3 +4654,78 @@ bootstrap deltas, per-id preds, `_summary` with the 4 mean tables),
 `amortized_ue/e72_run.log` + `e72_train_gpu{0,1}.log` + `e72_eval.log`. Checkpoints
 `stage2/runs/E72_bigtier_individual/checkpoints/<model>/` (15 `.pt` + 5 `z_bundle.pkl`, gitignored)
 + **W&B `e72_bigtier_individual_ckpts:v0`** (verified by fetch).
+
+---
+
+## E73 — E72 for the small-tier Qwen/Gemma "set 2": per-model INDIVIDUAL proxy vs ridge vs SEP, ID + OOD — ✅ **reproduces E72 exactly: ridge ≥ proxy ≥ SEP everywhere, the frozen 3B proxy never beats a ridge on the same hidden state (E15–E17 holds for set 2)**; new nuance — the cross-model *text* proxy (E71) edges the per-model *hidden-state* methods on ID AUROC
+
+**Why.** E71 gave set 2 (`Qwen3-8B`, `Qwen3.5-9B`, `gemma-7b-it`, `gemma-2-9b-it`) its cross-model
+transfer numbers (LOLO `q_resp_only` proxy + pooled aligned ridge). E73 is the per-model supervised
+complement — the exact analog of E72 one tier down. Same three methods, same 2-position input, same
+protocol; only the model set and the layers change.
+
+**Method (`amortized_ue/e73_settwo_individual.py`, adapted from `e72_bigtier_individual.py`).** For
+each of the 4 models: train its OWN proxy / ridge / SEP on its OWN trivia n2000, all reading the
+**identical** input `concat([TBG:L_tbg, SLT:L_slt])`, with `(L_tbg, L_slt)` = **the per-position
+val-Spearman layers E71's `aligned_ridge` (its `ModelAligner`, via `fit_probe`) selected**, reused
+verbatim: Qwen3-8B 34/23, Qwen3.5-9B 31/31, gemma-7b-it 27/18, gemma-2-9b-it 41/28. proxy = `z` arm
+(hidden-in, no text), `exp2_run.train_arm` E37/E53/E65 recipe, 3 seeds, `h_in = 2H`. ridge/SEP fresh
+on the same concat. Eval ID (trivia n1000) + OOD (squad n1000). Reference columns joined per-id from
+**E71's** JSON: true 10-sample SE, cross-model `aligned_ridge`, cross-model LOLO `q_resp_only`. 10k
+paired bootstrap. **Training curves written one-file-per-model** (`results/e73_train_curves/<model>.json`)
+— fixes the E72 concurrent-write race when `--models` splits folds across GPUs.
+
+**Results — MEAN over the 4 models (AUROC_incorrect / Spearman-vs-SE):**
+
+| method | ID | OOD |
+|---|---|---|
+| **ridge** (own-model) | **0.760 / 0.705** | **0.702 / 0.604** |
+| proxy (own-model `z`) | 0.747 / 0.691 | 0.689 / 0.587 |
+| SEP (own-model) | 0.739 / 0.644 | 0.658 / 0.496 |
+| true 10-sample SE | 0.785 / — | 0.738 / — |
+| aligned_ridge (E71, cross-model) | 0.741 / 0.643 | 0.637 / 0.425 |
+| LOLO `q_resp_only` (E71, cross-model, **text**) | **0.791** / 0.697 | 0.678 / 0.537 |
+
+**Per-model AUROC_incorrect (proxy / ridge / SEP), ID | OOD:**
+
+| model | ID | OOD |
+|---|---|---|
+| Qwen3-8B | 0.758 / 0.775 / 0.748 | 0.692 / 0.707 / 0.644 |
+| Qwen3.5-9B | 0.759 / 0.766 / 0.769 | 0.717 / 0.717 / 0.697 |
+| gemma-7b-it | 0.727 / 0.753 / 0.716 | 0.687 / 0.701 / 0.648 |
+| gemma-2-9b-it | 0.744 / 0.746 / 0.723 | 0.660 / 0.683 / 0.645 |
+
+**Findings.**
+1. **⭐ Same ordering as E72: ridge ≥ proxy ≥ SEP on every metric, both splits.** `proxy − ridge`
+   paired bootstrap: proxy significantly *loses* on 4/8 cells (Qwen3-8B-ID −0.017\*, gemma-7b-it-ID
+   −0.026\*, gemma-2-9b-it-OOD −0.023\*, …), ties the rest, **never wins**. **E15–E17 confirmed for
+   set 2 as well — routing the hidden state through a frozen 3B adds nothing over a ridge on the
+   same input; z→SE is linear at every tier tested.**
+2. **proxy > SEP** on the mean everywhere; significant on gemma-2-9b-it-ID (+0.022\*) and
+   Qwen3-8B-OOD (+0.048\*). SEP collapses hardest OOD (ρ 0.496 vs ridge 0.604; gemma-7b-it ρ 0.383).
+3. **Everything loses to true 10-sample SE** — `proxy − true SE` CI excludes 0 on 6/8 folds. The gap
+   is **wider than E72's big tier** (per-model ridge ID 0.760 vs true SE 0.785, vs E72's near-tie
+   0.762/0.760) — the 27B hidden state carries relatively more of the SE signal than the 7–9B one.
+4. **⭐ New nuance vs E72: the cross-model *text* proxy beats the per-model *hidden-state* methods on
+   ID AUROC** — E71's LOLO `q_resp_only` 0.791 vs own-model ridge 0.760 / proxy 0.747. For small
+   Qwen/Gemma the answer-text channel is strong (E45–E53), strong enough that a text proxy trained
+   on 3 *other* models outperforms a hidden-state probe trained on the target itself, for
+   wrong-answer detection ID. But per-model **ridge still wins OOD** (0.702 vs LOLO 0.678) and on ID
+   Spearman (0.705 vs 0.697). At the 27B tier (E72) the two were level; here the text proxy pulls
+   ahead ID. Model-set / tier dependent, consistent with E71's own "text > aligned-ridge for set 2".
+5. Per-model supervised (proxy/ridge) still beats the cross-model *aligned ridge* (E71) on all
+   metrics — OOD Spearman own ridge 0.604 vs E71 aligned 0.425.
+
+**Caveats.** One fixed 2-position layer per model (E71's picks), unswept. 3 seeds. Qwen 8B/9B on the
+`_nothink` builds. gemma-2-9b-it wrong-answer separation is weak for all methods (E64).
+
+**Infra.** `amortized_stage2`. Split across both GPUs — GPU0 the 2 Qwen, GPU1 the 2 gemma
+(`--models` filter) — training ~20 min wall. Eval ~10 min. Per-model curve files → no race (E72 fix).
+
+**Artifacts.** `amortized_ue/e73_settwo_individual.py`,
+`amortized_ue/results/e73_settwo_individual.json` (4 models × {ID, OOD}: per-method metrics,
+bootstrap deltas, per-id preds, `_summary` with the 4 mean tables),
+`amortized_ue/results/e73_train_curves/<model>.json` (all 4), `amortized_ue/e73_eval.log` +
+`e73_train_gpu{0,1}.log`. Checkpoints `stage2/runs/E73_settwo_individual/checkpoints/<model>/`
+(12 `.pt` + 4 `z_bundle.pkl`, gitignored) + **W&B `e73_settwo_individual_ckpts:v0`** (16 files,
+1.41 GB, verified by fetch).
