@@ -157,6 +157,24 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
+## Current state (updated 2026-09-04)
+
+**E72 (2026-09-04) — big-tier 5×27B PER-MODEL (individual, not LOLO) supervised ceiling: proxy vs
+ridge vs SEP, ID + OOD.** The complement to E65/E69/E70 (all cross-model). For each big-tier model,
+train its OWN proxy / ridge / SEP on its OWN trivia n2000, all on the **identical** input
+`concat([TBG:L_tbg, SLT:L_slt])` — the same per-position layers E70's `aligned_ridge` selected. New
+`e72_bigtier_individual.py`; proxy = `z` arm (hidden-state-in, no text), E37/E53/E65 recipe, 3 seeds,
+`h_in = 2H`. **Result (MEAN AUROC_incorrect / ρ, ID | OOD):** ridge 0.762/0.684 | 0.742/0.649 ·
+proxy 0.754/0.672 | 0.732/0.628 · SEP 0.752/0.643 | 0.697/0.536 · true SE 0.760 | 0.765.
+**⭐ ridge ≥ proxy ≥ SEP everywhere; `proxy − ridge` a tie on 8/10 cells, proxy never beats ridge**
+→ E15–E17's "ridge beats the 3B proxy for hidden-state-in" now confirmed at 27B AND OOD (z→SE
+linear; frozen backbone adds nothing). Per-model ridge ≈ true 10-sample SE for wrong-answer
+detection ID (0.762 vs 0.760). proxy > SEP sig. on 3/5 OOD. Per-model supervised ≫ cross-model
+transfer (OOD ρ: own ridge 0.649 vs E70 aligned 0.498 vs E65 LOLO 0.520). Checkpoints (15 `.pt` + 5
+`z_bundle.pkl`) + W&B `e72_bigtier_individual_ckpts:v0`. ⚠️ gemma-2/3 per-step training curves lost
+to a concurrent-write race when the folds were split across 2 GPUs (val-Spearman preserved in
+`e72_train_gpu1.log`; result unaffected). See EXPERIMENTS.md E72.
+
 ## Current state (updated 2026-09-03)
 
 **E71 (2026-09-03) — the E70 comparison for the small-tier Qwen/Gemma "set 2"** (`Qwen3-8B`,

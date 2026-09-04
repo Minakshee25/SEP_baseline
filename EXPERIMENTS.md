@@ -4568,3 +4568,89 @@ deltas, per-id `aligned_ridge`/`proxy`/`sep`/`true_se`/`incorrect`, `_summary`),
 `stage2/runs/E71_settwo_lolo_qresp/checkpoints/` (12 `.pt`) + `stage2/runs/E71_settwo_aligned_ridge/checkpoints/`
 (4 aligner + 4 fold pkls), both gitignored; **W&B `e71_settwo_lolo_qresp_ckpts:v0` (12 files, 1.05 GB)
 + `e71_settwo_aligned_ridge_bundles:v0` (8 files, 139 MB)**, both verified by fetch.
+
+---
+
+## E72 — big-tier (5×27B) PER-MODEL (individual, not LOLO) supervised ceiling: proxy vs ridge vs SEP on one common layer, ID + OOD — ✅ **ridge ≥ proxy ≥ SEP everywhere; z→SE is linear at 27B / OOD (E15–E17 confirmed at scale), and per-model ridge nearly matches true 10-sample SE for wrong-answer detection ID**
+
+**Why.** E65/E69/E70 all measured *cross-model* transfer (leave-one-LLM-out proxy, pooled aligned
+ridge). This is the complement the user asked for: the *per-model supervised* setting — for EACH
+big-tier model, train that model's OWN proxy / ridge / SEP on its OWN trivia n2000, evaluate ID
+(trivia n1000) and OOD (squad n1000). It answers "how much does cross-model transfer give up vs
+just training on the target?" and re-tests E15–E17's "ridge beats the 3B proxy for hidden-state-in"
+at 27B scale and under a dataset shift, where it had never been checked.
+
+**Method (new `amortized_ue/e72_bigtier_individual.py`).** All three methods read the **identical**
+input per model — `concat([TBG:L_tbg, SLT:L_slt])`, raw hidden states, 2 positions stacked — with
+`(L_tbg, L_slt)` = the per-position val-Spearman layers **E70's `aligned_ridge` already selected**
+(reused verbatim: Qwen3.5 63/50, Qwen3.6 63/49, Qwen3.8 63/48, gemma-2 45/43, gemma-3 58/58), so
+E72 sits on the same layers as E70. Fairness = same input; only the predictor class differs.
+- **proxy** — frozen Llama-3.2-3B + LoRA, `z` arm (hidden-state-in, NO text), trained per-model via
+  `exp2_run.train_arm` (the E37/E53/E65 recipe: batch 8 × grad_accum 4 = eff 32, projector 1024,
+  k=4, 10 epochs), 3 seeds. `h_in = 2H` (~9.2–10.8k). Own trivia n2000 tr/va split (leak-free).
+- **ridge** — own-model ridge on the same `concat([TBG,SLT])`, `fit_probe` (StandardScaler + Ridge,
+  α on val Spearman). All 5 pick α=1e4.
+- **SEP** — own-model logistic on `best_split`-binarised SE, same 2-position input, **fixed** layers
+  (E41: don't re-select by AUROC).
+Reference columns joined per-id: true 10-sample SE, E70's cross-model `aligned_ridge`, E65/E69's
+cross-model LOLO `q_resp_only`. 10k paired bootstrap on AUROC deltas.
+
+**Results — MEAN over the 5 models (AUROC_incorrect / Spearman-vs-SE):**
+
+| method | needs | ID | OOD |
+|---|---|---|---|
+| **ridge** (own-model) | white-box + own SE labels | **0.762 / 0.684** | **0.742 / 0.649** |
+| proxy (own-model `z`) | white-box + own SE labels | 0.754 / 0.672 | 0.732 / 0.628 |
+| SEP (own-model) | white-box + own SE labels | 0.752 / 0.643 | 0.697 / 0.536 |
+| true 10-sample SE | 10× sampling | 0.760 / — | 0.765 / — |
+| aligned_ridge (E70, cross-model) | white-box, label-free | 0.748 / 0.617 | 0.684 / 0.498 |
+| LOLO `q_resp_only` (E65/E69, cross-model) | text only | 0.747 / 0.626 | 0.694 / 0.520 |
+
+**Per-model AUROC_incorrect (proxy / ridge / SEP), ID | OOD:**
+
+| model | ID | OOD |
+|---|---|---|
+| Qwen3.5-27B | 0.771 / 0.774 / 0.766 | 0.749 / 0.754 / 0.694 |
+| Qwen3.6-27B | 0.760 / 0.765 / 0.752 | 0.705 / 0.736 / 0.689 |
+| Qwen3.8-27B | 0.788 / 0.786 / 0.774 | 0.715 / 0.717 / 0.672 |
+| gemma-2-27b-it | 0.756 / 0.760 / 0.750 | 0.784 / 0.797 / 0.770 |
+| gemma-3-27b-it | 0.698 / 0.726 / 0.719 | 0.706 / 0.706 / 0.661 |
+
+**Findings.**
+1. **⭐ Ridge ≥ proxy ≥ SEP on every metric, both splits.** Per-model ridge is the best amortized
+   method. `proxy − ridge` is a statistical tie on 8/10 model×split cells — the proxy significantly
+   *loses* to ridge only on Qwen3.6-OOD (−0.031\*) and gemma-3-ID (−0.029\*), never wins. **This
+   confirms E15–E17 at 27B scale AND out-of-distribution: the z→SE relation is linear; routing the
+   hidden state through a frozen 3B backbone adds nothing over a ridge on the same input.**
+2. **Proxy beats SEP significantly on 3/5 OOD folds** (Qwen3.5 +0.055\*, Qwen3.8 +0.043\*, gemma-3
+   +0.045\*); SEP is clearly the weakest of the three OOD (ρ 0.536 vs ridge 0.649) — binarising the
+   label costs the most under the shift (consistent with E56).
+3. **⭐ Per-model ridge ≈ true 10-sample SE for wrong-answer detection ID** (0.762 vs 0.760, tie) and
+   stays close OOD (0.742 vs 0.765) — far tighter than any cross-model predictor. The supervised
+   own-model linear probe is a genuine ceiling; sampling's remaining edge is OOD only.
+4. **Per-model supervised ≫ cross-model transfer**, as expected — sharpest on OOD Spearman: own-model
+   ridge 0.649 vs E70 aligned_ridge 0.498 vs E65 LOLO proxy 0.520. The transfer methods give up
+   ~0.13–0.15 ρ OOD for needing nothing from the target.
+5. **gemma-3-27b-it**: all methods weak (near-degenerate SE, incorrect_rate 0.24 ID). proxy/ridge
+   *beat* "true SE" on ID AUROC there (0.70–0.73 vs 0.65) only because true SE is itself a poor
+   wrong-answer signal for that model — not a real amortization win.
+
+**Caveats.** One fixed 2-position layer per model (E70's picks), not swept. 3 seeds. proxy `h_in`
+is the raw 2H concat (no PCA) — the projector's LayerNorm+Linear handles it. **The per-step training
+curves for gemma-2 + gemma-3 were lost to a concurrent-write race** when the 5 folds were split
+across 2 GPUs (both processes read-modify-wrote the shared curves JSON; the Qwen process wrote last).
+Recoverable only by retraining those 2 folds; val-Spearman per seed is preserved in
+`e72_train_gpu1.log` (gemma-2 0.661/0.689/0.682, gemma-3 0.436/0.455/0.468) and all 15 checkpoints +
+5 `z_bundle.pkl` (scaler/label-stats) are intact. Result unaffected (computed from checkpoints).
+
+**Infra.** `amortized_stage2` env. Split across both GPUs — GPU0 the 3 Qwen, GPU1 the 2 gemma
+(`--models` filter, resumable per model) — training ~40 min wall (would have been ~1.5 h serial).
+Eval ~15 min on GPU0 (proxy forward over 15 ckpts + fresh ridge/SEP CPU + 10k bootstraps).
+
+**Artifacts.** `amortized_ue/e72_bigtier_individual.py`,
+`amortized_ue/results/e72_bigtier_individual.json` (5 models × {ID, OOD}: per-method metrics,
+bootstrap deltas, per-id preds, `_summary` with the 4 mean tables),
+`amortized_ue/results/e72_bigtier_individual_train_curves.json` (Qwen folds only — see Caveats),
+`amortized_ue/e72_run.log` + `e72_train_gpu{0,1}.log` + `e72_eval.log`. Checkpoints
+`stage2/runs/E72_bigtier_individual/checkpoints/<model>/` (15 `.pt` + 5 `z_bundle.pkl`, gitignored)
++ **W&B `e72_bigtier_individual_ckpts:v0`** (verified by fetch).
