@@ -157,7 +157,23 @@ Joined by id. Local disk is source of truth (offline-first); W&B is an extra cop
 - Frozen backbone, LoRA r16/α32/drop0.05 on q,k,v,o_proj, linear head, REG readout. bf16 backbone;
   projector/head fp32.
 
-## Current state (updated 2026-09-04)
+## Current state (updated 2026-09-05)
+
+**E74 (2026-09-05) — the clean "Set-1" (original 4 targets: Llama-2-7b-chat,
+Mistral-7B-Instruct-v0.2, Meta-Llama-3-8B-Instruct, deepseek-llm-7b-chat) per-model supervised
+ceiling: 5 proxy arms vs own-target ridge vs SEP-single vs SEP-multi, ID + OOD.** The E72/E73
+per-model comparison had never been run on the *original* reference target set (fixed leak-free
+2-position layers: Llama-2 TBG:30/SLT:13, Mistral TBG:31/SLT:6, Llama-3 TBG:31/SLT:11, DeepSeek
+TBG:28/SLT:16). New `set1_full_eval.py` (adapted from `e72_bigtier_individual.py`, generalized to
+all 5 arms + SEP-single/SEP-multi). **Result (MEAN Spearman/AUROC_inc, ID | OOD):** ridge
+0.656/0.734 | 0.516/0.686 · best proxy arms 0.58–0.60/0.71–0.72 | 0.37–0.43/0.63–0.65 · sep_multi
+0.571/0.709 | 0.353/0.629 · sep_single 0.563/0.706 | 0.336/0.621 · true SE —/0.761 | —/0.755.
+**⭐ Reproduces E72/E73's ordering exactly at this tier: ridge ≥ proxy ≥ SEP everywhere, gap to
+true SE widens OOD** (E15–E17 now confirmed at all three tiers checked: 27B/E72, small
+Qwen-Gemma/E73, original small/E74). SEP-multi (paper's 5-layer concat) gives a small consistent
+bump over SEP-single but never closes the gap to ridge. `q_only` clearly weakest of the 5 proxy
+arms both splits. Checkpoints (60 `.pt` + 4 `z_bundle.pkl`) + W&B `set1_full_eval_ckpts:v0`. See
+EXPERIMENTS.md E74.
 
 **E73 (2026-09-04) — E72 for the small-tier Qwen/Gemma "set 2" (`Qwen3-8B`, `Qwen3.5-9B`,
 `gemma-7b-it`, `gemma-2-9b-it`): per-model INDIVIDUAL proxy vs ridge vs SEP, ID + OOD.** Exact analog

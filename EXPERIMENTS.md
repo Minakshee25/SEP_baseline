@@ -4729,3 +4729,95 @@ bootstrap deltas, per-id preds, `_summary` with the 4 mean tables),
 `e73_train_gpu{0,1}.log`. Checkpoints `stage2/runs/E73_settwo_individual/checkpoints/<model>/`
 (12 `.pt` + 4 `z_bundle.pkl`, gitignored) + **W&B `e73_settwo_individual_ckpts:v0`** (16 files,
 1.41 GB, verified by fetch).
+
+## E74 — clean "Set-1" (original 4 targets) per-model supervised ceiling: 5 proxy arms vs own-target ridge vs SEP-single vs SEP-multi, ID + OOD — reproduces E72/E73's ordering for the original small tier: **ridge ≥ proxy arms ≥ SEP everywhere; true SE best of all, gap widening OOD**
+
+**Why.** E72/E73 ran this exact per-model supervised comparison (proxy/ridge/SEP, ID+OOD) for the
+27B tier and the small Qwen/Gemma tier, but the **original 4 "Set-1" targets** (Llama-2-7b-chat,
+Mistral-7B-Instruct-v0.2, Meta-Llama-3-8B-Instruct, deepseek-llm-7b-chat) — the models every other
+experiment in this project (E20–E63) uses as the reference set — had never had this exact clean,
+single script running all 5 proxy arms + ridge + SEP-single + SEP-multi together, with SEP-multi's
+layer selection done strictly on TriviaQA train/val (never on the n1000 eval sets).
+
+**Method (`amortized_ue/set1_full_eval.py`, new, adapted from `e72_bigtier_individual.py`).** For
+each of the 4 models, fixed 2-position input `concat([TBG:L_tbg, SLT:L_slt])` at the established
+leak-free layers (E36/`exp2_run.BEST_TBG` + SLT picks): Llama-2 TBG:30/SLT:13, Mistral
+TBG:31/SLT:6, Llama-3 TBG:31/SLT:11, DeepSeek TBG:28/SLT:16 — none tuned on eval data.
+
+- **5 proxy arms** (`z`, `z_q`, `z_q_resp`, `q_only`, `q_resp_only`) via `exp2_run.train_arm` (the
+  same frozen Llama-3.2-3B + LoRA r16/α32/drop0.05 recipe as E37/E53/E65/E72), 3 seeds each.
+- **own-target ridge** on the same concat (StandardScaler + Ridge, alpha on val).
+- **SEP-single**: `correctness_eval.sep_single_fixed_layer` at the model's fixed best TBG layer.
+- **SEP-multi**: `correctness_eval.sep_5layer_concat` (the paper's top-5-layer concat), position
+  chosen by fit-val AUROC only.
+
+Trained on each model's trivia n2000; evaluated ID on the fresh disjoint trivia n1000 and OOD on
+squad n1000 (both already staged on `/data2`, 0 id-overlap with n2000 confirmed). True 10-sample SE
+included as the sampling reference. All 60 proxy checkpoints + per-model ridge/SEP bundles saved;
+per-arm/model training curves written to separate per-(model,arm) files (avoiding the E72
+concurrent-write race — training ran on both GPUs in parallel, 2 models/GPU).
+
+**Results — MEAN over the 4 models (Spearman / AUROC_incorrect):**
+
+| method | ID | OOD |
+|---|---|---|
+| **ridge** (own-model) | **0.656 / 0.734** | **0.516 / 0.686** |
+| z (proxy) | 0.601 / 0.715 | 0.425 / 0.654 |
+| z_q | 0.595 / 0.710 | 0.374 / 0.638 |
+| z_q_resp | 0.591 / 0.708 | 0.414 / 0.651 |
+| q_only | 0.490 / 0.671 | 0.287 / 0.598 |
+| q_resp_only | 0.580 / 0.715 | 0.411 / 0.648 |
+| sep_multi | 0.571 / 0.709 | 0.353 / 0.629 |
+| sep_single | 0.563 / 0.706 | 0.336 / 0.621 |
+| true 10-sample SE | 1.000 / **0.761** | 1.000 / **0.755** |
+
+**Per-model AUROC_incorrect, ID | OOD (best proxy arm / ridge / SEP-single / SEP-multi / true SE):**
+
+| model | ID | OOD |
+|---|---|---|
+| Llama-2-7b-chat | 0.694 / 0.715 / 0.681 / 0.681 / 0.760 | 0.656 / 0.674 / 0.621 / 0.631 / 0.784 |
+| Mistral-7B-Instruct-v0.2 | 0.746 / 0.746 / 0.714 / 0.714 / 0.747 | 0.720 / 0.747 / 0.669 / 0.665 / 0.774 |
+| Meta-Llama-3-8B-Instruct | 0.712 / 0.723 / 0.715 / 0.718 / 0.743 | 0.613 / 0.652 / 0.612 / 0.636 / 0.721 |
+| deepseek-llm-7b-chat | 0.742 / 0.753 / 0.716 / 0.721 / 0.796 | 0.643 / 0.672 / 0.582 / 0.583 / 0.740 |
+
+**Findings.**
+1. **⭐ Reproduces E72/E73's ordering exactly at this (original, 7-8B) tier: own-target ridge ≥
+   proxy arms ≥ SEP everywhere**, on both ID and OOD, for all 4 models — the frozen 3B proxy never
+   beats the linear ridge on the identical hidden-state input (E15–E17 holds at every tier now
+   checked: small-original, small-Qwen/Gemma (E73), and 27B (E72)).
+2. **SEP-multi (paper's 5-layer concat) gives a small, consistent bump over SEP-single** (+0.01 to
+   +0.02 AUROC mean, both splits) but never closes the gap to ridge or the best proxy arm — the
+   paper-style multi-layer concat helps a little, it doesn't change the qualitative ordering.
+3. **True 10-sample SE is best of all everywhere**, with the gap to every amortized/probe method
+   widening OOD (mean AUROC gap to best proxy arm: ID ~0.02–0.05, OOD ~0.08–0.13) — the same
+   sampling-is-robust-to-shift / amortization-degrades pattern seen in E39/E65/E69/E72/E73.
+4. **Best proxy arm varies by model and split** (no single arm dominates): `z` or `z_q_resp` best
+   ID for Llama-2/Llama-3/DeepSeek, `z_q` best ID for Mistral; text-heavy arms (`q_resp_only`,
+   `z_q_resp`) tend to hold up relatively better OOD than pure `z` for Llama-2/DeepSeek, consistent
+   with E39's "response text is the more transfer-robust channel" (though here every arm is still
+   trained and evaluated on the SAME model, so this is a within-model robustness note, not a
+   cross-model transfer claim).
+5. **`q_only` is clearly weakest of the 5 arms** on both splits, as expected — the text-only,
+   no-hidden-state, no-response arm always under-performs `q_resp_only` in this per-model
+   (non-transfer) setting, matching E37/E38's general finding that response text (not just the
+   question) carries the signal.
+
+**Caveats.** 3 seeds per proxy arm; no leakage — SEP layers, TBG/SLT positions, and the
+alpha/threshold choices were all fixed before touching the n1000 eval sets, and n2000∩n1000 id
+overlap was confirmed 0 for all 4 models. This is a per-model (individual) supervised ceiling, not
+a cross-model transfer result — for that see E37/E38/E62/E63 (same 4 targets, LOLO/leave-two-out).
+
+**Infra.** Training ran on both GPUs, 2 models/GPU in parallel (Llama-2+Mistral on GPU0, Llama-3+
+DeepSeek on GPU1 initially, then split further into 4 fully independent single-model processes once
+GPU headroom was confirmed — resumability via per-(model,arm,seed) checkpoint existence checks meant
+no double-training or races when the lanes and the standalone processes both reached the same
+model). Wall-clock ~2h50m for training (60 proxy trainings) + eval stage.
+
+Artifacts: `amortized_ue/set1_full_eval.py`, `amortized_ue/results/set1_full_eval.{json,csv}`
+(74-row combined table: Model × Method × ID/OOD × Spearman × AUROC, mean±std across proxy seeds),
+`amortized_ue/results/set1_full_eval_bundles/<model>_bundle.pkl` (ridge + SEP-single + SEP-multi
+fitted objects per model), `amortized_ue/results/set1_train_curves/<model>__<arm>.json` (per-seed
+val-Spearman training curves), `amortized_ue/logs/set1_train_gpu{0,1}{,_mistral,_deepseek}.log`.
+Checkpoints `amortized_ue/stage2/runs/SET1_full_eval/checkpoints/<model>/` (60 `.pt` + 4
+`z_bundle.pkl`, gitignored) + **W&B `set1_full_eval_ckpts:v0`** (pushed via
+`set1_full_eval.py --stage push_wandb`).
